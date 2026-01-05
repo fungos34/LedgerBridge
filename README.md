@@ -219,7 +219,94 @@ This format allows:
 - Preventing duplicate imports even if the pipeline is re-run
 - Auditing the complete document-to-transaction chain
 
-## 🔒 Security Notes
+## � Troubleshooting
+
+### Docker Container Not Starting
+
+If the container doesn't start or nothing listens on port 8080:
+
+1. **Check container status:**
+   ```bash
+   docker ps -a
+   ```
+
+2. **View container logs:**
+   ```bash
+   docker logs paperless-firefly
+   # Or follow logs in real-time:
+   docker logs -f paperless-firefly
+   ```
+
+3. **Common issues:**
+   - **Missing .env file**: Make sure you created `.env` with all required variables
+   - **Wrong URLs**: Ensure `PAPERLESS_URL` and `FIREFLY_URL` are accessible from inside the Docker container
+   - **Network issues**: If Paperless/Firefly are on the same host, use `http://host.docker.internal:PORT` instead of `localhost`
+   - **ARM architecture**: The Raspberry Pi uses ARM64, ensure the Python image supports it (it should by default)
+
+4. **Manual container debugging:**
+   ```bash
+   # Start a shell inside the container
+   docker compose run --rm paperless-firefly shell
+   
+   # Inside the container, test the command manually:
+   paperless-firefly --help
+   paperless-firefly -c /app/config/config.yaml review --host 0.0.0.0 --port 8080
+   ```
+
+### Can't Connect to Paperless or Firefly from Container
+
+If the container starts but can't reach Paperless or Firefly:
+
+- **Use host networking**: If both services are on the same Raspberry Pi:
+  ```yaml
+  # docker-compose.override.yml
+  services:
+    paperless-firefly:
+      network_mode: "host"
+      environment:
+        - PAPERLESS_URL=http://localhost:8000
+        - FIREFLY_URL=http://localhost:8080
+  ```
+
+- **Use LAN IP addresses**: Instead of `localhost`, use the actual IP:
+  ```bash
+  PAPERLESS_URL=http://192.168.1.100:8000
+  FIREFLY_URL=http://192.168.1.100:8080
+  ```
+
+### Getting Tokens
+
+**Paperless Token:**
+1. Log into Paperless-ngx web interface
+2. Go to **Settings** → **Users** → **Your User** → **Edit**
+3. Find or generate an **API Token** in the user details
+4. Copy the token
+
+**Firefly III Token:**
+1. Log into Firefly III web interface
+2. Go to **Options** (top right) → **Profile** → **OAuth** → **Personal Access Tokens**
+3. Click **Create New Token**
+4. Give it a name (e.g., "Paperless Pipeline")
+5. Copy the token (you'll only see it once!)
+
+### Web Interface Shows Errors
+
+- **Check environment variables**: Verify `PAPERLESS_URL` and `PAPERLESS_TOKEN` in the container:
+  ```bash
+  docker exec paperless-firefly env | grep PAPERLESS
+  ```
+
+- **Test API connectivity**: From inside the container:
+  ```bash
+  docker exec paperless-firefly python -c "
+  from paperless_firefly.paperless_client import PaperlessClient
+  import os
+  client = PaperlessClient(os.environ['PAPERLESS_URL'], os.environ['PAPERLESS_TOKEN'])
+  print(client.health_check())
+  "
+  ```
+
+## �🔒 Security Notes
 
 - API tokens are never logged or exposed in the UI
 - The web interface is for **LAN use only** (no authentication)

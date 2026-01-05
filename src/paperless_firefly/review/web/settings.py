@@ -11,7 +11,8 @@ BASE_DIR = Path(__file__).resolve().parent
 # Security settings
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-secret-key-change-in-production")
 DEBUG = os.environ.get("DJANGO_DEBUG", "True").lower() == "true"
-ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,*").split(",")
+# Allow all hosts by default for Docker deployment
 
 # Application definition
 INSTALLED_APPS = [
