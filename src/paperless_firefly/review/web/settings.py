@@ -77,4 +77,5 @@ LOGGING = {
 # These will be set at runtime from config
 PAPERLESS_BASE_URL = os.environ.get("PAPERLESS_URL", "http://localhost:8000")
 PAPERLESS_TOKEN = os.environ.get("PAPERLESS_TOKEN", "")
+FIREFLY_BASE_URL = os.environ.get("FIREFLY_URL", "http://localhost:8080")
 STATE_DB_PATH = os.environ.get("STATE_DB_PATH", "state.db")

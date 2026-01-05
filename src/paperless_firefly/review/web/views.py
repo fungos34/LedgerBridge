@@ -67,6 +67,7 @@ def review_list(request: HttpRequest) -> HttpResponse:
         "extractions": extractions,
         "stats": stats,
         "paperless_url": settings.PAPERLESS_BASE_URL,
+        "firefly_url": settings.FIREFLY_BASE_URL,
     }
     return render(request, "review/list.html", context)
 
@@ -171,8 +172,8 @@ def accept_extraction(request: HttpRequest, extraction_id: int) -> HttpResponse:
     # Redirect to next pending or back to list
     pending = store.get_extractions_for_review()
     if pending:
-        return redirect("review:detail", extraction_id=pending[0].id)
-    return redirect("review:list")
+        return redirect("detail", extraction_id=pending[0].id)
+    return redirect("list")
 
 
 @require_http_methods(["POST"])
@@ -184,8 +185,8 @@ def reject_extraction(request: HttpRequest, extraction_id: int) -> HttpResponse:
     # Redirect to next pending or back to list
     pending = store.get_extractions_for_review()
     if pending:
-        return redirect("review:detail", extraction_id=pending[0].id)
-    return redirect("review:list")
+        return redirect("detail", extraction_id=pending[0].id)
+    return redirect("list")
 
 
 @require_http_methods(["POST"])
@@ -200,9 +201,9 @@ def skip_extraction(request: HttpRequest, extraction_id: int) -> HttpResponse:
     if extraction_id in pending_ids:
         current_idx = pending_ids.index(extraction_id)
         if current_idx < len(pending_ids) - 1:
-            return redirect("review:detail", extraction_id=pending_ids[current_idx + 1])
+            return redirect("detail", extraction_id=pending_ids[current_idx + 1])
     
-    return redirect("review:list")
+    return redirect("list")
 
 
 @require_http_methods(["POST"])
@@ -317,8 +318,8 @@ def save_extraction(request: HttpRequest, extraction_id: int) -> HttpResponse:
     # Redirect to next pending or back to list
     pending = store.get_extractions_for_review()
     if pending:
-        return redirect("review:detail", extraction_id=pending[0].id)
-    return redirect("review:list")
+        return redirect("detail", extraction_id=pending[0].id)
+    return redirect("list")
 
 
 def document_proxy(request: HttpRequest, document_id: int) -> HttpResponse:

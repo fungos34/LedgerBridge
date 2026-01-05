@@ -74,6 +74,8 @@ def run_server(
             os.environ["PAPERLESS_URL"] = config.paperless.base_url
         if "PAPERLESS_TOKEN" not in os.environ:
             os.environ["PAPERLESS_TOKEN"] = config.paperless.token
+        if "FIREFLY_URL" not in os.environ:
+            os.environ["FIREFLY_URL"] = config.firefly.base_url
         if "STATE_DB_PATH" not in os.environ:
             os.environ["STATE_DB_PATH"] = str(config.state_db_path)
     
