@@ -17,15 +17,16 @@ def get_wsgi_application(config_path: str = None, state_db_path: str = None):
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "paperless_firefly.review.web.settings")
     
     # Load our config if provided
+    # Note: os.environ requires strings, so convert Path objects
     if config_path:
         from ...config import load_config
         config = load_config(config_path)
         
         os.environ["PAPERLESS_URL"] = config.paperless.base_url
         os.environ["PAPERLESS_TOKEN"] = config.paperless.token
-        os.environ["STATE_DB_PATH"] = state_db_path or config.state_db_path
+        os.environ["STATE_DB_PATH"] = str(state_db_path or config.state_db_path)
     elif state_db_path:
-        os.environ["STATE_DB_PATH"] = state_db_path
+        os.environ["STATE_DB_PATH"] = str(state_db_path)
     
     from django.core.wsgi import get_wsgi_application as django_wsgi
     return django_wsgi()
@@ -56,12 +57,13 @@ def run_server(
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "paperless_firefly.review.web.settings")
     
     # Set environment variables from direct parameters or config
+    # Note: os.environ requires strings, so convert Path objects
     if paperless_url:
         os.environ["PAPERLESS_URL"] = paperless_url
     if paperless_token:
         os.environ["PAPERLESS_TOKEN"] = paperless_token
     if state_db_path:
-        os.environ["STATE_DB_PATH"] = state_db_path
+        os.environ["STATE_DB_PATH"] = str(state_db_path)
     
     # Load config file if provided and fill in missing values
     if config_path:
@@ -73,7 +75,7 @@ def run_server(
         if "PAPERLESS_TOKEN" not in os.environ:
             os.environ["PAPERLESS_TOKEN"] = config.paperless.token
         if "STATE_DB_PATH" not in os.environ:
-            os.environ["STATE_DB_PATH"] = config.state_db_path
+            os.environ["STATE_DB_PATH"] = str(config.state_db_path)
     
     # Initialize Django
     import django
