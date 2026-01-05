@@ -1,0 +1,23 @@
+{
+  "paperless": {
+    "document_id": 1234,
+    "title": "...",
+    "created": "2026-01-05",
+    "added": "2026-01-05T12:34:56Z",
+    "tags": ["finance/inbox", "receipt"],
+    "correspondent": "SPAR",
+    "document_type": "Receipt",
+    "custom_fields": {
+      "amount_total": {"type": "monetary", "value": "35.70", "currency": "EUR"},
+      "invoice_number": {"type": "text", "value": "R-2026-000123"}
+    }
+  },
+  "files": {
+    "original_download_url": "/api/documents/1234/download/?original=true",
+    "archived_download_url": "/api/documents/1234/download/",
+    "mime_type_hint": "application/pdf"
+  },
+  "text": {
+    "ocr_content": "..."
+  }
+}

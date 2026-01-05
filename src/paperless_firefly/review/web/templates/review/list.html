@@ -1,0 +1,124 @@
+{% extends "review/base.html" %}
+
+{% block title %}Review Queue{% endblock %}
+{% block pending_count %}{{ extractions|length }}{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <h2>Pending Review ({{ extractions|length }})</h2>
+        {% if extractions %}
+        <a href="{% url 'review:detail' extractions.0.id %}" class="btn btn-primary">
+            Start Review →
+        </a>
+        {% endif %}
+    </div>
+    
+    {% if extractions %}
+    <table>
+        <thead>
+            <tr>
+                <th>Document</th>
+                <th>Amount</th>
+                <th>Date</th>
+                <th>Vendor</th>
+                <th>Confidence</th>
+                <th>State</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for ext in extractions %}
+            <tr>
+                <td>
+                    <div class="mb-1">
+                        <strong>{{ ext.title|truncatechars:50 }}</strong>
+                    </div>
+                    <div class="text-sm text-muted">
+                        Doc #{{ ext.document_id }}
+                    </div>
+                </td>
+                <td class="text-mono">
+                    {{ ext.amount }} {{ ext.currency }}
+                </td>
+                <td>{{ ext.date }}</td>
+                <td>{{ ext.vendor|default:"-"|truncatechars:30 }}</td>
+                <td>
+                    <div class="mb-1 text-sm">{{ ext.confidence|floatformat:0 }}%</div>
+                    <div class="confidence-bar" style="width: 80px;">
+                        <div class="confidence-bar-fill {% if ext.confidence >= 85 %}confidence-high{% elif ext.confidence >= 60 %}confidence-medium{% else %}confidence-low{% endif %}"
+                             style="width: {{ ext.confidence }}%"></div>
+                    </div>
+                </td>
+                <td>
+                    <span class="badge {% if ext.review_state == 'AUTO' %}badge-auto{% elif ext.review_state == 'REVIEW' %}badge-review{% else %}badge-manual{% endif %}">
+                        {{ ext.review_state }}
+                    </span>
+                </td>
+                <td class="text-right">
+                    <a href="{% url 'review:detail' ext.id %}" class="btn btn-sm btn-outline">
+                        Review
+                    </a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <h3>🎉 All caught up!</h3>
+        <p>No extractions pending review.</p>
+        <p class="mt-4">
+            <a href="{% url 'review:list' %}" class="btn btn-secondary">Refresh</a>
+        </p>
+    </div>
+    {% endif %}
+</div>
+
+{% if stats %}
+<div class="grid grid-2 mt-4">
+    <div class="card">
+        <div class="card-header">
+            <h2>Statistics</h2>
+        </div>
+        <div class="card-body">
+            <div class="grid grid-2">
+                <div>
+                    <div class="text-sm text-muted">Documents</div>
+                    <div class="text-mono" style="font-size: 1.5rem;">{{ stats.total_documents }}</div>
+                </div>
+                <div>
+                    <div class="text-sm text-muted">Extractions</div>
+                    <div class="text-mono" style="font-size: 1.5rem;">{{ stats.total_extractions }}</div>
+                </div>
+                <div>
+                    <div class="text-sm text-muted">Imported</div>
+                    <div class="text-mono" style="font-size: 1.5rem;">{{ stats.imported }}</div>
+                </div>
+                <div>
+                    <div class="text-sm text-muted">Pending Review</div>
+                    <div class="text-mono" style="font-size: 1.5rem;">{{ stats.pending_review }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="card">
+        <div class="card-header">
+            <h2>Quick Links</h2>
+        </div>
+        <div class="card-body">
+            <p class="mb-4">
+                <a href="{{ paperless_url }}" target="_blank" class="btn btn-outline">
+                    📄 Open Paperless
+                </a>
+            </p>
+            <p class="text-sm text-muted">
+                Documents are fetched from Paperless and displayed inline for review.
+                All edits are saved locally before import to Firefly III.
+            </p>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

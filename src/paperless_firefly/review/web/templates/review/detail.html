@@ -1,0 +1,438 @@
+{% extends "review/base.html" %}
+
+{% block title %}Review: {{ extraction.paperless_title }}{% endblock %}
+{% block pending_count %}{{ pending_count }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .review-layout {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1.5rem;
+        align-items: start;
+    }
+    
+    @media (max-width: 1024px) {
+        .review-layout {
+            grid-template-columns: 1fr;
+        }
+    }
+    
+    .document-viewer {
+        position: sticky;
+        top: 1rem;
+        height: calc(100vh - 8rem);
+        min-height: 500px;
+    }
+    
+    .document-viewer iframe {
+        width: 100%;
+        height: 100%;
+        border: none;
+        border-radius: 0.375rem;
+    }
+    
+    .document-viewer-fallback {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        background: var(--gray-100);
+        border-radius: 0.375rem;
+        text-align: center;
+        padding: 2rem;
+    }
+    
+    .document-viewer-fallback img {
+        max-width: 200px;
+        margin-bottom: 1rem;
+        border-radius: 0.25rem;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .form-section {
+        margin-bottom: 1.5rem;
+        padding-bottom: 1.5rem;
+        border-bottom: 1px solid var(--gray-200);
+    }
+    
+    .form-section:last-child {
+        border-bottom: none;
+        margin-bottom: 0;
+        padding-bottom: 0;
+    }
+    
+    .form-section-title {
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--gray-500);
+        margin-bottom: 1rem;
+    }
+    
+    .form-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+    }
+    
+    .nav-buttons {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+    }
+    
+    .nav-buttons .position {
+        color: var(--gray-500);
+        font-size: 0.875rem;
+    }
+    
+    .action-buttons {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+    }
+    
+    .confidence-detail {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 0.5rem;
+        margin-top: 0.5rem;
+    }
+    
+    .confidence-item {
+        text-align: center;
+        padding: 0.5rem;
+        background: var(--gray-50);
+        border-radius: 0.25rem;
+    }
+    
+    .confidence-item-label {
+        font-size: 0.625rem;
+        text-transform: uppercase;
+        color: var(--gray-500);
+    }
+    
+    .confidence-item-value {
+        font-size: 0.875rem;
+        font-weight: 600;
+    }
+    
+    .raw-text {
+        max-height: 200px;
+        overflow-y: auto;
+        background: var(--gray-50);
+        padding: 0.75rem;
+        border-radius: 0.375rem;
+        font-family: monospace;
+        font-size: 0.75rem;
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+    
+    .provenance-info {
+        font-size: 0.75rem;
+        color: var(--gray-500);
+    }
+    
+    .provenance-info dt {
+        font-weight: 500;
+        display: inline;
+    }
+    
+    .provenance-info dd {
+        display: inline;
+        margin: 0;
+        margin-right: 1rem;
+    }
+    
+    .already-reviewed {
+        background: #fef3c7;
+        border: 1px solid #fcd34d;
+        color: #92400e;
+        padding: 1rem;
+        border-radius: 0.375rem;
+        margin-bottom: 1rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="nav-buttons">
+    <div class="flex gap-2">
+        <a href="{% url 'review:list' %}" class="btn btn-outline">← Back to List</a>
+        {% if prev_id %}
+        <a href="{% url 'review:detail' prev_id %}" class="btn btn-outline">← Previous</a>
+        {% endif %}
+    </div>
+    <span class="position">{{ current_position }} of {{ pending_count }}</span>
+    <div>
+        {% if next_id %}
+        <a href="{% url 'review:detail' next_id %}" class="btn btn-outline">Next →</a>
+        {% endif %}
+    </div>
+</div>
+
+{% if already_reviewed %}
+<div class="already-reviewed">
+    ⚠️ This extraction has already been reviewed ({{ record.review_decision }}).
+    You can still modify and re-submit if needed.
+</div>
+{% endif %}
+
+<div class="review-layout">
+    <!-- Document Viewer -->
+    <div class="card document-viewer">
+        <div class="card-header">
+            <h2>📄 {{ extraction.paperless_title|truncatechars:40 }}</h2>
+            <a href="{{ paperless_url }}/documents/{{ document_id }}/" target="_blank" class="btn btn-sm btn-outline">
+                Open in Paperless ↗
+            </a>
+        </div>
+        <div class="card-body" style="height: calc(100% - 60px); padding: 0;">
+            <iframe src="{% url 'review:document' document_id %}" 
+                    title="Document Preview"
+                    style="width: 100%; height: 100%; border: none;"></iframe>
+        </div>
+    </div>
+    
+    <!-- Edit Form -->
+    <div>
+        <form method="post" action="{% url 'review:save' record.id %}">
+            <div class="card">
+                <div class="card-header">
+                    <h2>Transaction Details</h2>
+                    <span class="badge {% if record.review_state == 'AUTO' %}badge-auto{% elif record.review_state == 'REVIEW' %}badge-review{% else %}badge-manual{% endif %}">
+                        {{ record.review_state }}
+                    </span>
+                </div>
+                <div class="card-body">
+                    <!-- Amount & Currency -->
+                    <div class="form-section">
+                        <div class="form-section-title">Amount</div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label" for="amount">Amount *</label>
+                                <input type="number" 
+                                       id="amount" 
+                                       name="amount" 
+                                       class="form-input" 
+                                       value="{{ proposal.amount }}"
+                                       step="0.01"
+                                       required>
+                                <div class="form-help">Confidence: {{ confidence.amount|floatformat:0 }}%</div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="currency">Currency *</label>
+                                <input type="text" 
+                                       id="currency" 
+                                       name="currency" 
+                                       class="form-input" 
+                                       value="{{ proposal.currency }}"
+                                       maxlength="3"
+                                       style="text-transform: uppercase;"
+                                       required>
+                                <div class="form-help">Confidence: {{ confidence.currency|floatformat:0 }}%</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Date -->
+                    <div class="form-section">
+                        <div class="form-section-title">Date</div>
+                        <div class="form-group">
+                            <label class="form-label" for="date">Transaction Date *</label>
+                            <input type="date" 
+                                   id="date" 
+                                   name="date" 
+                                   class="form-input" 
+                                   value="{{ proposal.date }}"
+                                   required>
+                            <div class="form-help">Confidence: {{ confidence.date|floatformat:0 }}%</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Description -->
+                    <div class="form-section">
+                        <div class="form-section-title">Description</div>
+                        <div class="form-group">
+                            <label class="form-label" for="description">Description *</label>
+                            <input type="text" 
+                                   id="description" 
+                                   name="description" 
+                                   class="form-input" 
+                                   value="{{ proposal.description }}"
+                                   required>
+                            <div class="form-help">Confidence: {{ confidence.description|floatformat:0 }}%</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Accounts -->
+                    <div class="form-section">
+                        <div class="form-section-title">Accounts</div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label" for="source_account">Source Account</label>
+                                <input type="text" 
+                                       id="source_account" 
+                                       name="source_account" 
+                                       class="form-input" 
+                                       value="{{ proposal.source_account|default:'' }}"
+                                       placeholder="e.g., Checking Account">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="destination_account">Destination / Vendor</label>
+                                <input type="text" 
+                                       id="destination_account" 
+                                       name="destination_account" 
+                                       class="form-input" 
+                                       value="{{ proposal.destination_account|default:'' }}"
+                                       placeholder="e.g., Supermarket">
+                                <div class="form-help">Confidence: {{ confidence.vendor|floatformat:0 }}%</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Category & Type -->
+                    <div class="form-section">
+                        <div class="form-section-title">Classification</div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label" for="category">Category</label>
+                                <input type="text" 
+                                       id="category" 
+                                       name="category" 
+                                       class="form-input" 
+                                       value="{{ proposal.category|default:'' }}"
+                                       placeholder="e.g., Groceries">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="transaction_type">Transaction Type *</label>
+                                <select id="transaction_type" name="transaction_type" class="form-input" required>
+                                    <option value="withdrawal" {% if proposal.transaction_type.value == 'WITHDRAWAL' %}selected{% endif %}>Withdrawal (Expense)</option>
+                                    <option value="deposit" {% if proposal.transaction_type.value == 'DEPOSIT' %}selected{% endif %}>Deposit (Income)</option>
+                                    <option value="transfer" {% if proposal.transaction_type.value == 'TRANSFER' %}selected{% endif %}>Transfer</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Invoice Number -->
+                    <div class="form-section">
+                        <div class="form-section-title">Reference</div>
+                        <div class="form-group">
+                            <label class="form-label" for="invoice_number">Invoice / Receipt Number</label>
+                            <input type="text" 
+                                   id="invoice_number" 
+                                   name="invoice_number" 
+                                   class="form-input" 
+                                   value="{{ proposal.invoice_number|default:'' }}"
+                                   placeholder="e.g., INV-2024-001">
+                            <div class="form-help">Confidence: {{ confidence.invoice_number|floatformat:0 }}%</div>
+                        </div>
+                    </div>
+                    
+                    <!-- External ID (read-only) -->
+                    <div class="form-section">
+                        <div class="form-section-title">Identifiers</div>
+                        <div class="form-group">
+                            <label class="form-label">External ID</label>
+                            <input type="text" 
+                                   class="form-input" 
+                                   value="{{ proposal.external_id }}"
+                                   readonly>
+                            <div class="form-help">Auto-generated. Changes if amount or date are modified.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Action Buttons -->
+            <div class="card mt-4">
+                <div class="card-body">
+                    <div class="action-buttons">
+                        <button type="submit" class="btn btn-lg btn-success">
+                            ✓ Save & Accept
+                        </button>
+                        <button type="submit" formaction="{% url 'review:accept' record.id %}" class="btn btn-lg btn-primary">
+                            ✓ Accept As-Is
+                        </button>
+                        <button type="submit" formaction="{% url 'review:reject' record.id %}" class="btn btn-lg btn-danger">
+                            ✕ Reject
+                        </button>
+                        <button type="submit" formaction="{% url 'review:skip' record.id %}" class="btn btn-lg btn-secondary">
+                            Skip →
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </form>
+        
+        <!-- Confidence Details -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h2>Confidence Scores</h2>
+                <span class="text-mono">{{ confidence.overall|floatformat:0 }}% overall</span>
+            </div>
+            <div class="card-body">
+                <div class="confidence-bar" style="height: 0.75rem; margin-bottom: 1rem;">
+                    <div class="confidence-bar-fill {% if confidence.overall >= 85 %}confidence-high{% elif confidence.overall >= 60 %}confidence-medium{% else %}confidence-low{% endif %}"
+                         style="width: {{ confidence.overall }}%"></div>
+                </div>
+                <div class="confidence-detail">
+                    <div class="confidence-item">
+                        <div class="confidence-item-label">Amount</div>
+                        <div class="confidence-item-value">{{ confidence.amount|floatformat:0 }}%</div>
+                    </div>
+                    <div class="confidence-item">
+                        <div class="confidence-item-label">Date</div>
+                        <div class="confidence-item-value">{{ confidence.date|floatformat:0 }}%</div>
+                    </div>
+                    <div class="confidence-item">
+                        <div class="confidence-item-label">Currency</div>
+                        <div class="confidence-item-value">{{ confidence.currency|floatformat:0 }}%</div>
+                    </div>
+                    <div class="confidence-item">
+                        <div class="confidence-item-label">Vendor</div>
+                        <div class="confidence-item-value">{{ confidence.vendor|floatformat:0 }}%</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Provenance -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h2>Provenance</h2>
+            </div>
+            <div class="card-body">
+                <dl class="provenance-info">
+                    <dt>Source:</dt>
+                    <dd>{{ provenance.source_system }}</dd>
+                    
+                    <dt>Strategy:</dt>
+                    <dd>{{ provenance.extraction_strategy }}</dd>
+                    
+                    <dt>Parser:</dt>
+                    <dd>v{{ provenance.parser_version }}</dd>
+                    
+                    <dt>Parsed:</dt>
+                    <dd>{{ provenance.parsed_at }}</dd>
+                </dl>
+                
+                {% if extraction.raw_text %}
+                <details class="mt-4">
+                    <summary style="cursor: pointer; font-size: 0.875rem; color: var(--gray-500);">
+                        Show Raw OCR Text
+                    </summary>
+                    <div class="raw-text mt-2">{{ extraction.raw_text|truncatechars:2000 }}</div>
+                </details>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,17 @@
+{% extends "review/base.html" %}
+
+{% block title %}Not Found{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-body">
+        <div class="empty-state">
+            <h3>Extraction Not Found</h3>
+            <p>The extraction with ID {{ extraction_id }} was not found or is not pending review.</p>
+            <p class="mt-4">
+                <a href="{% url 'review:list' %}" class="btn btn-primary">← Back to List</a>
+            </p>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,92 @@
+# Paperless → Firefly III Finance Pipeline
+# Docker Compose configuration for local development and production
+
+services:
+  # Main application service
+  paperless-firefly:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: paperless-firefly:latest
+    container_name: paperless-firefly
+    restart: unless-stopped
+    
+    ports:
+      - "${PF_PORT:-8080}:8080"
+    
+    environment:
+      # Paperless connection
+      - PAPERLESS_URL=${PAPERLESS_URL:?PAPERLESS_URL is required}
+      - PAPERLESS_TOKEN=${PAPERLESS_TOKEN:?PAPERLESS_TOKEN is required}
+      - PAPERLESS_FILTER_TAG=${PAPERLESS_FILTER_TAG:-finance/inbox}
+      
+      # Firefly III connection
+      - FIREFLY_URL=${FIREFLY_URL:?FIREFLY_URL is required}
+      - FIREFLY_TOKEN=${FIREFLY_TOKEN:?FIREFLY_TOKEN is required}
+      - FIREFLY_DEFAULT_ACCOUNT=${FIREFLY_DEFAULT_ACCOUNT:-Checking Account}
+      
+      # Confidence thresholds
+      - CONFIDENCE_AUTO_THRESHOLD=${CONFIDENCE_AUTO_THRESHOLD:-0.85}
+      - CONFIDENCE_REVIEW_THRESHOLD=${CONFIDENCE_REVIEW_THRESHOLD:-0.60}
+      
+      # Server settings
+      - HOST=0.0.0.0
+      - PORT=8080
+    
+    volumes:
+      # Persistent state database
+      - paperless-firefly-data:/app/data
+      # Optional: mount custom config
+      # - ./config.yaml:/app/config/config.yaml:ro
+    
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8080/', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    
+    networks:
+      - paperless-firefly-net
+    
+    # For LAN access to Paperless and Firefly
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # Scheduled extraction worker (optional)
+  paperless-firefly-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: paperless-firefly:latest
+    container_name: paperless-firefly-worker
+    restart: "no"
+    profiles:
+      - worker
+    
+    command: ["pipeline", "finance/inbox", "50"]
+    
+    environment:
+      - PAPERLESS_URL=${PAPERLESS_URL}
+      - PAPERLESS_TOKEN=${PAPERLESS_TOKEN}
+      - FIREFLY_URL=${FIREFLY_URL}
+      - FIREFLY_TOKEN=${FIREFLY_TOKEN}
+      - FIREFLY_DEFAULT_ACCOUNT=${FIREFLY_DEFAULT_ACCOUNT:-Checking Account}
+    
+    volumes:
+      - paperless-firefly-data:/app/data
+    
+    networks:
+      - paperless-firefly-net
+    
+    depends_on:
+      paperless-firefly:
+        condition: service_healthy
+
+volumes:
+  paperless-firefly-data:
+    driver: local
+
+networks:
+  paperless-firefly-net:
+    driver: bridge

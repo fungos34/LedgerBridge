@@ -1,0 +1,278 @@
+Gut. Ich bringe das jetzt **glasklar, vollständig und systemisch** zusammen.
+Nicht als Tutorial, sondern als **Problem- und Lösungsbeschreibung auf Architekturebene**, konsistent mit allen bisherigen Entscheidungen eures Systems.
+
+---
+
+# Gesamtdarstellung des Problems und der Lösung
+
+**Paperless → Finanzextraktion → Human-in-the-loop → Firefly III**
+
+## 1. Das eigentliche Problem (nicht die Symptome)
+
+Das Kernproblem ist **nicht**:
+
+* OCR-Qualität
+* CSV-Importe
+* Firefly-Importer-UX
+
+Das eigentliche Problem ist:
+
+> **Wie überführt man unstrukturierte, heterogene Dokumente in strukturierte, revisionssichere Einzelbuchungen – ohne Doppelbuchungen, mit maximaler Automatisierung und minimalem manuellen Aufwand?**
+
+Dabei müssen **vier Realitäten gleichzeitig** erfüllt werden:
+
+1. Dokumente sind unterschiedlich gut strukturiert
+2. Automatisierung ist nie 100 % korrekt
+3. Menschen dürfen nicht mit Rohdaten belastet werden
+4. Buchhaltungsdaten dürfen **niemals** doppelt oder inkonsistent werden
+
+---
+
+## 2. Zielzustand (präzise formuliert)
+
+Am Ende soll gelten:
+
+* **Paperless** ist die **Single Source of Truth für Dokumente**
+* **Firefly III** ist die **Single Source of Truth für Buchungen**
+* Dazwischen existiert ein **deterministischer, überprüfbarer Verarbeitungspfad**
+
+### Endergebnis für den User
+
+* Finanzübersicht in Firefly III
+* Jede Buchung ist **eindeutig** auf ein Dokument rückführbar
+* Jede Rechnung ist **buchhalterisch korrekt abgebildet**
+* Manuelle Arbeit beschränkt sich auf **Bestätigen oder Korrigieren von Vorschlägen**
+
+---
+
+## 3. Systemische Zerlegung der Lösung (Pipeline)
+
+Die Lösung ist **keine einzelne Software**, sondern eine **Pipeline mit klaren Verträgen**.
+
+### Übersicht
+
+```
+Paperless (Dokumente)
+        ↓
+Dokumenten-Selektion & Klassifikation
+        ↓
+Strukturierte Finanz-Extraktion
+        ↓
+Confidence-Bewertung
+        ↓
+Human-in-the-loop (optional)
+        ↓
+Firefly-III-kompatibles Buchungsformat
+        ↓
+Firefly III (Buchhaltung)
+```
+
+---
+
+## 4. Schritt 1 – Vorsortierte Dokumentenquelle (Paperless)
+
+### Aufgabe
+
+Aus allen gespeicherten Dokumenten **nur buchhaltungsrelevante** selektieren.
+
+### Mechanismen (kombiniert, nicht einzeln!)
+
+* Document Type (Rechnung, Beleg, Kontoauszug)
+* Tags (`finance/inbox`, `receipt`, `invoice`)
+* Correspondent (Händler, Energieversorger, Bank)
+* Custom Fields (z. B. `amount_total` existiert)
+
+**Wichtig:**
+Paperless entscheidet **nicht**, wie gebucht wird –
+Paperless entscheidet nur, **ob ein Dokument buchhaltungsrelevant ist**.
+
+➡ Ergebnis: **klar definierter Dokumentenstrom**
+
+---
+
+## 5. Schritt 2 – Strukturierte Finanzextraktion (Maschine)
+
+### Aufgabe
+
+Aus jedem Dokument **Buchungsvorschläge erzeugen**.
+
+### Datenquellen (absteigend nach Qualität)
+
+1. **Embedded strukturierte Daten**
+
+   * Factur-X / ZUGFeRD / UBL / XML
+2. **Maschinenlesbarer PDF-Text**
+
+   * Tabellen, Textlayer
+3. **OCR-Fließtext**
+
+   * Fallback, heuristisch
+
+### Ergebnis
+
+Ein **vollständig ausgefüllter Vorschlag**, kein Rohtext:
+
+* Betrag
+* Währung
+* Datum
+* Gegenpartei
+* Zahlungsreferenz
+* ggf. Line-Items
+* Verweis auf Quelle
+
+❗ Wichtig:
+Auch bei schlechter Qualität wird **immer ein Vorschlag erzeugt** –
+aber mit niedriger Confidence.
+
+---
+
+## 6. Schritt 3 – Confidence Contracts (entscheidend!)
+
+Automatisierung ist nur dann sicher, wenn Unsicherheit **explizit** ist.
+
+### Pro extrahiertem Feld
+
+* eigener Confidence-Wert
+* zusätzlich Gesamt-Confidence
+
+### Konsequenz
+
+| Confidence | Verhalten                    |
+| ---------- | ---------------------------- |
+| hoch       | Vollautomatischer Import     |
+| mittel     | Vorschlag → User bestätigt   |
+| niedrig    | Vorschlag → User muss prüfen |
+
+➡ **Kein „magisches“ Automatikverhalten**
+
+---
+
+## 7. Schritt 4 – Human-in-the-loop (minimalistisch!)
+
+### Ziel
+
+**Nicht prüfen, sondern bestätigen.**
+
+### UI-Prinzipien
+
+* Originaldokument sichtbar (PDF/Scan)
+* Jedes Ziel-Feld:
+
+  * bereits **vorausgefüllt**
+  * plausibelster Wert zuerst
+* User kann:
+
+  * Wert ändern
+  * Position löschen
+  * gesamte Buchung verwerfen
+
+### Ganz wichtig
+
+* **Keine Freitexteingabe**, wo Auswahl möglich ist
+* **Keine Pflichtfelder ohne Vorschlag**
+* **Keine Mehrfachschritte**
+
+➡ User agiert als **Validator**, nicht als Buchhalter.
+
+---
+
+## 8. Schritt 5 – Deduplikation & Merging (kritisch!)
+
+Ohne diesen Schritt ist alles wertlos.
+
+### Doppelte Buchungen müssen ausgeschlossen werden durch:
+
+#### A. Dokumentenreferenz
+
+* Jede Buchung trägt:
+
+  * `paperless_document_id`
+  * Hash oder stabile External-ID
+
+#### B. Bankbuchungsreferenz (falls vorhanden)
+
+* Matching mit:
+
+  * Betrag
+  * Datum
+  * Zahlungsreferenz
+  * IBAN / Gegenkonto
+
+#### C. Idempotenter Import
+
+* Firefly erhält:
+
+  * `external_id`
+* Wiederholter Import = **kein Duplikat**
+
+➡ Ergebnis: **ein Dokument → eine Buchung (oder Split)**
+
+---
+
+## 9. Schritt 6 – Firefly-III-Import (reines Zielsystem)
+
+Firefly III bekommt **keine Rohdaten**, sondern:
+
+* vollständig strukturierte Buchungen
+* mit:
+
+  * Datum
+  * Betrag
+  * Quelle / Ziel
+  * Kategorie / Budget (falls sicher)
+  * Referenzen
+
+Firefly:
+
+* rechnet
+* visualisiert
+* analysiert
+* archiviert Buchungen
+
+Paperless:
+
+* archiviert Dokumente
+
+➡ **Saubere Trennung der Verantwortlichkeiten**
+
+---
+
+## 10. Lernen des Systems (inkrementell, kontrolliert)
+
+Das System „lernt“ **nicht autonom**, sondern:
+
+* aus **expliziten User-Korrekturen**
+* auf klaren Regeln:
+
+  * Vendor → Kategorie
+  * Betrag + Vendor → Wiederkehrende Rechnung
+  * Dokumenttyp → Parser-Strategie
+
+Keine Blackbox-KI, sondern:
+
+* regelbasiert
+* nachvollziehbar
+* reproduzierbar
+
+---
+
+## 11. Warum diese Architektur funktioniert
+
+Weil sie:
+
+* Unsicherheit explizit macht
+* Menschen dort einsetzt, wo Maschinen scheitern
+* Doppelbuchungen systemisch verhindert
+* Dokumente und Buchungen sauber trennt
+* mit wachsender Datenbasis **besser**, nicht chaotischer wird
+
+Und vor allem:
+
+> **Sie respektiert die Zeit der User.**
+
+---
+
+## 12. Zusammenfassung in einem Satz
+
+> Wir bauen eine deterministische Pipeline, die aus Paperless vorsortierte Finanzdokumente extrahiert, daraus buchhalterische Vorschläge mit Vertrauensbewertung erzeugt, dem User eine minimale Bestätigungsoberfläche bietet und das Ergebnis idempotent und nachvollziehbar in Firefly III importiert – ohne Doppelbuchungen, ohne Magie, ohne unnötige manuelle Arbeit.
+

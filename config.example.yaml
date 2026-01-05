@@ -1,0 +1,27 @@
+# Paperless → Firefly III Pipeline Configuration
+
+paperless:
+  # Paperless-ngx instance URL
+  base_url: "http://192.168.1.138:8000"
+  # API token (get from Paperless admin → Tokens)
+  token: "YOUR_PAPERLESS_TOKEN"
+  # Tag to filter finance documents
+  filter_tag: "finance/inbox"
+
+firefly:
+  # Firefly III instance URL
+  base_url: "http://192.168.1.138:8081"
+  # Personal access token (get from Firefly III → Options → OAuth)
+  token: "YOUR_FIREFLY_TOKEN"
+  # Default source account for withdrawals
+  default_source_account: "Checking Account"
+
+# State database path (SQLite)
+state_db_path: "data/state.db"
+
+# Confidence thresholds
+# Transactions above auto_threshold are imported automatically
+# Transactions between review_threshold and auto_threshold require confirmation
+# Transactions below review_threshold require manual review
+auto_threshold: 0.85
+review_threshold: 0.60
