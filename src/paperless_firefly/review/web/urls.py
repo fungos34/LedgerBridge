@@ -5,7 +5,7 @@ URL configuration for the review web interface.
 from django.urls import path
 from . import views
 
-app_name = "review"
+# Note: No app_name since this is the ROOT_URLCONF
 
 urlpatterns = [
     # Main review queue

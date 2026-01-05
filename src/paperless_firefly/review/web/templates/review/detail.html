@@ -163,15 +163,15 @@
 {% block content %}
 <div class="nav-buttons">
     <div class="flex gap-2">
-        <a href="{% url 'review:list' %}" class="btn btn-outline">← Back to List</a>
+        <a href="{% url 'list' %}" class="btn btn-outline">← Back to List</a>
         {% if prev_id %}
-        <a href="{% url 'review:detail' prev_id %}" class="btn btn-outline">← Previous</a>
+        <a href="{% url 'detail' prev_id %}" class="btn btn-outline">← Previous</a>
         {% endif %}
     </div>
     <span class="position">{{ current_position }} of {{ pending_count }}</span>
     <div>
         {% if next_id %}
-        <a href="{% url 'review:detail' next_id %}" class="btn btn-outline">Next →</a>
+        <a href="{% url 'detail' next_id %}" class="btn btn-outline">Next →</a>
         {% endif %}
     </div>
 </div>
@@ -193,7 +193,7 @@
             </a>
         </div>
         <div class="card-body" style="height: calc(100% - 60px); padding: 0;">
-            <iframe src="{% url 'review:document' document_id %}" 
+            <iframe src="{% url 'document' document_id %}" 
                     title="Document Preview"
                     style="width: 100%; height: 100%; border: none;"></iframe>
         </div>
@@ -201,7 +201,7 @@
     
     <!-- Edit Form -->
     <div>
-        <form method="post" action="{% url 'review:save' record.id %}">
+        <form method="post" action="{% url 'save' record.id %}">
             <div class="card">
                 <div class="card-header">
                     <h2>Transaction Details</h2>
@@ -357,13 +357,13 @@
                         <button type="submit" class="btn btn-lg btn-success">
                             ✓ Save & Accept
                         </button>
-                        <button type="submit" formaction="{% url 'review:accept' record.id %}" class="btn btn-lg btn-primary">
+                        <button type="submit" formaction="{% url 'accept' record.id %}" class="btn btn-lg btn-primary">
                             ✓ Accept As-Is
                         </button>
-                        <button type="submit" formaction="{% url 'review:reject' record.id %}" class="btn btn-lg btn-danger">
+                        <button type="submit" formaction="{% url 'reject' record.id %}" class="btn btn-lg btn-danger">
                             ✕ Reject
                         </button>
-                        <button type="submit" formaction="{% url 'review:skip' record.id %}" class="btn btn-lg btn-secondary">
+                        <button type="submit" formaction="{% url 'skip' record.id %}" class="btn btn-lg btn-secondary">
                             Skip →
                         </button>
                     </div>

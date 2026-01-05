@@ -8,7 +8,7 @@
     <div class="card-header">
         <h2>Pending Review ({{ extractions|length }})</h2>
         {% if extractions %}
-        <a href="{% url 'review:detail' extractions.0.id %}" class="btn btn-primary">
+        <a href="{% url 'detail' extractions.0.id %}" class="btn btn-primary">
             Start Review →
         </a>
         {% endif %}
@@ -56,7 +56,7 @@
                     </span>
                 </td>
                 <td class="text-right">
-                    <a href="{% url 'review:detail' ext.id %}" class="btn btn-sm btn-outline">
+                    <a href="{% url 'detail' ext.id %}" class="btn btn-sm btn-outline">
                         Review
                     </a>
                 </td>
@@ -69,7 +69,7 @@
         <h3>🎉 All caught up!</h3>
         <p>No extractions pending review.</p>
         <p class="mt-4">
-            <a href="{% url 'review:list' %}" class="btn btn-secondary">Refresh</a>
+            <a href="{% url 'list' %}" class="btn btn-secondary">Refresh</a>
         </p>
     </div>
     {% endif %}
