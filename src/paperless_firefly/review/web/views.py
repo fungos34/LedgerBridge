@@ -326,10 +326,19 @@ def document_proxy(request: HttpRequest, document_id: int) -> HttpResponse:
     """Proxy the original document from Paperless for viewing."""
     session = _get_paperless_session()
     
+    # Check if download is requested via query param
+    force_download = request.GET.get('download', '').lower() in ('1', 'true', 'yes')
+    
     try:
-        # Get document download URL
-        url = f"{settings.PAPERLESS_BASE_URL}/api/documents/{document_id}/download/"
+        # Get document preview URL (not download, to get inline viewing)
+        url = f"{settings.PAPERLESS_BASE_URL}/api/documents/{document_id}/preview/"
         response = session.get(url, stream=True)
+        
+        # Fallback to download endpoint if preview fails
+        if response.status_code == 404:
+            url = f"{settings.PAPERLESS_BASE_URL}/api/documents/{document_id}/download/"
+            response = session.get(url, stream=True)
+        
         response.raise_for_status()
         
         # Get content type from response
@@ -341,9 +350,10 @@ def document_proxy(request: HttpRequest, document_id: int) -> HttpResponse:
             content_type=content_type
         )
         
-        # Set filename for download
-        if "Content-Disposition" in response.headers:
-            django_response["Content-Disposition"] = response.headers["Content-Disposition"]
+        # Force inline display for iframe viewing (not download)
+        # Only use attachment if explicitly requested via ?download=1
+        if force_download:
+            django_response["Content-Disposition"] = f"attachment; filename=document_{document_id}.pdf"
         else:
             django_response["Content-Disposition"] = f"inline; filename=document_{document_id}.pdf"
         

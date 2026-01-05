@@ -188,9 +188,14 @@
     <div class="card document-viewer">
         <div class="card-header">
             <h2>📄 {{ extraction.paperless_title|truncatechars:40 }}</h2>
-            <a href="{{ paperless_url }}/documents/{{ document_id }}/" target="_blank" class="btn btn-sm btn-outline">
-                Open in Paperless ↗
-            </a>
+            <div class="flex gap-2">
+                <a href="{% url 'document' document_id %}?download=1" class="btn btn-sm btn-outline" download>
+                    ⬇ Download
+                </a>
+                <a href="{{ paperless_url }}/documents/{{ document_id }}/" target="_blank" class="btn btn-sm btn-outline">
+                    Open in Paperless ↗
+                </a>
+            </div>
         </div>
         <div class="card-body" style="height: calc(100% - 60px); padding: 0;">
             <iframe src="{% url 'document' document_id %}" 
