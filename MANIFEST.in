@@ -1,0 +1,5 @@
+# Include package data files
+include README.md
+include LICENSE
+recursive-include src/paperless_firefly/review/web/templates *.html
+recursive-include src/paperless_firefly/review/web/static *

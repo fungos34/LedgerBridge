@@ -41,6 +41,9 @@ paperless-firefly = "paperless_firefly.runner.main:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"paperless_firefly.review.web" = ["templates/**/*.html", "static/**/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
