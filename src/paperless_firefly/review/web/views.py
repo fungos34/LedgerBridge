@@ -501,48 +501,47 @@ def _get_ready_to_import_count(store: StateStore) -> int:
 def import_queue(request: HttpRequest) -> HttpResponse:
     """Show transactions ready to import to Firefly."""
     store = _get_store()
+    ready_items = []
+    recent_imports = []
     
-    # Get extractions ready for import
+    # Get data from database - keep connection open during access
     conn = store._get_connection()
     try:
-        rows = conn.execute("""
+        # Get extractions ready for import
+        extraction_rows = conn.execute("""
             SELECT e.* FROM extractions e
             LEFT JOIN imports i ON e.external_id = i.external_id
             WHERE i.id IS NULL
             AND (e.review_state = 'AUTO' OR e.review_decision IN ('ACCEPTED', 'EDITED'))
             ORDER BY e.created_at DESC
         """).fetchall()
-    finally:
-        conn.close()
-    
-    # Parse extractions
-    ready_items = []
-    for row in rows:
-        try:
-            data = json.loads(row["extraction_json"])
-            extraction = FinanceExtraction.from_dict(data)
-            ready_items.append({
-                "id": row["id"],
-                "document_id": row["document_id"],
-                "external_id": row["external_id"],
-                "title": extraction.paperless_title,
-                "amount": extraction.proposal.amount,
-                "currency": extraction.proposal.currency,
-                "date": extraction.proposal.date,
-                "vendor": extraction.proposal.destination_account,
-                "source_account": extraction.proposal.source_account or "Default",
-                "review_state": row["review_state"],
-                "review_decision": row["review_decision"],
-            })
-        except Exception as e:
-            logger.error(f"Error parsing extraction {row['id']}: {e}")
-    
-    # Get recent imports
-    recent_imports = []
-    try:
+        
+        # Parse extractions while connection is still open
+        for row in extraction_rows:
+            try:
+                data = json.loads(row["extraction_json"])
+                extraction = FinanceExtraction.from_dict(data)
+                ready_items.append({
+                    "id": row["id"],
+                    "document_id": row["document_id"],
+                    "external_id": row["external_id"],
+                    "title": extraction.paperless_title,
+                    "amount": extraction.proposal.amount,
+                    "currency": extraction.proposal.currency,
+                    "date": extraction.proposal.date,
+                    "vendor": extraction.proposal.destination_account,
+                    "source_account": extraction.proposal.source_account or "Default",
+                    "review_state": row["review_state"],
+                    "review_decision": row["review_decision"],
+                })
+            except Exception as e:
+                logger.error(f"Error parsing extraction {row['id']}: {e}")
+        
+        # Get recent imports
         import_rows = conn.execute("""
             SELECT * FROM imports ORDER BY created_at DESC LIMIT 20
         """).fetchall()
+        
         for irow in import_rows:
             recent_imports.append({
                 "external_id": irow["external_id"],
@@ -552,8 +551,8 @@ def import_queue(request: HttpRequest) -> HttpResponse:
                 "error_message": irow["error_message"],
                 "created_at": irow["created_at"],
             })
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error(f"Error loading import queue: {e}")
     finally:
         conn.close()
     

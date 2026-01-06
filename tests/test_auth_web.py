@@ -39,14 +39,19 @@ class TestAuthenticationViews:
         import django
         from django.conf import settings
         
-        # Create test databases
+        # Create test databases - ensure parent directory exists
         state_db = tmp_path / "test_state.db"
         auth_db = tmp_path / "test_auth.db"
+        
+        # Create empty database files to ensure they can be opened
+        state_db.touch()
+        auth_db.touch()
         
         if not settings.configured:
             settings.configure(
                 DEBUG=True,
                 SECRET_KEY="test-secret-key-for-testing-only",
+                ALLOWED_HOSTS=['testserver', 'localhost', '127.0.0.1'],
                 DATABASES={
                     'default': {
                         'ENGINE': 'django.db.backends.sqlite3',
@@ -175,10 +180,15 @@ class TestLandingPage:
         state_db = tmp_path / "test_state.db"
         auth_db = tmp_path / "test_auth.db"
         
+        # Create empty database files to ensure they can be opened
+        state_db.touch()
+        auth_db.touch()
+        
         if not settings.configured:
             settings.configure(
                 DEBUG=True,
                 SECRET_KEY="test-secret-key-12345",
+                ALLOWED_HOSTS=['testserver', 'localhost', '127.0.0.1'],
                 DATABASES={
                     'default': {
                         'ENGINE': 'django.db.backends.sqlite3',
@@ -320,10 +330,17 @@ class TestExtractCommand:
     def test_extract_command_parses_correctly(self):
         """Extract command should be callable with tag."""
         # Test that extract command can be invoked with a tag parameter
-        from paperless_firefly.runner.main import extract
+        from paperless_firefly.runner.main import cmd_extract, create_cli
         
         # The function should exist and be callable
-        assert callable(extract)
+        assert callable(cmd_extract)
+        
+        # Create CLI to verify extract subcommand exists
+        parser = create_cli()
+        # Should be able to parse extract command
+        args = parser.parse_args(['extract', '--tag', 'finance/inbox'])
+        assert args.command == 'extract'
+        assert args.tag == 'finance/inbox'
 
 
 class TestUserProfile:

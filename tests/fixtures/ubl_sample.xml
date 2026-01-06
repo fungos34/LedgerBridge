@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  UBL 2.1 Sample Invoice
+  Universal Business Language - standard format for B2B invoicing
+  
+  Format: UBL 2.1 Invoice
+  Standard: ISO 19845
+-->
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+    
+    <!-- Document Information -->
+    <cbc:UBLVersionID>2.1</cbc:UBLVersionID>
+    <cbc:CustomizationID>urn:oasis:names:specification:ubl:xpath:Invoice-2.1</cbc:CustomizationID>
+    <cbc:ID>UBL-INV-2026-00456</cbc:ID>
+    <cbc:IssueDate>2026-01-06</cbc:IssueDate>
+    <cbc:DueDate>2026-02-05</cbc:DueDate>
+    <cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>
+    <cbc:Note>Thank you for your business!</cbc:Note>
+    <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
+    
+    <!-- Supplier -->
+    <cac:AccountingSupplierParty>
+        <cac:Party>
+            <cac:PartyIdentification>
+                <cbc:ID>ACME-001</cbc:ID>
+            </cac:PartyIdentification>
+            <cac:PartyName>
+                <cbc:Name>ACME Corporation Ltd</cbc:Name>
+            </cac:PartyName>
+            <cac:PostalAddress>
+                <cbc:StreetName>Innovation Drive 100</cbc:StreetName>
+                <cbc:BuildingNumber>100</cbc:BuildingNumber>
+                <cbc:CityName>Vienna</cbc:CityName>
+                <cbc:PostalZone>1010</cbc:PostalZone>
+                <cac:Country>
+                    <cbc:IdentificationCode>AT</cbc:IdentificationCode>
+                </cac:Country>
+            </cac:PostalAddress>
+            <cac:PartyTaxScheme>
+                <cbc:CompanyID>ATU12345678</cbc:CompanyID>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:PartyTaxScheme>
+            <cac:PartyLegalEntity>
+                <cbc:RegistrationName>ACME Corporation Ltd</cbc:RegistrationName>
+                <cbc:CompanyID>FN 123456a</cbc:CompanyID>
+            </cac:PartyLegalEntity>
+            <cac:Contact>
+                <cbc:Name>Accounting Department</cbc:Name>
+                <cbc:Telephone>+43 1 234 5678</cbc:Telephone>
+                <cbc:ElectronicMail>accounting@acme.at</cbc:ElectronicMail>
+            </cac:Contact>
+        </cac:Party>
+    </cac:AccountingSupplierParty>
+    
+    <!-- Customer -->
+    <cac:AccountingCustomerParty>
+        <cac:Party>
+            <cac:PartyIdentification>
+                <cbc:ID>CUST-789</cbc:ID>
+            </cac:PartyIdentification>
+            <cac:PartyName>
+                <cbc:Name>Customer Company GmbH</cbc:Name>
+            </cac:PartyName>
+            <cac:PostalAddress>
+                <cbc:StreetName>Käuferstraße 42</cbc:StreetName>
+                <cbc:CityName>Salzburg</cbc:CityName>
+                <cbc:PostalZone>5020</cbc:PostalZone>
+                <cac:Country>
+                    <cbc:IdentificationCode>AT</cbc:IdentificationCode>
+                </cac:Country>
+            </cac:PostalAddress>
+            <cac:PartyLegalEntity>
+                <cbc:RegistrationName>Customer Company GmbH</cbc:RegistrationName>
+            </cac:PartyLegalEntity>
+        </cac:Party>
+    </cac:AccountingCustomerParty>
+    
+    <!-- Payment Means -->
+    <cac:PaymentMeans>
+        <cbc:PaymentMeansCode>31</cbc:PaymentMeansCode>
+        <cbc:PaymentID>UBL-INV-2026-00456</cbc:PaymentID>
+        <cac:PayeeFinancialAccount>
+            <cbc:ID>AT611904300234573201</cbc:ID>
+            <cbc:Name>ACME Corporation Ltd</cbc:Name>
+            <cac:FinancialInstitutionBranch>
+                <cbc:ID>BKAUATWW</cbc:ID>
+            </cac:FinancialInstitutionBranch>
+        </cac:PayeeFinancialAccount>
+    </cac:PaymentMeans>
+    
+    <!-- Tax Total -->
+    <cac:TaxTotal>
+        <cbc:TaxAmount currencyID="EUR">160.00</cbc:TaxAmount>
+        <cac:TaxSubtotal>
+            <cbc:TaxableAmount currencyID="EUR">800.00</cbc:TaxableAmount>
+            <cbc:TaxAmount currencyID="EUR">160.00</cbc:TaxAmount>
+            <cac:TaxCategory>
+                <cbc:ID>S</cbc:ID>
+                <cbc:Percent>20</cbc:Percent>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:TaxCategory>
+        </cac:TaxSubtotal>
+    </cac:TaxTotal>
+    
+    <!-- Legal Monetary Total -->
+    <cac:LegalMonetaryTotal>
+        <cbc:LineExtensionAmount currencyID="EUR">800.00</cbc:LineExtensionAmount>
+        <cbc:TaxExclusiveAmount currencyID="EUR">800.00</cbc:TaxExclusiveAmount>
+        <cbc:TaxInclusiveAmount currencyID="EUR">960.00</cbc:TaxInclusiveAmount>
+        <cbc:PayableAmount currencyID="EUR">960.00</cbc:PayableAmount>
+    </cac:LegalMonetaryTotal>
+    
+    <!-- Invoice Line 1 -->
+    <cac:InvoiceLine>
+        <cbc:ID>1</cbc:ID>
+        <cbc:InvoicedQuantity unitCode="EA">2</cbc:InvoicedQuantity>
+        <cbc:LineExtensionAmount currencyID="EUR">300.00</cbc:LineExtensionAmount>
+        <cac:Item>
+            <cbc:Description>Premium Widget Model A - High quality industrial widget</cbc:Description>
+            <cbc:Name>Premium Widget A</cbc:Name>
+            <cac:SellersItemIdentification>
+                <cbc:ID>WIDGET-A-001</cbc:ID>
+            </cac:SellersItemIdentification>
+            <cac:ClassifiedTaxCategory>
+                <cbc:ID>S</cbc:ID>
+                <cbc:Percent>20</cbc:Percent>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:ClassifiedTaxCategory>
+        </cac:Item>
+        <cac:Price>
+            <cbc:PriceAmount currencyID="EUR">150.00</cbc:PriceAmount>
+        </cac:Price>
+    </cac:InvoiceLine>
+    
+    <!-- Invoice Line 2 -->
+    <cac:InvoiceLine>
+        <cbc:ID>2</cbc:ID>
+        <cbc:InvoicedQuantity unitCode="EA">5</cbc:InvoicedQuantity>
+        <cbc:LineExtensionAmount currencyID="EUR">500.00</cbc:LineExtensionAmount>
+        <cac:Item>
+            <cbc:Description>Standard Gadget B - Reliable everyday gadget</cbc:Description>
+            <cbc:Name>Standard Gadget B</cbc:Name>
+            <cac:SellersItemIdentification>
+                <cbc:ID>GADGET-B-002</cbc:ID>
+            </cac:SellersItemIdentification>
+            <cac:ClassifiedTaxCategory>
+                <cbc:ID>S</cbc:ID>
+                <cbc:Percent>20</cbc:Percent>
+                <cac:TaxScheme>
+                    <cbc:ID>VAT</cbc:ID>
+                </cac:TaxScheme>
+            </cac:ClassifiedTaxCategory>
+        </cac:Item>
+        <cac:Price>
+            <cbc:PriceAmount currencyID="EUR">100.00</cbc:PriceAmount>
+        </cac:Price>
+    </cac:InvoiceLine>
+</Invoice>

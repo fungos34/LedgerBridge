@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 
+  ZUGFeRD 2.1 / Factur-X Sample Invoice
+  This is a BASIC profile test invoice.
+  
+  Format: Cross Industry Invoice (CII) - UN/CEFACT D16B
+  Standard: EN 16931 compliant
+-->
+<rsm:CrossIndustryInvoice 
+    xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100"
+    xmlns:ram="urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100"
+    xmlns:udt="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100"
+    xmlns:qdt="urn:un:unece:uncefact:data:standard:QualifiedDataType:100">
+    
+    <!-- Document Context -->
+    <rsm:ExchangedDocumentContext>
+        <ram:GuidelineSpecifiedDocumentContextParameter>
+            <ram:ID>urn:factur-x.eu:1p0:extended</ram:ID>
+        </ram:GuidelineSpecifiedDocumentContextParameter>
+    </rsm:ExchangedDocumentContext>
+    
+    <!-- Document Header -->
+    <rsm:ExchangedDocument>
+        <ram:ID>ZUGFERD-2024-001234</ram:ID>
+        <ram:Name>Rechnung</ram:Name>
+        <ram:TypeCode>380</ram:TypeCode>
+        <ram:IssueDateTime>
+            <udt:DateTimeString format="102">20260106</udt:DateTimeString>
+        </ram:IssueDateTime>
+        <ram:IncludedNote>
+            <ram:Content>Diese Rechnung wurde elektronisch erstellt und ist ohne Unterschrift gültig.</ram:Content>
+        </ram:IncludedNote>
+    </rsm:ExchangedDocument>
+    
+    <!-- Supply Chain Trade Transaction -->
+    <rsm:SupplyChainTradeTransaction>
+        <!-- Agreement (Seller/Buyer) -->
+        <ram:ApplicableHeaderTradeAgreement>
+            <!-- Seller -->
+            <ram:SellerTradeParty>
+                <ram:ID>SELLER-123</ram:ID>
+                <ram:Name>Muster IT-Solutions GmbH</ram:Name>
+                <ram:DefinedTradeContact>
+                    <ram:PersonName>Max Mustermann</ram:PersonName>
+                    <ram:TelephoneUniversalCommunication>
+                        <ram:CompleteNumber>+49 30 12345678</ram:CompleteNumber>
+                    </ram:TelephoneUniversalCommunication>
+                    <ram:EmailURIUniversalCommunication>
+                        <ram:URIID>rechnung@muster-it.de</ram:URIID>
+                    </ram:EmailURIUniversalCommunication>
+                </ram:DefinedTradeContact>
+                <ram:PostalTradeAddress>
+                    <ram:PostcodeCode>10115</ram:PostcodeCode>
+                    <ram:LineOne>Hauptstraße 42</ram:LineOne>
+                    <ram:CityName>Berlin</ram:CityName>
+                    <ram:CountryID>DE</ram:CountryID>
+                </ram:PostalTradeAddress>
+                <ram:SpecifiedTaxRegistration>
+                    <ram:ID schemeID="VA">DE123456789</ram:ID>
+                </ram:SpecifiedTaxRegistration>
+            </ram:SellerTradeParty>
+            
+            <!-- Buyer -->
+            <ram:BuyerTradeParty>
+                <ram:ID>BUYER-456</ram:ID>
+                <ram:Name>Beispiel Kunde AG</ram:Name>
+                <ram:PostalTradeAddress>
+                    <ram:PostcodeCode>80331</ram:PostcodeCode>
+                    <ram:LineOne>Kundenweg 15</ram:LineOne>
+                    <ram:CityName>München</ram:CityName>
+                    <ram:CountryID>DE</ram:CountryID>
+                </ram:PostalTradeAddress>
+            </ram:BuyerTradeParty>
+        </ram:ApplicableHeaderTradeAgreement>
+        
+        <!-- Line Item 1: Consulting -->
+        <ram:IncludedSupplyChainTradeLineItem>
+            <ram:AssociatedDocumentLineDocument>
+                <ram:LineID>1</ram:LineID>
+            </ram:AssociatedDocumentLineDocument>
+            <ram:SpecifiedTradeProduct>
+                <ram:GlobalID schemeID="0160">4012345678901</ram:GlobalID>
+                <ram:Name>IT-Beratung Premium</ram:Name>
+                <ram:Description>Strategische IT-Beratung, Vor-Ort-Termin</ram:Description>
+            </ram:SpecifiedTradeProduct>
+            <ram:SpecifiedLineTradeAgreement>
+                <ram:NetPriceProductTradePrice>
+                    <ram:ChargeAmount>150.00</ram:ChargeAmount>
+                </ram:NetPriceProductTradePrice>
+            </ram:SpecifiedLineTradeAgreement>
+            <ram:SpecifiedLineTradeDelivery>
+                <ram:BilledQuantity unitCode="HUR">8</ram:BilledQuantity>
+            </ram:SpecifiedLineTradeDelivery>
+            <ram:SpecifiedLineTradeSettlement>
+                <ram:ApplicableTradeTax>
+                    <ram:TypeCode>VAT</ram:TypeCode>
+                    <ram:CategoryCode>S</ram:CategoryCode>
+                    <ram:RateApplicablePercent>19</ram:RateApplicablePercent>
+                </ram:ApplicableTradeTax>
+                <ram:SpecifiedTradeSettlementLineMonetarySummation>
+                    <ram:LineTotalAmount>1200.00</ram:LineTotalAmount>
+                </ram:SpecifiedTradeSettlementLineMonetarySummation>
+            </ram:SpecifiedLineTradeSettlement>
+        </ram:IncludedSupplyChainTradeLineItem>
+        
+        <!-- Line Item 2: Software License -->
+        <ram:IncludedSupplyChainTradeLineItem>
+            <ram:AssociatedDocumentLineDocument>
+                <ram:LineID>2</ram:LineID>
+            </ram:AssociatedDocumentLineDocument>
+            <ram:SpecifiedTradeProduct>
+                <ram:Name>Software-Lizenz Enterprise</ram:Name>
+                <ram:Description>Jahreslizenz für Enterprise Software Suite</ram:Description>
+            </ram:SpecifiedTradeProduct>
+            <ram:SpecifiedLineTradeAgreement>
+                <ram:NetPriceProductTradePrice>
+                    <ram:ChargeAmount>599.00</ram:ChargeAmount>
+                </ram:NetPriceProductTradePrice>
+            </ram:SpecifiedLineTradeAgreement>
+            <ram:SpecifiedLineTradeDelivery>
+                <ram:BilledQuantity unitCode="EA">1</ram:BilledQuantity>
+            </ram:SpecifiedLineTradeDelivery>
+            <ram:SpecifiedLineTradeSettlement>
+                <ram:ApplicableTradeTax>
+                    <ram:TypeCode>VAT</ram:TypeCode>
+                    <ram:CategoryCode>S</ram:CategoryCode>
+                    <ram:RateApplicablePercent>19</ram:RateApplicablePercent>
+                </ram:ApplicableTradeTax>
+                <ram:SpecifiedTradeSettlementLineMonetarySummation>
+                    <ram:LineTotalAmount>599.00</ram:LineTotalAmount>
+                </ram:SpecifiedTradeSettlementLineMonetarySummation>
+            </ram:SpecifiedLineTradeSettlement>
+        </ram:IncludedSupplyChainTradeLineItem>
+        
+        <!-- Delivery -->
+        <ram:ApplicableHeaderTradeDelivery>
+            <ram:ActualDeliverySupplyChainEvent>
+                <ram:OccurrenceDateTime>
+                    <udt:DateTimeString format="102">20260103</udt:DateTimeString>
+                </ram:OccurrenceDateTime>
+            </ram:ActualDeliverySupplyChainEvent>
+        </ram:ApplicableHeaderTradeDelivery>
+        
+        <!-- Settlement (Payment, Tax, Totals) -->
+        <ram:ApplicableHeaderTradeSettlement>
+            <ram:PaymentReference>ZUGFERD-2024-001234</ram:PaymentReference>
+            <ram:InvoiceCurrencyCode>EUR</ram:InvoiceCurrencyCode>
+            
+            <!-- Payment Terms -->
+            <ram:SpecifiedTradePaymentTerms>
+                <ram:Description>Zahlbar innerhalb 14 Tagen ohne Abzug</ram:Description>
+                <ram:DueDateDateTime>
+                    <udt:DateTimeString format="102">20260120</udt:DateTimeString>
+                </ram:DueDateDateTime>
+            </ram:SpecifiedTradePaymentTerms>
+            
+            <!-- Bank Account -->
+            <ram:SpecifiedTradeSettlementPaymentMeans>
+                <ram:TypeCode>58</ram:TypeCode>
+                <ram:PayeePartyCreditorFinancialAccount>
+                    <ram:IBANID>DE89370400440532013000</ram:IBANID>
+                </ram:PayeePartyCreditorFinancialAccount>
+                <ram:PayeeSpecifiedCreditorFinancialInstitution>
+                    <ram:BICID>COBADEFFXXX</ram:BICID>
+                </ram:PayeeSpecifiedCreditorFinancialInstitution>
+            </ram:SpecifiedTradeSettlementPaymentMeans>
+            
+            <!-- Tax -->
+            <ram:ApplicableTradeTax>
+                <ram:CalculatedAmount>341.81</ram:CalculatedAmount>
+                <ram:TypeCode>VAT</ram:TypeCode>
+                <ram:BasisAmount>1799.00</ram:BasisAmount>
+                <ram:CategoryCode>S</ram:CategoryCode>
+                <ram:RateApplicablePercent>19</ram:RateApplicablePercent>
+            </ram:ApplicableTradeTax>
+            
+            <!-- Monetary Totals -->
+            <ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+                <ram:LineTotalAmount>1799.00</ram:LineTotalAmount>
+                <ram:ChargeTotalAmount>0.00</ram:ChargeTotalAmount>
+                <ram:AllowanceTotalAmount>0.00</ram:AllowanceTotalAmount>
+                <ram:TaxBasisTotalAmount>1799.00</ram:TaxBasisTotalAmount>
+                <ram:TaxTotalAmount currencyID="EUR">341.81</ram:TaxTotalAmount>
+                <ram:GrandTotalAmount>2140.81</ram:GrandTotalAmount>
+                <ram:DuePayableAmount>2140.81</ram:DuePayableAmount>
+            </ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+        </ram:ApplicableHeaderTradeSettlement>
+    </rsm:SupplyChainTradeTransaction>
+</rsm:CrossIndustryInvoice>

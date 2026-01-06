@@ -16,6 +16,18 @@ from paperless_firefly.extractors.einvoice_extractor import (
 )
 from paperless_firefly.extractors.base import ExtractionResult
 
+# Import fixture loaders
+from fixtures import (
+    get_zugferd_sample,
+    get_xrechnung_sample,
+    get_ubl_sample,
+    get_peppol_sample,
+    EXPECTED_ZUGFERD,
+    EXPECTED_XRECHNUNG,
+    EXPECTED_UBL,
+    EXPECTED_PEPPOL,
+)
+
 
 # Sample CII (Cross Industry Invoice) XML - used by ZUGFeRD/Factur-X
 SAMPLE_CII_XML = """<?xml version="1.0" encoding="UTF-8"?>
@@ -507,6 +519,9 @@ class TestExtractorRouterIntegration:
             id=123,
             title="Test Invoice",
             content=SAMPLE_CII_XML,
+            created="2024-11-18",
+            added="2024-11-18T10:00:00Z",
+            modified="2024-11-18T10:00:00Z",
             document_type="Invoice",
             correspondent=None,
             tags=[],
@@ -516,7 +531,7 @@ class TestExtractorRouterIntegration:
         result = router.extract(
             document=doc,
             file_bytes=b"",
-            source_hash="abc123",
+            source_hash="abc123def456789012",  # Must be at least 16 characters
             paperless_base_url="http://test",
             default_source_account="Test Account",
         )
@@ -525,3 +540,60 @@ class TestExtractorRouterIntegration:
         assert "einvoice" in result.provenance.extraction_strategy or \
                "cii" in result.provenance.extraction_strategy or \
                "ubl" in result.provenance.extraction_strategy
+
+
+class TestRealFixtureFiles:
+    """Tests using the real fixture files from tests/fixtures/."""
+    
+    @pytest.fixture
+    def extractor(self):
+        return EInvoiceExtractor()
+    
+    def test_zugferd_fixture(self, extractor):
+        """Test extraction from ZUGFeRD fixture file."""
+        xml_content = get_zugferd_sample()
+        result = extractor.extract(xml_content, None)
+        
+        assert result.invoice_number == EXPECTED_ZUGFERD["invoice_number"]
+        assert result.vendor == EXPECTED_ZUGFERD["vendor"]
+        assert result.amount == Decimal(EXPECTED_ZUGFERD["amount"])
+        assert result.currency == EXPECTED_ZUGFERD["currency"]
+        assert result.tax_amount == Decimal(EXPECTED_ZUGFERD["tax_amount"])
+        assert result.total_net == Decimal(EXPECTED_ZUGFERD["total_net"])
+        assert result.amount_confidence >= 0.95
+    
+    def test_xrechnung_fixture(self, extractor):
+        """Test extraction from XRechnung fixture file."""
+        xml_content = get_xrechnung_sample()
+        result = extractor.extract(xml_content, None)
+        
+        assert result.invoice_number == EXPECTED_XRECHNUNG["invoice_number"]
+        assert result.vendor == EXPECTED_XRECHNUNG["vendor"]
+        assert result.amount == Decimal(EXPECTED_XRECHNUNG["amount"])
+        assert result.currency == EXPECTED_XRECHNUNG["currency"]
+        assert result.tax_amount == Decimal(EXPECTED_XRECHNUNG["tax_amount"])
+        assert result.total_net == Decimal(EXPECTED_XRECHNUNG["total_net"])
+    
+    def test_ubl_fixture(self, extractor):
+        """Test extraction from UBL fixture file."""
+        xml_content = get_ubl_sample()
+        result = extractor.extract(xml_content, None)
+        
+        assert result.invoice_number == EXPECTED_UBL["invoice_number"]
+        assert result.vendor == EXPECTED_UBL["vendor"]
+        assert result.amount == Decimal(EXPECTED_UBL["amount"])
+        assert result.currency == EXPECTED_UBL["currency"]
+        assert result.tax_amount == Decimal(EXPECTED_UBL["tax_amount"])
+        assert result.total_net == Decimal(EXPECTED_UBL["total_net"])
+    
+    def test_peppol_fixture(self, extractor):
+        """Test extraction from PEPPOL fixture file."""
+        xml_content = get_peppol_sample()
+        result = extractor.extract(xml_content, None)
+        
+        assert result.invoice_number == EXPECTED_PEPPOL["invoice_number"]
+        assert result.vendor == EXPECTED_PEPPOL["vendor"]
+        assert result.amount == Decimal(EXPECTED_PEPPOL["amount"])
+        assert result.currency == EXPECTED_PEPPOL["currency"]
+        assert result.tax_amount == Decimal(EXPECTED_PEPPOL["tax_amount"])
+        assert result.total_net == Decimal(EXPECTED_PEPPOL["total_net"])

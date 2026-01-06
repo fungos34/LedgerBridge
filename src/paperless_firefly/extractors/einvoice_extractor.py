@@ -50,14 +50,55 @@ ZUGFERD_FILENAMES = [
 
 
 def _safe_decimal(value: Optional[str]) -> Optional[Decimal]:
-    """Safely convert string to Decimal."""
+    """Safely convert string to Decimal.
+    
+    Handles various formats:
+    - Standard: 1234.56
+    - European: 1.234,56 (dot as thousands, comma as decimal)
+    - With currency symbols: EUR 1,234.56
+    """
     if not value:
         return None
     try:
-        # Handle both comma and dot as decimal separator
-        cleaned = value.strip().replace(',', '.')
-        # Remove any currency symbols or whitespace
-        cleaned = re.sub(r'[^\d.\-]', '', cleaned)
+        cleaned = value.strip()
+        # Remove currency symbols and whitespace
+        cleaned = re.sub(r'[^\d,.\-]', '', cleaned)
+        
+        if not cleaned:
+            return None
+        
+        # Detect European format: if comma is after last dot, or only comma is present
+        # Examples: "1.234,56" or "1234,56"
+        has_comma = ',' in cleaned
+        has_dot = '.' in cleaned
+        
+        if has_comma and has_dot:
+            # Both present - check which is last (that's the decimal separator)
+            last_comma = cleaned.rfind(',')
+            last_dot = cleaned.rfind('.')
+            
+            if last_comma > last_dot:
+                # European format: 1.234,56 -> remove dots, replace comma with dot
+                cleaned = cleaned.replace('.', '').replace(',', '.')
+            else:
+                # US format: 1,234.56 -> just remove commas
+                cleaned = cleaned.replace(',', '')
+        elif has_comma and not has_dot:
+            # Only comma - could be decimal separator: 1234,56 -> 1234.56
+            # If there's exactly one comma and digits after are 1-2, treat as decimal
+            if cleaned.count(',') == 1:
+                comma_pos = cleaned.find(',')
+                digits_after = len(cleaned) - comma_pos - 1
+                if digits_after <= 2:
+                    cleaned = cleaned.replace(',', '.')
+                else:
+                    # Likely a thousands separator: 1,234 -> 1234
+                    cleaned = cleaned.replace(',', '')
+            else:
+                # Multiple commas - thousands separators
+                cleaned = cleaned.replace(',', '')
+        # If only dots, leave as is (standard format)
+        
         return Decimal(cleaned)
     except (InvalidOperation, ValueError):
         return None
@@ -272,16 +313,21 @@ class EInvoiceExtractor(BaseExtractor):
         
         try:
             # Find the main document context
-            # Structure: rsm:CrossIndustryInvoice/rsm:SupplyChainTradeTransaction
+            # Structure: rsm:CrossIndustryInvoice/rsm:ExchangedDocument (rsm namespace!)
             
-            # Invoice number
-            invoice_id = root.find('.//ram:ExchangedDocument/ram:ID', ns)
+            # Invoice number - ExchangedDocument is in rsm namespace, ID inside is in ram namespace
+            invoice_id = root.find('.//rsm:ExchangedDocument/ram:ID', ns)
+            if invoice_id is None:
+                # Try alternate paths
+                invoice_id = root.find('.//ram:ExchangedDocument/ram:ID', ns)
             if invoice_id is not None and invoice_id.text:
                 result.invoice_number = invoice_id.text.strip()
                 result.invoice_number_confidence = 0.95
             
-            # Issue date
-            issue_date = root.find('.//ram:ExchangedDocument/ram:IssueDateTime/udt:DateTimeString', ns)
+            # Issue date - try rsm namespace first
+            issue_date = root.find('.//rsm:ExchangedDocument/ram:IssueDateTime/udt:DateTimeString', ns)
+            if issue_date is None:
+                issue_date = root.find('.//ram:ExchangedDocument/ram:IssueDateTime/udt:DateTimeString', ns)
             if issue_date is None:
                 issue_date = root.find('.//ram:IssueDateTime/udt:DateTimeString', ns)
             if issue_date is not None and issue_date.text:
@@ -348,7 +394,10 @@ class EInvoiceExtractor(BaseExtractor):
             
             # Description from first line item or document name
             if not result.description:
-                doc_name = root.find('.//ram:ExchangedDocument/ram:Name', ns)
+                # Try rsm namespace first, then ram
+                doc_name = root.find('.//rsm:ExchangedDocument/ram:Name', ns)
+                if doc_name is None:
+                    doc_name = root.find('.//ram:ExchangedDocument/ram:Name', ns)
                 if doc_name is not None and doc_name.text:
                     result.description = doc_name.text.strip()
                     result.description_confidence = 0.8
@@ -471,9 +520,14 @@ class EInvoiceExtractor(BaseExtractor):
                 result.total_net = _safe_decimal(tax_exclusive.text)
             
             # Tax rate from TaxTotal/TaxSubtotal
+            # Try direct path first
             tax_percent = root.find('.//cac:TaxSubtotal/cbc:Percent', ns)
             if tax_percent is None:
-                tax_percent = root.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2}TaxSubtotal/{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}Percent')
+                # Try inside TaxCategory
+                tax_percent = root.find('.//cac:TaxSubtotal/cac:TaxCategory/cbc:Percent', ns)
+            if tax_percent is None:
+                # Fallback with full namespace
+                tax_percent = root.find('.//{urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2}TaxSubtotal//{urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2}Percent')
             if tax_percent is not None and tax_percent.text:
                 result.tax_rate = _safe_decimal(tax_percent.text)
             
