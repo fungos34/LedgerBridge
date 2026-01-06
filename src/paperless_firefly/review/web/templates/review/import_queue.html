@@ -161,18 +161,22 @@
     <h1>📤 Import Queue</h1>
     <div class="queue-actions">
         <a href="{% url 'home' %}" class="btn btn-outline">← Back</a>
-        {% if ready_items %}
         <form method="post" action="{% url 'run_import' %}" style="display: inline;">
             {% csrf_token %}
+            {% if ready_items or failed_items %}
             <button type="submit" class="btn btn-primary" {% if import_status.running %}disabled{% endif %}>
                 {% if import_status.running %}
                 <span class="spinner">⏳</span> Importing...
                 {% else %}
-                Import All to Firefly →
+                Import All to Firefly ({{ ready_items|length|add:failed_items|length }}) →
                 {% endif %}
             </button>
+            {% else %}
+            <button type="button" class="btn btn-primary" disabled style="opacity: 0.5; cursor: not-allowed;">
+                Import All to Firefly →
+            </button>
+            {% endif %}
         </form>
-        {% endif %}
     </div>
 </div>
 

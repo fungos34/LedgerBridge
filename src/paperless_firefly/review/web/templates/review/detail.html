@@ -281,13 +281,23 @@
                         <div class="form-section-title">Accounts</div>
                         <div class="form-row">
                             <div class="form-group">
-                                <label class="form-label" for="source_account">Source Account</label>
-                                <input type="text" 
-                                       id="source_account" 
-                                       name="source_account" 
-                                       class="form-input" 
-                                       value="{{ proposal.source_account|default:'' }}"
-                                       placeholder="e.g., Checking Account">
+                                <label class="form-label" for="source_account">Source Account * <span style="color: #dc2626; font-size: 0.8em;">(required)</span></label>
+                                <select id="source_account" 
+                                        name="source_account" 
+                                        class="form-input" 
+                                        required>
+                                    <option value="">-- Select Source Account --</option>
+                                    {% for account in firefly_accounts %}
+                                    <option value="{{ account.name }}" {% if account.name == proposal.source_account %}selected{% endif %}>
+                                        {{ account.name }} ({{ account.currency_code }})
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                                {% if not firefly_accounts %}
+                                <div class="form-help" style="color: #dc2626;">⚠️ Could not load Firefly accounts. Check your Firefly API settings.</div>
+                                {% else %}
+                                <div class="form-help">Select the bank account from your Firefly III to debit from</div>
+                                {% endif %}
                             </div>
                             <div class="form-group">
                                 <label class="form-label" for="destination_account">Destination / Vendor</label>
