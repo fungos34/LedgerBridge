@@ -271,6 +271,39 @@ class FireflyClient:
 
         return int(transaction_id) if transaction_id else None
 
+    def update_transaction(
+        self,
+        transaction_id: int,
+        payload: FireflyTransactionStore,
+    ) -> bool:
+        """
+        Update an existing transaction in Firefly III.
+
+        Args:
+            transaction_id: The Firefly transaction ID to update
+            payload: Transaction store payload with new data
+
+        Returns:
+            True if updated successfully
+
+        Raises:
+            FireflyAPIError: If API returns an error
+            ValueError: If payload is invalid
+        """
+        # Validate payload before sending
+        validation_errors = validate_firefly_payload(payload)
+        if validation_errors:
+            raise ValueError(f"Invalid payload: {'; '.join(validation_errors)}")
+
+        response = self._request(
+            "PUT",
+            f"/api/v1/transactions/{transaction_id}",
+            json_data=payload.to_dict(),
+        )
+
+        logger.info(f"Updated Firefly transaction id={transaction_id}")
+        return True
+
     def find_by_external_id(self, external_id: str) -> Optional[FireflyTransaction]:
         """
         Find a transaction by external_id.

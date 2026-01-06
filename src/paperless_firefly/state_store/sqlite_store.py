@@ -406,6 +406,44 @@ class StateStore:
                     (now, decision, extraction_id),
                 )
 
+    def reset_extraction_for_review(self, extraction_id: int) -> bool:
+        """
+        Reset an extraction so it can be reviewed again.
+
+        This clears the review_decision, allowing:
+        - REJECTED extractions to be reviewed and accepted
+        - ACCEPTED extractions to be re-reviewed
+
+        Returns True if reset, False if extraction not found.
+        """
+        with self._transaction() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE extractions
+                SET reviewed_at = NULL, review_decision = NULL
+                WHERE id = ?
+            """,
+                (extraction_id,),
+            )
+            return cursor.rowcount > 0
+
+    def reset_extraction_by_document(self, document_id: int) -> bool:
+        """
+        Reset an extraction by document ID for re-review.
+
+        Returns True if reset, False if no extraction found.
+        """
+        with self._transaction() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE extractions
+                SET reviewed_at = NULL, review_decision = NULL
+                WHERE document_id = ?
+            """,
+                (document_id,),
+            )
+            return cursor.rowcount > 0
+
     def get_extractions_for_review(self) -> list[ExtractionRecord]:
         """Get all extractions pending review."""
         with self._transaction() as conn:
@@ -540,6 +578,46 @@ class StateStore:
             cursor = conn.execute("DELETE FROM imports WHERE external_id = ?", (external_id,))
             return cursor.rowcount > 0
 
+    def reset_import_for_retry(self, external_id: str) -> Optional[int]:
+        """
+        Reset an import to PENDING for reimport.
+
+        Keeps the firefly_id so the same Firefly transaction can be updated.
+        Returns the firefly_id if exists, None otherwise.
+        """
+        with self._transaction() as conn:
+            # Get the current firefly_id before resetting
+            row = conn.execute(
+                "SELECT firefly_id FROM imports WHERE external_id = ?",
+                (external_id,),
+            ).fetchone()
+
+            if not row:
+                return None
+
+            firefly_id = row["firefly_id"]
+
+            # Reset status to PENDING (keep firefly_id for update)
+            conn.execute(
+                """
+                UPDATE imports
+                SET status = ?, error_message = NULL, imported_at = NULL
+                WHERE external_id = ?
+            """,
+                (ImportStatus.PENDING.value, external_id),
+            )
+
+            return firefly_id
+
+    def get_import_by_document(self, document_id: int) -> Optional[ImportRecord]:
+        """Get import record by document_id."""
+        with self._transaction() as conn:
+            row = conn.execute(
+                "SELECT * FROM imports WHERE document_id = ? ORDER BY created_at DESC LIMIT 1",
+                (document_id,),
+            ).fetchone()
+            return ImportRecord.from_row(row) if row else None
+
     def get_pending_imports(self) -> list[ImportRecord]:
         """Get all pending imports."""
         with self._transaction() as conn:
@@ -602,6 +680,44 @@ class StateStore:
                     "use_count": row["use_count"],
                 }
             return None
+
+    def get_processed_extractions(self) -> list[dict[str, Any]]:
+        """
+        Get all extractions that have been processed (imported, rejected, or pending import).
+
+        Used to show archive/history of processed documents that can be reset.
+        """
+        with self._transaction() as conn:
+            rows = conn.execute(
+                """
+                SELECT e.*, i.status as import_status, i.firefly_id, i.error_message as import_error
+                FROM extractions e
+                LEFT JOIN imports i ON e.external_id = i.external_id
+                WHERE e.review_decision IS NOT NULL
+                   OR i.status IS NOT NULL
+                ORDER BY COALESCE(e.reviewed_at, e.created_at) DESC
+            """
+            ).fetchall()
+
+            results = []
+            for row in rows:
+                results.append(
+                    {
+                        "id": row["id"],
+                        "document_id": row["document_id"],
+                        "external_id": row["external_id"],
+                        "extraction_json": row["extraction_json"],
+                        "overall_confidence": row["overall_confidence"],
+                        "review_state": row["review_state"],
+                        "review_decision": row["review_decision"],
+                        "reviewed_at": row["reviewed_at"],
+                        "created_at": row["created_at"],
+                        "import_status": row["import_status"],
+                        "firefly_id": row["firefly_id"],
+                        "import_error": row["import_error"],
+                    }
+                )
+            return results
 
     # Statistics
 

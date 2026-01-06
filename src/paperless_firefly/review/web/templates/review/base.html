@@ -458,6 +458,7 @@
                 <a href="{% url 'home' %}" {% if request.path == '/' %}class="active"{% endif %}>Home</a>
                 <a href="{% url 'list' %}" {% if '/review' in request.path %}class="active"{% endif %}>Review</a>
                 <a href="{% url 'import_queue' %}" {% if '/import' in request.path %}class="active"{% endif %}>Import</a>
+                <a href="{% url 'archive' %}" {% if '/archive' in request.path %}class="active"{% endif %}>Archive</a>
                 <a href="{% url 'settings' %}" {% if '/settings' in request.path %}class="active"{% endif %}>Settings</a>
                 {% endif %}
             </nav>

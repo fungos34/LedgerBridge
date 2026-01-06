@@ -317,6 +317,70 @@ def review_list(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+def extraction_archive(request: HttpRequest) -> HttpResponse:
+    """
+    Show archive of processed extractions (imported, rejected).
+
+    Allows resetting extractions for re-review or reimport.
+    """
+    store = _get_store()
+    processed = store.get_processed_extractions()
+
+    # Parse extractions for display
+    items = []
+    for row in processed:
+        try:
+            data = json.loads(row["extraction_json"])
+            extraction = FinanceExtraction.from_dict(data)
+
+            # Determine status for display
+            status = "unknown"
+            status_class = "secondary"
+            if row["import_status"] == "IMPORTED":
+                status = "Imported"
+                status_class = "success"
+            elif row["import_status"] == "FAILED":
+                status = "Failed"
+                status_class = "danger"
+            elif row["review_decision"] == "REJECTED":
+                status = "Rejected"
+                status_class = "warning"
+            elif row["review_decision"] in ("ACCEPTED", "EDITED"):
+                status = "Approved (pending import)"
+                status_class = "info"
+
+            items.append(
+                {
+                    "id": row["id"],
+                    "document_id": row["document_id"],
+                    "external_id": row["external_id"],
+                    "title": extraction.paperless_title,
+                    "amount": extraction.proposal.amount,
+                    "currency": extraction.proposal.currency,
+                    "date": extraction.proposal.date,
+                    "vendor": extraction.proposal.destination_account,
+                    "status": status,
+                    "status_class": status_class,
+                    "review_decision": row["review_decision"],
+                    "import_status": row["import_status"],
+                    "firefly_id": row["firefly_id"],
+                    "import_error": row["import_error"],
+                    "reviewed_at": row["reviewed_at"],
+                    "created_at": row["created_at"],
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error parsing extraction {row['id']}: {e}")
+
+    context = {
+        "items": items,
+        "debug_mode": _is_debug_mode(),
+        **_get_external_urls(),
+    }
+    return render(request, "review/archive.html", context)
+
+
+@login_required
 def review_detail(request: HttpRequest, extraction_id: int) -> HttpResponse:
     """Show single extraction for review with document preview."""
     store = _get_store()
@@ -435,6 +499,41 @@ def reject_extraction(request: HttpRequest, extraction_id: int) -> HttpResponse:
     pending = store.get_extractions_for_review()
     if pending:
         return redirect("detail", extraction_id=pending[0].id)
+    return redirect("list")
+
+
+@login_required
+@require_http_methods(["POST"])
+def reset_extraction(request: HttpRequest, extraction_id: int) -> HttpResponse:
+    """
+    Reset an extraction to allow re-review and re-import.
+
+    This is used when:
+    - A document was rejected but should now be imported
+    - A document was imported but needs to be updated (reimport)
+    - A document was unlisted then relisted
+    """
+    store = _get_store()
+
+    # Reset the extraction review decision
+    if store.reset_extraction_for_review(extraction_id):
+        # Also clear any failed import so it can be retried
+        conn = store._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT external_id FROM extractions WHERE id = ?", (extraction_id,)
+            ).fetchone()
+            if row:
+                external_id = row["external_id"]
+                # Delete import record so it can be re-imported
+                store.delete_import(external_id)
+        finally:
+            conn.close()
+
+        messages.success(request, "Extraction has been reset for re-review.")
+    else:
+        messages.error(request, "Extraction not found.")
+
     return redirect("list")
 
 

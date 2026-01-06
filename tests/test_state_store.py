@@ -351,6 +351,197 @@ class TestVendorMappings:
         assert mapping["use_count"] == 2
 
 
+class TestExtractionReset:
+    """Tests for extraction reset functionality (unlist/relist scenario)."""
+
+    @pytest.fixture
+    def store(self, temp_db):
+        store = StateStore(temp_db)
+        store.upsert_document(document_id=123, source_hash="abc123")
+        return store
+
+    def test_reset_extraction_for_review(self, store):
+        """Reset a rejected extraction so it can be reviewed again."""
+        # Create extraction and reject it
+        extraction_id = store.save_extraction(
+            document_id=123,
+            external_id="test-ext-1",
+            extraction_json='{"test": true}',
+            overall_confidence=0.7,
+            review_state="REVIEW",
+        )
+        store.update_extraction_review(extraction_id, "REJECTED")
+
+        # Verify it was rejected
+        ext = store.get_extraction_by_external_id("test-ext-1")
+        assert ext.review_decision == "REJECTED"
+
+        # Reset it
+        result = store.reset_extraction_for_review(extraction_id)
+        assert result is True
+
+        # Verify it's reset
+        ext = store.get_extraction_by_external_id("test-ext-1")
+        assert ext.review_decision is None
+        assert ext.reviewed_at is None
+
+    def test_reset_extraction_by_document(self, store):
+        """Reset extraction by document ID."""
+        extraction_id = store.save_extraction(
+            document_id=123,
+            external_id="test-ext-2",
+            extraction_json='{"test": true}',
+            overall_confidence=0.7,
+            review_state="REVIEW",
+        )
+        store.update_extraction_review(extraction_id, "ACCEPTED")
+
+        # Reset by document ID
+        result = store.reset_extraction_by_document(123)
+        assert result is True
+
+        # Verify it's reset
+        ext = store.get_extraction_by_document(123)
+        assert ext.review_decision is None
+
+    def test_reset_nonexistent_extraction(self, store):
+        """Reset returns False for nonexistent extraction."""
+        result = store.reset_extraction_for_review(999)
+        assert result is False
+
+    def test_rejected_extraction_not_in_review_queue(self, store):
+        """Rejected extractions are not in review queue."""
+        extraction_id = store.save_extraction(
+            document_id=123,
+            external_id="test-ext-3",
+            extraction_json='{"test": true}',
+            overall_confidence=0.7,
+            review_state="REVIEW",
+        )
+
+        # Before rejection, should be in queue
+        pending = store.get_extractions_for_review()
+        assert len(pending) == 1
+
+        # After rejection, should not be in queue
+        store.update_extraction_review(extraction_id, "REJECTED")
+        pending = store.get_extractions_for_review()
+        assert len(pending) == 0
+
+        # After reset, should be back in queue
+        store.reset_extraction_for_review(extraction_id)
+        pending = store.get_extractions_for_review()
+        assert len(pending) == 1
+
+
+class TestImportReset:
+    """Tests for import reset functionality (reimport scenario)."""
+
+    @pytest.fixture
+    def store(self, temp_db):
+        store = StateStore(temp_db)
+        store.upsert_document(document_id=123, source_hash="abc123")
+        return store
+
+    def test_reset_import_for_retry(self, store):
+        """Reset imported record for reimport."""
+        store.create_import(
+            external_id="test-import-1",
+            document_id=123,
+            payload_json='{"transactions": []}',
+        )
+        store.update_import_success("test-import-1", firefly_id=999)
+
+        # Verify it was imported
+        record = store.get_import_by_external_id("test-import-1")
+        assert record.status == ImportStatus.IMPORTED
+        assert record.firefly_id == 999
+
+        # Reset for reimport
+        firefly_id = store.reset_import_for_retry("test-import-1")
+        assert firefly_id == 999
+
+        # Verify it's reset to PENDING but keeps firefly_id
+        record = store.get_import_by_external_id("test-import-1")
+        assert record.status == ImportStatus.PENDING
+        assert record.firefly_id == 999  # Kept for update
+
+    def test_reset_nonexistent_import(self, store):
+        """Reset returns None for nonexistent import."""
+        result = store.reset_import_for_retry("nonexistent")
+        assert result is None
+
+    def test_get_import_by_document(self, store):
+        """Get import by document ID."""
+        store.create_import(
+            external_id="test-import-2",
+            document_id=123,
+            payload_json="{}",
+        )
+
+        record = store.get_import_by_document(123)
+        assert record is not None
+        assert record.external_id == "test-import-2"
+
+    def test_get_import_by_document_nonexistent(self, store):
+        """Get import returns None for nonexistent document."""
+        record = store.get_import_by_document(999)
+        assert record is None
+
+
+class TestProcessedExtractions:
+    """Tests for get_processed_extractions (archive view)."""
+
+    @pytest.fixture
+    def store(self, temp_db):
+        store = StateStore(temp_db)
+        store.upsert_document(document_id=1, source_hash="a")
+        store.upsert_document(document_id=2, source_hash="b")
+        store.upsert_document(document_id=3, source_hash="c")
+        return store
+
+    def test_get_processed_extractions_empty(self, store):
+        """No processed extractions initially."""
+        processed = store.get_processed_extractions()
+        assert len(processed) == 0
+
+    def test_get_processed_extractions_rejected(self, store):
+        """Rejected extractions appear in processed list."""
+        ext_id = store.save_extraction(
+            document_id=1,
+            external_id="ext-1",
+            extraction_json='{"doc": 1}',
+            overall_confidence=0.7,
+            review_state="REVIEW",
+        )
+        store.update_extraction_review(ext_id, "REJECTED")
+
+        processed = store.get_processed_extractions()
+        assert len(processed) == 1
+        assert processed[0]["review_decision"] == "REJECTED"
+
+    def test_get_processed_extractions_imported(self, store):
+        """Imported extractions appear in processed list."""
+        store.save_extraction(
+            document_id=2,
+            external_id="ext-2",
+            extraction_json='{"doc": 2}',
+            overall_confidence=0.9,
+            review_state="AUTO",
+        )
+        store.create_import(
+            external_id="ext-2",
+            document_id=2,
+            payload_json="{}",
+        )
+        store.update_import_success("ext-2", firefly_id=123)
+
+        processed = store.get_processed_extractions()
+        assert len(processed) == 1
+        assert processed[0]["import_status"] == "IMPORTED"
+        assert processed[0]["firefly_id"] == 123
+
+
 class TestStatistics:
     """Tests for statistics."""
 

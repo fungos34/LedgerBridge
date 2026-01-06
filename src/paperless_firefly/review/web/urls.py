@@ -22,6 +22,8 @@ urlpatterns = [
     path("settings/", views.user_settings, name="settings"),
     # Main review queue
     path("review/", views.review_list, name="list"),
+    # Archive/History (processed documents)
+    path("archive/", views.extraction_archive, name="archive"),
     # Import queue
     path("import-queue/", views.import_queue, name="import_queue"),
     path("import-queue/import/", views.run_import, name="run_import"),
@@ -44,6 +46,7 @@ urlpatterns = [
     path("extraction/<int:extraction_id>/reject/", views.reject_extraction, name="reject"),
     path("extraction/<int:extraction_id>/skip/", views.skip_extraction, name="skip"),
     path("extraction/<int:extraction_id>/save/", views.save_extraction, name="save"),
+    path("extraction/<int:extraction_id>/reset/", views.reset_extraction, name="reset_extraction"),
     # Document proxy (to serve original document from Paperless)
     path("document/<int:document_id>/", views.document_proxy, name="document"),
     path("document/<int:document_id>/thumbnail/", views.document_thumbnail, name="thumbnail"),

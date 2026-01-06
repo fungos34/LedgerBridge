@@ -35,6 +35,8 @@ dev = [
     "types-requests>=2.28.0",
     "types-PyYAML>=6.0",
     "types-lxml>=2023.3.28",
+    "reportlab>=4.0",  # PDF generation for test fixtures
+    "isort>=5.12.0",
 ]
 
 [project.scripts]
