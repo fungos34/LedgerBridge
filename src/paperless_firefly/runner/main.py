@@ -276,8 +276,20 @@ def cmd_review(config: Config, host: str = "127.0.0.1", port: int = 8080) -> int
     return 0
 
 
-def cmd_import(config: Config, auto_only: bool, dry_run: bool) -> int:
-    """Import transactions to Firefly III."""
+def cmd_import(
+    config: Config,
+    auto_only: bool,
+    dry_run: bool,
+    source_account_override: Optional[str] = None,
+) -> int:
+    """Import transactions to Firefly III.
+    
+    Args:
+        config: Application configuration
+        auto_only: Only import AUTO-confidence transactions
+        dry_run: Don't actually import, just show what would be done
+        source_account_override: Override the default source account from config
+    """
     print("📤 Importing transactions to Firefly III...")
 
     store = StateStore(config.state_db_path)
@@ -285,6 +297,9 @@ def cmd_import(config: Config, auto_only: bool, dry_run: bool) -> int:
         base_url=config.firefly.base_url,
         token=config.firefly.token,
     )
+    
+    # Use override if provided, otherwise use config
+    default_source_account = source_account_override or config.firefly.default_source_account
 
     if not firefly.test_connection():
         print("❌ Failed to connect to Firefly III")
@@ -303,16 +318,16 @@ def cmd_import(config: Config, auto_only: bool, dry_run: bool) -> int:
                 SELECT e.* FROM extractions e
                 LEFT JOIN imports i ON e.external_id = i.external_id
                 WHERE e.review_state = 'AUTO'
-                AND i.id IS NULL
+                AND (i.id IS NULL OR i.status = 'FAILED')
             """
             ).fetchall()
         else:
-            # AUTO + reviewed/accepted
+            # AUTO + reviewed/accepted (includes failed imports for retry)
             rows = conn.execute(
                 """
                 SELECT e.* FROM extractions e
                 LEFT JOIN imports i ON e.external_id = i.external_id
-                WHERE i.id IS NULL
+                WHERE (i.id IS NULL OR i.status = 'FAILED')
                 AND (e.review_state = 'AUTO' OR e.review_decision IN ('ACCEPTED', 'EDITED'))
             """
             ).fetchall()
@@ -348,7 +363,7 @@ def cmd_import(config: Config, auto_only: bool, dry_run: bool) -> int:
             # Build Firefly payload
             payload = build_firefly_payload(
                 ext,
-                default_source_account=config.firefly.default_source_account,
+                default_source_account=default_source_account,
                 paperless_base_url=config.paperless.base_url,
             )
 
@@ -391,7 +406,7 @@ def cmd_import(config: Config, auto_only: bool, dry_run: bool) -> int:
             failed += 1
 
     print(f"\n✓ Imported: {imported}, Failed: {failed}")
-    return 0 if failed == 0 else 1
+    return failed  # Return actual failure count
 
 
 def cmd_pipeline(config: Config, tag: str, auto_only: bool, limit: int) -> int:

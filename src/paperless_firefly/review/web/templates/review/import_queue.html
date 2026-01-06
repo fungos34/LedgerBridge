@@ -218,6 +218,7 @@
                 <th>Amount</th>
                 <th>Date</th>
                 <th>Error</th>
+                <th>Actions</th>
             </tr>
         </thead>
         <tbody>
@@ -231,12 +232,20 @@
                 <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; color: #991b1b;">
                     {{ item.error_message|default:"Unknown error" }}
                 </td>
+                <td>
+                    <form method="post" action="{% url 'dismiss_import' item.external_id %}" style="display: inline;">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-sm" style="background: #fee2e2; color: #991b1b;" title="Reject this extraction and remove from retry queue">
+                            ✕ Dismiss
+                        </button>
+                    </form>
+                </td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
     <div style="padding: 0.75rem 1rem; background: #fef2f2; font-size: 0.875rem; color: #7f1d1d;">
-        💡 Tip: These items will be retried when you click "Import All to Firefly"
+        💡 Tip: These items will be retried when you click "Import All to Firefly". Click "Dismiss" to reject and skip permanently.
     </div>
 </div>
 {% endif %}

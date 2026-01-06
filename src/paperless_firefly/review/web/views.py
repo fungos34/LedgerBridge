@@ -699,6 +699,15 @@ def run_import(request: HttpRequest) -> HttpResponse:
 
     # Get selected items or import all
     selected_ids = request.POST.getlist("selected_ids")
+    
+    # Capture user's source account preference before starting thread
+    user_source_account = None
+    try:
+        profile = request.user.profile
+        if profile.default_source_account:
+            user_source_account = profile.default_source_account
+    except Exception:
+        pass  # User may not have profile
 
     def do_import():
         global _import_status
@@ -723,7 +732,12 @@ def run_import(request: HttpRequest) -> HttpResponse:
             config = load_config(config_path)
 
             _import_status["progress"] = "Importing to Firefly III..."
-            result = cmd_import(config, auto_only=False, dry_run=False)
+            result = cmd_import(
+                config,
+                auto_only=False,
+                dry_run=False,
+                source_account_override=user_source_account,
+            )
 
             if result == 0:
                 _import_status["result"] = "Import completed successfully"
@@ -743,6 +757,34 @@ def run_import(request: HttpRequest) -> HttpResponse:
     thread.start()
 
     messages.info(request, "Import started in background. Refresh to see progress.")
+    return redirect("import_queue")
+
+
+@login_required
+@require_http_methods(["POST"])
+def dismiss_failed_import(request: HttpRequest, external_id: str) -> HttpResponse:
+    """Dismiss a failed import by rejecting the extraction (won't be retried)."""
+    store = _get_store()
+    
+    # Find the extraction by external_id
+    conn = store._get_connection()
+    try:
+        row = conn.execute(
+            "SELECT id FROM extractions WHERE external_id = ?",
+            (external_id,)
+        ).fetchone()
+        
+        if row:
+            # Mark extraction as rejected so it won't be imported
+            store.update_extraction_review(row["id"], ReviewDecision.REJECTED.value)
+            # Delete the failed import record
+            store.delete_import(external_id)
+            messages.success(request, "Failed import dismissed. The extraction has been rejected.")
+        else:
+            messages.error(request, "Extraction not found.")
+    finally:
+        conn.close()
+    
     return redirect("import_queue")
 
 

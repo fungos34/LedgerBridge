@@ -207,6 +207,7 @@
     <!-- Edit Form -->
     <div>
         <form method="post" action="{% url 'save' record.id %}">
+            {% csrf_token %}
             <div class="card">
                 <div class="card-header">
                     <h2>Transaction Details</h2>
