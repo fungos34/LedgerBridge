@@ -320,6 +320,18 @@ def cmd_import(config: Config, auto_only: bool, dry_run: bool) -> int:
             from ..schemas.finance_extraction import FinanceExtraction
             ext = FinanceExtraction.from_dict(extraction)
             
+            external_id = ext.proposal.external_id
+            
+            # Check if already imported (safety check) - includes failed imports
+            existing_import = store.get_import_by_external_id(external_id)
+            if existing_import:
+                if existing_import.status == ImportStatus.IMPORTED.value:
+                    print(f"  ⏭ [{ext.paperless_document_id}] Already imported")
+                    continue
+                elif existing_import.status == ImportStatus.FAILED.value:
+                    # Reset failed imports so they can be retried
+                    store.delete_import(external_id)
+            
             # Build Firefly payload
             payload = build_firefly_payload(
                 ext,
@@ -327,18 +339,11 @@ def cmd_import(config: Config, auto_only: bool, dry_run: bool) -> int:
                 paperless_base_url=config.paperless.base_url,
             )
             
-            external_id = ext.proposal.external_id
-            
             print(f"  📤 [{ext.paperless_document_id}] {ext.proposal.description}")
             print(f"     → {ext.proposal.amount} {ext.proposal.currency} on {ext.proposal.date}")
             
             if dry_run:
                 print("     → [DRY RUN] Would import")
-                continue
-            
-            # Check if already imported (safety check)
-            if store.is_imported(external_id):
-                print("     ⏭ Already imported")
                 continue
             
             # Create import record
@@ -363,8 +368,12 @@ def cmd_import(config: Config, auto_only: bool, dry_run: bool) -> int:
         except Exception as e:
             logger.exception("Import failed")
             print(f"     ❌ Error: {e}")
-            if not dry_run:
-                store.update_import_failed(row["external_id"], str(e))
+            if not dry_run and row.get("external_id"):
+                # Only update if import record exists
+                try:
+                    store.update_import_failed(row["external_id"], str(e))
+                except Exception:
+                    pass  # Import record may not exist
             failed += 1
     
     print(f"\n✓ Imported: {imported}, Failed: {failed}")

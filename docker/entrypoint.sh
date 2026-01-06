@@ -85,6 +85,38 @@ from paperless_firefly.state_store import StateStore
 store = StateStore('${STATE_DB_PATH}')
 print('Database initialized successfully')
 "
+    
+    # Run Django migrations for auth database
+    log_info "Running Django migrations..."
+    python -c "
+import django
+from django.conf import settings
+import os
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'paperless_firefly.review.web.settings')
+django.setup()
+from django.core.management import call_command
+call_command('migrate', '--run-syncdb', verbosity=0)
+print('Django migrations complete')
+"
+    
+    # Create default admin user if not exists
+    if [ -n "$ADMIN_USERNAME" ] && [ -n "$ADMIN_PASSWORD" ]; then
+        log_info "Creating admin user..."
+        python -c "
+import django
+import os
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'paperless_firefly.review.web.settings')
+django.setup()
+from django.contrib.auth.models import User
+username = '${ADMIN_USERNAME}'
+password = '${ADMIN_PASSWORD}'
+if not User.objects.filter(username=username).exists():
+    User.objects.create_superuser(username, '', password)
+    print(f'Admin user {username} created')
+else:
+    print(f'Admin user {username} already exists')
+"
+    fi
 }
 
 # Run the web server (review interface)

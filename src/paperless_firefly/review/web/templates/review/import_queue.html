@@ -1,0 +1,306 @@
+{% extends "review/base.html" %}
+
+{% block title %}Import Queue - LedgerBridge{% endblock %}
+
+{% block extra_css %}
+<style>
+    .queue-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+        flex-wrap: wrap;
+        gap: 1rem;
+    }
+    
+    .queue-actions {
+        display: flex;
+        gap: 0.5rem;
+    }
+    
+    .status-banner {
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin-bottom: 1.5rem;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }
+    
+    .status-banner.running {
+        background: #dbeafe;
+        border: 1px solid #93c5fd;
+        color: #1e40af;
+    }
+    
+    .status-banner.success {
+        background: #d1fae5;
+        border: 1px solid #6ee7b7;
+        color: #065f46;
+    }
+    
+    .status-banner.error {
+        background: #fee2e2;
+        border: 1px solid #fca5a5;
+        color: #991b1b;
+    }
+    
+    .spinner {
+        animation: spin 1s linear infinite;
+    }
+    
+    @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
+    
+    .queue-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    
+    .queue-table th,
+    .queue-table td {
+        padding: 0.75rem;
+        text-align: left;
+        border-bottom: 1px solid var(--gray-200);
+    }
+    
+    .queue-table th {
+        background: var(--gray-50);
+        font-weight: 600;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+    
+    .queue-table tr:hover {
+        background: var(--gray-50);
+    }
+    
+    .amount-cell {
+        font-family: monospace;
+        font-weight: 600;
+    }
+    
+    .status-badge {
+        display: inline-block;
+        padding: 0.25rem 0.5rem;
+        border-radius: 0.25rem;
+        font-size: 0.75rem;
+        font-weight: 500;
+    }
+    
+    .status-badge.auto {
+        background: #d1fae5;
+        color: #065f46;
+    }
+    
+    .status-badge.accepted {
+        background: #dbeafe;
+        color: #1e40af;
+    }
+    
+    .status-badge.edited {
+        background: #fef3c7;
+        color: #92400e;
+    }
+    
+    .status-badge.imported {
+        background: #d1fae5;
+        color: #065f46;
+    }
+    
+    .status-badge.failed {
+        background: #fee2e2;
+        color: #991b1b;
+    }
+    
+    .status-badge.pending {
+        background: var(--gray-100);
+        color: var(--gray-700);
+    }
+    
+    .section-title {
+        font-size: 1rem;
+        font-weight: 600;
+        margin: 2rem 0 1rem;
+        color: var(--gray-700);
+    }
+    
+    .empty-state {
+        text-align: center;
+        padding: 3rem;
+        color: var(--gray-500);
+    }
+    
+    .empty-state-icon {
+        font-size: 3rem;
+        margin-bottom: 1rem;
+    }
+    
+    .checkbox-cell {
+        width: 40px;
+    }
+    
+    .select-all-row {
+        background: var(--gray-50);
+    }
+    
+    @media (max-width: 768px) {
+        .queue-table {
+            display: block;
+            overflow-x: auto;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="queue-header">
+    <h1>📤 Import Queue</h1>
+    <div class="queue-actions">
+        <a href="{% url 'home' %}" class="btn btn-outline">← Back</a>
+        {% if ready_items %}
+        <form method="post" action="{% url 'run_import' %}" style="display: inline;">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-primary" {% if import_status.running %}disabled{% endif %}>
+                {% if import_status.running %}
+                <span class="spinner">⏳</span> Importing...
+                {% else %}
+                Import All to Firefly →
+                {% endif %}
+            </button>
+        </form>
+        {% endif %}
+    </div>
+</div>
+
+{% if import_status.running %}
+<div class="status-banner running">
+    <span class="spinner">🔄</span>
+    <div>
+        <strong>Import in progress...</strong>
+        <div>{{ import_status.progress }}</div>
+    </div>
+</div>
+{% elif import_status.error %}
+<div class="status-banner error">
+    <span>❌</span>
+    <div>
+        <strong>Import failed</strong>
+        <div>{{ import_status.error }}</div>
+    </div>
+</div>
+{% elif import_status.result %}
+<div class="status-banner success">
+    <span>✅</span>
+    <div>{{ import_status.result }}</div>
+</div>
+{% endif %}
+
+<div class="card">
+    <div class="card-header">
+        <h2>Ready to Import ({{ ready_items|length }})</h2>
+    </div>
+    
+    {% if ready_items %}
+    <table class="queue-table">
+        <thead>
+            <tr>
+                <th>Document</th>
+                <th>Amount</th>
+                <th>Date</th>
+                <th>Vendor</th>
+                <th>Source</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in ready_items %}
+            <tr>
+                <td>
+                    <a href="{% url 'detail' item.id %}">{{ item.title|truncatechars:40 }}</a>
+                </td>
+                <td class="amount-cell">{{ item.amount }} {{ item.currency }}</td>
+                <td>{{ item.date }}</td>
+                <td>{{ item.vendor|default:"-" }}</td>
+                <td>{{ item.source_account }}</td>
+                <td>
+                    {% if item.review_state == 'AUTO' %}
+                    <span class="status-badge auto">AUTO</span>
+                    {% elif item.review_decision == 'ACCEPTED' %}
+                    <span class="status-badge accepted">Accepted</span>
+                    {% elif item.review_decision == 'EDITED' %}
+                    <span class="status-badge edited">Edited</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-state-icon">📭</div>
+        <div>No transactions ready for import</div>
+        <p>Review pending extractions or run a new extraction</p>
+        <a href="{% url 'list' %}" class="btn btn-primary" style="margin-top: 1rem;">Go to Review Queue</a>
+    </div>
+    {% endif %}
+</div>
+
+{% if recent_imports %}
+<h3 class="section-title">Recent Import History</h3>
+<div class="card">
+    <table class="queue-table">
+        <thead>
+            <tr>
+                <th>Document</th>
+                <th>Status</th>
+                <th>Firefly ID</th>
+                <th>Error</th>
+                <th>Date</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for imp in recent_imports %}
+            <tr>
+                <td>Doc #{{ imp.document_id }}</td>
+                <td>
+                    {% if imp.status == 'IMPORTED' %}
+                    <span class="status-badge imported">✓ Imported</span>
+                    {% elif imp.status == 'FAILED' %}
+                    <span class="status-badge failed">✗ Failed</span>
+                    {% else %}
+                    <span class="status-badge pending">Pending</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if imp.firefly_id %}
+                    <a href="{{ firefly_url }}/transactions/show/{{ imp.firefly_id }}" target="_blank">
+                        #{{ imp.firefly_id }}
+                    </a>
+                    {% else %}
+                    -
+                    {% endif %}
+                </td>
+                <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis;">
+                    {{ imp.error_message|default:"-" }}
+                </td>
+                <td>{{ imp.created_at|slice:":10" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{% if import_status.running %}
+<script>
+// Auto-refresh while import is running
+setTimeout(function() {
+    window.location.reload();
+}, 3000);
+</script>
+{% endif %}
+{% endblock %}

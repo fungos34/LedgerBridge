@@ -3,13 +3,29 @@ URL configuration for the review web interface.
 """
 
 from django.urls import path
+from django.contrib.auth import views as auth_views
 from . import views
 
 # Note: No app_name since this is the ROOT_URLCONF
 
 urlpatterns = [
+    # Landing page / Home
+    path("", views.landing_page, name="home"),
+    
+    # Authentication
+    path("login/", auth_views.LoginView.as_view(template_name="review/login.html"), name="login"),
+    path("logout/", auth_views.LogoutView.as_view(), name="logout"),
+    path("settings/", views.user_settings, name="settings"),
+    
     # Main review queue
-    path("", views.review_list, name="list"),
+    path("review/", views.review_list, name="list"),
+    
+    # Import queue
+    path("import-queue/", views.import_queue, name="import_queue"),
+    path("import-queue/import/", views.run_import, name="run_import"),
+    
+    # Extraction from Paperless
+    path("extract/", views.run_extract, name="run_extract"),
     
     # Single extraction review
     path("extraction/<int:extraction_id>/", views.review_detail, name="detail"),
@@ -27,4 +43,6 @@ urlpatterns = [
     # API endpoints for AJAX
     path("api/extraction/<int:extraction_id>/", views.api_extraction_detail, name="api_detail"),
     path("api/stats/", views.api_stats, name="api_stats"),
+    path("api/accounts/", views.api_firefly_accounts, name="api_accounts"),
+    path("api/extract/status/", views.api_extract_status, name="api_extract_status"),
 ]

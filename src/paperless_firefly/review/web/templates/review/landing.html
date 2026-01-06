@@ -1,0 +1,214 @@
+{% extends "review/base.html" %}
+
+{% block title %}LedgerBridge - Home{% endblock %}
+
+{% block extra_css %}
+<style>
+    .landing-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 1.5rem;
+        margin-top: 1.5rem;
+    }
+    
+    .service-card {
+        background: white;
+        border-radius: 0.75rem;
+        padding: 1.5rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        transition: transform 0.2s, box-shadow 0.2s;
+        text-decoration: none;
+        color: inherit;
+        display: block;
+    }
+    
+    .service-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    
+    .service-card.primary {
+        border: 2px solid var(--primary);
+        background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+    }
+    
+    .service-icon {
+        font-size: 2.5rem;
+        margin-bottom: 0.75rem;
+    }
+    
+    .service-title {
+        font-size: 1.25rem;
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+    }
+    
+    .service-desc {
+        color: var(--gray-600);
+        font-size: 0.875rem;
+        margin-bottom: 1rem;
+    }
+    
+    .service-badge {
+        display: inline-block;
+        padding: 0.25rem 0.75rem;
+        border-radius: 9999px;
+        font-size: 0.75rem;
+        font-weight: 600;
+    }
+    
+    .service-badge.pending {
+        background: #fef3c7;
+        color: #92400e;
+    }
+    
+    .service-badge.ready {
+        background: #d1fae5;
+        color: #065f46;
+    }
+    
+    .quick-stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 1rem;
+        margin-bottom: 2rem;
+    }
+    
+    .stat-box {
+        background: white;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        text-align: center;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    }
+    
+    .stat-value {
+        font-size: 1.75rem;
+        font-weight: 700;
+        color: var(--primary);
+    }
+    
+    .stat-label {
+        font-size: 0.75rem;
+        color: var(--gray-500);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+    
+    .welcome-header {
+        margin-bottom: 2rem;
+    }
+    
+    .welcome-header h1 {
+        font-size: 1.75rem;
+        margin-bottom: 0.5rem;
+    }
+    
+    .welcome-header p {
+        color: var(--gray-600);
+    }
+    
+    @media (max-width: 640px) {
+        .landing-grid {
+            grid-template-columns: 1fr;
+        }
+        
+        .quick-stats {
+            grid-template-columns: repeat(2, 1fr);
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="welcome-header">
+    <h1>👋 Welcome, {{ user.username }}!</h1>
+    <p>Manage your document-to-finance pipeline</p>
+</div>
+
+<div class="quick-stats">
+    <div class="stat-box">
+        <div class="stat-value">{{ pending_count }}</div>
+        <div class="stat-label">Pending Review</div>
+    </div>
+    <div class="stat-box">
+        <div class="stat-value">{{ ready_to_import }}</div>
+        <div class="stat-label">Ready to Import</div>
+    </div>
+    <div class="stat-box">
+        <div class="stat-value">{{ stats.extractions_total }}</div>
+        <div class="stat-label">Total Extracted</div>
+    </div>
+    <div class="stat-box">
+        <div class="stat-value">{{ stats.imports_success }}</div>
+        <div class="stat-label">Imported</div>
+    </div>
+</div>
+
+<div class="landing-grid">
+    <!-- Review Queue -->
+    <a href="{% url 'list' %}" class="service-card primary">
+        <div class="service-icon">📋</div>
+        <div class="service-title">Review Queue</div>
+        <div class="service-desc">Review and approve extracted transactions from your documents</div>
+        {% if pending_count > 0 %}
+        <span class="service-badge pending">{{ pending_count }} pending</span>
+        {% else %}
+        <span class="service-badge ready">All clear!</span>
+        {% endif %}
+    </a>
+    
+    <!-- Import Queue -->
+    <a href="{% url 'import_queue' %}" class="service-card primary">
+        <div class="service-icon">📤</div>
+        <div class="service-title">Import to Firefly</div>
+        <div class="service-desc">Send approved transactions to Firefly III</div>
+        {% if ready_to_import > 0 %}
+        <span class="service-badge ready">{{ ready_to_import }} ready</span>
+        {% endif %}
+    </a>
+    
+    <!-- Paperless -->
+    {% if paperless_url %}
+    <a href="{{ paperless_url }}" target="_blank" class="service-card">
+        <div class="service-icon">📄</div>
+        <div class="service-title">Paperless-ngx</div>
+        <div class="service-desc">Document management and OCR processing</div>
+    </a>
+    {% endif %}
+    
+    <!-- Firefly III -->
+    {% if firefly_url %}
+    <a href="{{ firefly_url }}" target="_blank" class="service-card">
+        <div class="service-icon">💰</div>
+        <div class="service-title">Firefly III</div>
+        <div class="service-desc">Personal finance manager</div>
+    </a>
+    {% endif %}
+    
+    <!-- Firefly Importer -->
+    {% if firefly_importer_url %}
+    <a href="{{ firefly_importer_url }}" target="_blank" class="service-card">
+        <div class="service-icon">📥</div>
+        <div class="service-title">Firefly Importer</div>
+        <div class="service-desc">Import bank statements and CSV files</div>
+    </a>
+    {% endif %}
+    
+    <!-- Syncthing -->
+    {% if syncthing_url %}
+    <a href="{{ syncthing_url }}" target="_blank" class="service-card">
+        <div class="service-icon">🔄</div>
+        <div class="service-title">Syncthing</div>
+        <div class="service-desc">File synchronization between devices</div>
+    </a>
+    {% endif %}
+    
+    <!-- Settings -->
+    <a href="{% url 'settings' %}" class="service-card">
+        <div class="service-icon">⚙️</div>
+        <div class="service-title">Settings</div>
+        <div class="service-desc">Configure API tokens and preferences</div>
+    </a>
+</div>
+{% endblock %}

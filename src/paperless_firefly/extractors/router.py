@@ -20,6 +20,7 @@ from ..schemas.dedupe import generate_external_id
 from ..paperless_client import PaperlessDocument
 from .base import BaseExtractor, ExtractionResult
 from .ocr_extractor import OCRTextExtractor
+from .einvoice_extractor import EInvoiceExtractor
 
 
 class ExtractorRouter:
@@ -27,19 +28,19 @@ class ExtractorRouter:
     Routes extraction to the appropriate strategy.
     
     Tries extractors in priority order:
-    1. Structured XML (Factur-X, UBL) - highest confidence
-    2. PDF text layer - medium confidence
+    1. E-Invoice XML (ZUGFeRD, Factur-X, UBL, XRechnung) - highest confidence
+    2. PDF text layer - medium confidence  
     3. OCR text heuristics - lowest confidence
     """
     
-    VERSION = "0.1.0"
+    VERSION = "0.2.0"
     
     def __init__(self):
         """Initialize with default extractors."""
         self.extractors: list[BaseExtractor] = [
-            # Add more extractors here as they are implemented
-            # FacturXExtractor(),
-            # PDFTextExtractor(),
+            # E-invoice extractors (highest priority)
+            EInvoiceExtractor(),
+            # OCR fallback (lowest priority)
             OCRTextExtractor(),
         ]
         # Sort by priority (highest first)

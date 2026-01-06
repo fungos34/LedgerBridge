@@ -361,23 +361,124 @@
         .gap-4 { gap: 1rem; }
         .items-center { align-items: center; }
         .justify-between { justify-content: space-between; }
+        
+        /* Navigation */
+        nav.main-nav {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+        
+        nav.main-nav a {
+            color: var(--gray-700);
+            text-decoration: none;
+            font-size: 0.875rem;
+            padding: 0.5rem 0.75rem;
+            border-radius: 0.375rem;
+            transition: background 0.15s;
+        }
+        
+        nav.main-nav a:hover {
+            background: var(--gray-100);
+        }
+        
+        nav.main-nav a.active {
+            background: var(--primary);
+            color: white;
+        }
+        
+        .user-menu {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-size: 0.875rem;
+        }
+        
+        .user-name {
+            color: var(--gray-600);
+        }
+        
+        /* Messages */
+        .messages {
+            margin-bottom: 1rem;
+        }
+        
+        .message {
+            padding: 0.75rem 1rem;
+            border-radius: 0.375rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .message.success {
+            background: #d1fae5;
+            color: #065f46;
+            border: 1px solid #6ee7b7;
+        }
+        
+        .message.error {
+            background: #fee2e2;
+            color: #991b1b;
+            border: 1px solid #fca5a5;
+        }
+        
+        .message.warning {
+            background: #fef3c7;
+            color: #92400e;
+            border: 1px solid #fcd34d;
+        }
+        
+        .message.info {
+            background: #dbeafe;
+            color: #1e40af;
+            border: 1px solid #93c5fd;
+        }
+        
+        @media (max-width: 768px) {
+            header .container {
+                flex-direction: column;
+                gap: 1rem;
+            }
+            
+            nav.main-nav {
+                flex-wrap: wrap;
+                justify-content: center;
+            }
+        }
     </style>
     {% block extra_css %}{% endblock %}
 </head>
 <body>
     <header>
         <div class="container">
-            <h1>📄 Paperless → Firefly <span>Review Queue</span></h1>
-            <nav class="stats">
-                <div class="stat">
-                    <span class="stat-value" id="pending-count">{% block pending_count %}0{% endblock %}</span>
-                    <span class="stat-label">pending</span>
-                </div>
+            <a href="{% url 'home' %}" style="text-decoration: none; color: inherit;">
+                <h1>🌉 LedgerBridge</h1>
+            </a>
+            <nav class="main-nav">
+                {% if user.is_authenticated %}
+                <a href="{% url 'home' %}" {% if request.path == '/' %}class="active"{% endif %}>Home</a>
+                <a href="{% url 'list' %}" {% if '/review' in request.path %}class="active"{% endif %}>Review</a>
+                <a href="{% url 'import_queue' %}" {% if '/import' in request.path %}class="active"{% endif %}>Import</a>
+                <a href="{% url 'settings' %}" {% if '/settings' in request.path %}class="active"{% endif %}>Settings</a>
+                {% endif %}
             </nav>
+            <div class="user-menu">
+                {% if user.is_authenticated %}
+                <span class="user-name">{{ user.username }}</span>
+                <a href="{% url 'logout' %}" class="btn btn-sm btn-outline">Logout</a>
+                {% endif %}
+            </div>
         </div>
     </header>
     
     <main class="container">
+        {% if messages %}
+        <div class="messages">
+            {% for message in messages %}
+            <div class="message {{ message.tags }}">{{ message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        
         {% block content %}{% endblock %}
     </main>
     

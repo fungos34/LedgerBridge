@@ -15,15 +15,28 @@ services:
       - "${PF_PORT:-8080}:8080"
     
     environment:
-      # Paperless connection
+      # Paperless connection (internal Docker URLs)
       - PAPERLESS_URL=${PAPERLESS_URL:?PAPERLESS_URL is required}
       - PAPERLESS_TOKEN=${PAPERLESS_TOKEN:?PAPERLESS_TOKEN is required}
       - PAPERLESS_FILTER_TAG=${PAPERLESS_FILTER_TAG:-finance/inbox}
       
-      # Firefly III connection
+      # External URLs for browser links (what users actually access)
+      - PAPERLESS_EXTERNAL_URL=${PAPERLESS_EXTERNAL_URL:-${PAPERLESS_URL}}
+      - FIREFLY_EXTERNAL_URL=${FIREFLY_EXTERNAL_URL:-${FIREFLY_URL}}
+      
+      # Firefly III connection (internal Docker URLs)
       - FIREFLY_URL=${FIREFLY_URL:?FIREFLY_URL is required}
       - FIREFLY_TOKEN=${FIREFLY_TOKEN:?FIREFLY_TOKEN is required}
       - FIREFLY_DEFAULT_ACCOUNT=${FIREFLY_DEFAULT_ACCOUNT:-Checking Account}
+      
+      # Optional service links for landing page
+      - SYNCTHING_URL=${SYNCTHING_URL:-}
+      - FIREFLY_IMPORTER_URL=${FIREFLY_IMPORTER_URL:-}
+      
+      # Authentication - default admin user
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:-change-me-in-production}
       
       # Confidence thresholds
       - CONFIDENCE_AUTO_THRESHOLD=${CONFIDENCE_AUTO_THRESHOLD:-0.85}

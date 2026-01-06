@@ -1,17 +1,83 @@
 {% extends "review/base.html" %}
 
 {% block title %}Review Queue{% endblock %}
-{% block pending_count %}{{ extractions|length }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .queue-actions {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+    }
+    
+    .status-banner {
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin-bottom: 1.5rem;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }
+    
+    .status-banner.running {
+        background: #dbeafe;
+        border: 1px solid #93c5fd;
+        color: #1e40af;
+    }
+    
+    .spinner {
+        animation: spin 1s linear infinite;
+        display: inline-block;
+    }
+    
+    @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
+</style>
+{% endblock %}
 
 {% block content %}
+{% if extraction_status.running %}
+<div class="status-banner running">
+    <span class="spinner">🔄</span>
+    <div>
+        <strong>Extraction in progress...</strong>
+        <div>{{ extraction_status.progress }}</div>
+    </div>
+</div>
+{% elif extraction_status.error %}
+<div class="status-banner" style="background: #fee2e2; border: 1px solid #fca5a5; color: #991b1b;">
+    <span>❌</span>
+    <div>
+        <strong>Extraction failed</strong>
+        <div>{{ extraction_status.error }}</div>
+    </div>
+</div>
+{% endif %}
+
 <div class="card">
     <div class="card-header">
         <h2>Pending Review ({{ extractions|length }})</h2>
-        {% if extractions %}
-        <a href="{% url 'detail' extractions.0.id %}" class="btn btn-primary">
-            Start Review →
-        </a>
-        {% endif %}
+        <div class="queue-actions">
+            <form method="post" action="{% url 'run_extract' %}" style="display: inline;">
+                {% csrf_token %}
+                <input type="hidden" name="tag" value="finance/inbox">
+                <input type="hidden" name="limit" value="10">
+                <button type="submit" class="btn btn-secondary" {% if extraction_status.running %}disabled{% endif %}>
+                    {% if extraction_status.running %}
+                    <span class="spinner">⏳</span> Extracting...
+                    {% else %}
+                    🔄 Extract from Paperless
+                    {% endif %}
+                </button>
+            </form>
+            {% if extractions %}
+            <a href="{% url 'detail' extractions.0.id %}" class="btn btn-primary">
+                Start Review →
+            </a>
+            {% endif %}
+        </div>
     </div>
     
     {% if extractions %}
@@ -69,11 +135,27 @@
         <h3>🎉 All caught up!</h3>
         <p>No extractions pending review.</p>
         <p class="mt-4">
-            <a href="{% url 'list' %}" class="btn btn-secondary">Refresh</a>
+            <form method="post" action="{% url 'run_extract' %}" style="display: inline;">
+                {% csrf_token %}
+                <input type="hidden" name="tag" value="finance/inbox">
+                <input type="hidden" name="limit" value="10">
+                <button type="submit" class="btn btn-primary" {% if extraction_status.running %}disabled{% endif %}>
+                    🔄 Extract from Paperless
+                </button>
+            </form>
         </p>
     </div>
     {% endif %}
 </div>
+
+{% if extraction_status.running %}
+<script>
+// Auto-refresh while extraction is running
+setTimeout(function() {
+    window.location.reload();
+}, 3000);
+</script>
+{% endif %}
 
 {% if stats %}
 <div class="grid grid-2 mt-4">

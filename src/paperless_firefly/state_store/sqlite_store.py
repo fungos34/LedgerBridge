@@ -444,6 +444,15 @@ class StateStore:
             ).fetchone()
             return row is not None
     
+    def delete_import(self, external_id: str) -> bool:
+        """Delete an import record. Returns True if deleted."""
+        with self._transaction() as conn:
+            cursor = conn.execute(
+                "DELETE FROM imports WHERE external_id = ?",
+                (external_id,)
+            )
+            return cursor.rowcount > 0
+    
     def get_pending_imports(self) -> list[ImportRecord]:
         """Get all pending imports."""
         with self._transaction() as conn:
