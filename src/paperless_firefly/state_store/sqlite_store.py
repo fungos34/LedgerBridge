@@ -15,11 +15,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Optional, Iterator, Any
+from typing import Any, Iterator, Optional
 
 
 class ImportStatus(str, Enum):
     """Status of a Firefly import."""
+
     PENDING = "PENDING"
     IMPORTED = "IMPORTED"
     FAILED = "FAILED"
@@ -30,6 +31,7 @@ class ImportStatus(str, Enum):
 @dataclass
 class DocumentRecord:
     """Record of a processed Paperless document."""
+
     document_id: int
     source_hash: str
     title: Optional[str]
@@ -38,7 +40,7 @@ class DocumentRecord:
     tags: list[str]
     first_seen: str  # ISO timestamp
     last_seen: str  # ISO timestamp
-    
+
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "DocumentRecord":
         """Create from database row."""
@@ -57,6 +59,7 @@ class DocumentRecord:
 @dataclass
 class ExtractionRecord:
     """Record of a finance extraction."""
+
     id: int
     document_id: int
     external_id: str
@@ -66,7 +69,7 @@ class ExtractionRecord:
     created_at: str
     reviewed_at: Optional[str]
     review_decision: Optional[str]  # ACCEPTED, REJECTED, EDITED
-    
+
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "ExtractionRecord":
         """Create from database row."""
@@ -86,6 +89,7 @@ class ExtractionRecord:
 @dataclass
 class ImportRecord:
     """Record of a Firefly III import."""
+
     id: int
     external_id: str
     document_id: int
@@ -95,7 +99,7 @@ class ImportRecord:
     payload_json: str
     created_at: str
     imported_at: Optional[str]
-    
+
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "ImportRecord":
         """Create from database row."""
@@ -115,35 +119,35 @@ class ImportRecord:
 class StateStore:
     """
     SQLite-based state store for the pipeline.
-    
+
     Provides persistent tracking of:
     - Processed documents
     - Generated extractions
     - Firefly imports
-    
+
     Thread-safe for single-writer scenarios.
     """
-    
+
     SCHEMA_VERSION = 1
-    
+
     def __init__(self, db_path: Path | str):
         """
         Initialize state store.
-        
+
         Args:
             db_path: Path to SQLite database file
         """
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
-    
+
     def _get_connection(self) -> sqlite3.Connection:
         """Get a database connection with row factory."""
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         return conn
-    
+
     @contextmanager
     def _transaction(self) -> Iterator[sqlite3.Connection]:
         """Context manager for database transactions."""
@@ -156,19 +160,22 @@ class StateStore:
             raise
         finally:
             conn.close()
-    
+
     def _init_db(self) -> None:
         """Initialize database schema."""
         with self._transaction() as conn:
             # Schema version tracking
-            conn.execute("""
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS schema_version (
                     version INTEGER PRIMARY KEY
                 )
-            """)
-            
+            """
+            )
+
             # Paperless documents table
-            conn.execute("""
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS paperless_documents (
                     document_id INTEGER PRIMARY KEY,
                     source_hash TEXT NOT NULL,
@@ -179,10 +186,12 @@ class StateStore:
                     first_seen TEXT NOT NULL,
                     last_seen TEXT NOT NULL
                 )
-            """)
-            
+            """
+            )
+
             # Extractions table
-            conn.execute("""
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS extractions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     document_id INTEGER NOT NULL,
@@ -195,10 +204,12 @@ class StateStore:
                     review_decision TEXT,
                     FOREIGN KEY (document_id) REFERENCES paperless_documents(document_id)
                 )
-            """)
-            
+            """
+            )
+
             # Imports table
-            conn.execute("""
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS imports (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     external_id TEXT NOT NULL UNIQUE,
@@ -211,10 +222,12 @@ class StateStore:
                     imported_at TEXT,
                     FOREIGN KEY (document_id) REFERENCES paperless_documents(document_id)
                 )
-            """)
-            
+            """
+            )
+
             # Bank matches table (optional, for future use)
-            conn.execute("""
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS bank_matches (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     document_id INTEGER,
@@ -224,10 +237,12 @@ class StateStore:
                     matched_at TEXT NOT NULL,
                     FOREIGN KEY (document_id) REFERENCES paperless_documents(document_id)
                 )
-            """)
-            
+            """
+            )
+
             # Vendor mappings (learning from user edits)
-            conn.execute("""
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS vendor_mappings (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     vendor_pattern TEXT NOT NULL UNIQUE,
@@ -238,18 +253,25 @@ class StateStore:
                     updated_at TEXT NOT NULL,
                     use_count INTEGER DEFAULT 1
                 )
-            """)
-            
+            """
+            )
+
             # Create indexes
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_extractions_document_id ON extractions(document_id)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_imports_document_id ON imports(document_id)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_extractions_document_id ON extractions(document_id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_imports_document_id ON imports(document_id)"
+            )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_imports_status ON imports(status)")
-            
+
             # Set schema version
-            conn.execute("INSERT OR REPLACE INTO schema_version (version) VALUES (?)", (self.SCHEMA_VERSION,))
-    
+            conn.execute(
+                "INSERT OR REPLACE INTO schema_version (version) VALUES (?)", (self.SCHEMA_VERSION,)
+            )
+
     # Document methods
-    
+
     def upsert_document(
         self,
         document_id: int,
@@ -262,48 +284,60 @@ class StateStore:
         """Insert or update a document record."""
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         tags_json = json.dumps(tags or [])
-        
+
         with self._transaction() as conn:
             # Check if exists
             existing = conn.execute(
-                "SELECT first_seen FROM paperless_documents WHERE document_id = ?",
-                (document_id,)
+                "SELECT first_seen FROM paperless_documents WHERE document_id = ?", (document_id,)
             ).fetchone()
-            
+
             if existing:
-                conn.execute("""
+                conn.execute(
+                    """
                     UPDATE paperless_documents
                     SET source_hash = ?, title = ?, document_type = ?, correspondent = ?,
                         tags = ?, last_seen = ?
                     WHERE document_id = ?
-                """, (source_hash, title, document_type, correspondent, tags_json, now, document_id))
+                """,
+                    (source_hash, title, document_type, correspondent, tags_json, now, document_id),
+                )
             else:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO paperless_documents
                     (document_id, source_hash, title, document_type, correspondent, tags, first_seen, last_seen)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (document_id, source_hash, title, document_type, correspondent, tags_json, now, now))
-    
+                """,
+                    (
+                        document_id,
+                        source_hash,
+                        title,
+                        document_type,
+                        correspondent,
+                        tags_json,
+                        now,
+                        now,
+                    ),
+                )
+
     def get_document(self, document_id: int) -> Optional[DocumentRecord]:
         """Get a document record by ID."""
         with self._transaction() as conn:
             row = conn.execute(
-                "SELECT * FROM paperless_documents WHERE document_id = ?",
-                (document_id,)
+                "SELECT * FROM paperless_documents WHERE document_id = ?", (document_id,)
             ).fetchone()
             return DocumentRecord.from_row(row) if row else None
-    
+
     def document_exists(self, document_id: int) -> bool:
         """Check if a document has been processed."""
         with self._transaction() as conn:
             row = conn.execute(
-                "SELECT 1 FROM paperless_documents WHERE document_id = ?",
-                (document_id,)
+                "SELECT 1 FROM paperless_documents WHERE document_id = ?", (document_id,)
             ).fetchone()
             return row is not None
-    
+
     # Extraction methods
-    
+
     def save_extraction(
         self,
         document_id: int,
@@ -314,33 +348,35 @@ class StateStore:
     ) -> int:
         """Save an extraction record. Returns the extraction ID."""
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        
+
         with self._transaction() as conn:
-            cursor = conn.execute("""
+            cursor = conn.execute(
+                """
                 INSERT INTO extractions
                 (document_id, external_id, extraction_json, overall_confidence, review_state, created_at)
                 VALUES (?, ?, ?, ?, ?, ?)
-            """, (document_id, external_id, extraction_json, overall_confidence, review_state, now))
+            """,
+                (document_id, external_id, extraction_json, overall_confidence, review_state, now),
+            )
             return cursor.lastrowid or 0
-    
+
     def get_extraction_by_document(self, document_id: int) -> Optional[ExtractionRecord]:
         """Get the latest extraction for a document."""
         with self._transaction() as conn:
             row = conn.execute(
                 "SELECT * FROM extractions WHERE document_id = ? ORDER BY created_at DESC LIMIT 1",
-                (document_id,)
+                (document_id,),
             ).fetchone()
             return ExtractionRecord.from_row(row) if row else None
-    
+
     def get_extraction_by_external_id(self, external_id: str) -> Optional[ExtractionRecord]:
         """Get extraction by external_id."""
         with self._transaction() as conn:
             row = conn.execute(
-                "SELECT * FROM extractions WHERE external_id = ?",
-                (external_id,)
+                "SELECT * FROM extractions WHERE external_id = ?", (external_id,)
             ).fetchone()
             return ExtractionRecord.from_row(row) if row else None
-    
+
     def update_extraction_review(
         self,
         extraction_id: int,
@@ -349,34 +385,42 @@ class StateStore:
     ) -> None:
         """Update extraction with review decision."""
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        
+
         with self._transaction() as conn:
             if updated_json:
-                conn.execute("""
+                conn.execute(
+                    """
                     UPDATE extractions
                     SET reviewed_at = ?, review_decision = ?, extraction_json = ?
                     WHERE id = ?
-                """, (now, decision, updated_json, extraction_id))
+                """,
+                    (now, decision, updated_json, extraction_id),
+                )
             else:
-                conn.execute("""
+                conn.execute(
+                    """
                     UPDATE extractions
                     SET reviewed_at = ?, review_decision = ?
                     WHERE id = ?
-                """, (now, decision, extraction_id))
-    
+                """,
+                    (now, decision, extraction_id),
+                )
+
     def get_extractions_for_review(self) -> list[ExtractionRecord]:
         """Get all extractions pending review."""
         with self._transaction() as conn:
-            rows = conn.execute("""
+            rows = conn.execute(
+                """
                 SELECT * FROM extractions
                 WHERE review_state IN ('REVIEW', 'MANUAL')
                 AND review_decision IS NULL
                 ORDER BY created_at ASC
-            """).fetchall()
+            """
+            ).fetchall()
             return [ExtractionRecord.from_row(row) for row in rows]
-    
+
     # Import methods
-    
+
     def create_import(
         self,
         external_id: str,
@@ -386,84 +430,127 @@ class StateStore:
     ) -> int:
         """Create an import record. Returns the import ID."""
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        
+
         with self._transaction() as conn:
-            cursor = conn.execute("""
+            cursor = conn.execute(
+                """
                 INSERT INTO imports
                 (external_id, document_id, payload_json, status, created_at)
                 VALUES (?, ?, ?, ?, ?)
-            """, (external_id, document_id, payload_json, status.value, now))
+            """,
+                (external_id, document_id, payload_json, status.value, now),
+            )
             return cursor.lastrowid or 0
-    
+
     def update_import_success(self, external_id: str, firefly_id: int) -> None:
         """Mark import as successful with Firefly transaction ID."""
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        
+
         with self._transaction() as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 UPDATE imports
                 SET status = ?, firefly_id = ?, imported_at = ?
                 WHERE external_id = ?
-            """, (ImportStatus.IMPORTED.value, firefly_id, now, external_id))
-    
+            """,
+                (ImportStatus.IMPORTED.value, firefly_id, now, external_id),
+            )
+
     def update_import_failed(self, external_id: str, error_message: str) -> None:
         """Mark import as failed with error message."""
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        
+
         with self._transaction() as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 UPDATE imports
                 SET status = ?, error_message = ?, imported_at = ?
                 WHERE external_id = ?
-            """, (ImportStatus.FAILED.value, error_message, now, external_id))
-    
+            """,
+                (ImportStatus.FAILED.value, error_message, now, external_id),
+            )
+
+    def create_or_update_failed_import(
+        self,
+        external_id: str,
+        document_id: int,
+        error_message: str,
+        payload_json: str = "{}",
+    ) -> None:
+        """Create a failed import record or update existing one with error."""
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+        with self._transaction() as conn:
+            # Try to update first
+            cursor = conn.execute(
+                """
+                UPDATE imports
+                SET status = ?, error_message = ?, imported_at = ?
+                WHERE external_id = ?
+            """,
+                (ImportStatus.FAILED.value, error_message, now, external_id),
+            )
+
+            if cursor.rowcount == 0:
+                # No existing record, create one
+                conn.execute(
+                    """
+                    INSERT INTO imports
+                    (external_id, document_id, payload_json, status, error_message, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                    (
+                        external_id,
+                        document_id,
+                        payload_json,
+                        ImportStatus.FAILED.value,
+                        error_message,
+                        now,
+                    ),
+                )
+
     def get_import_by_external_id(self, external_id: str) -> Optional[ImportRecord]:
         """Get import record by external_id."""
         with self._transaction() as conn:
             row = conn.execute(
-                "SELECT * FROM imports WHERE external_id = ?",
-                (external_id,)
+                "SELECT * FROM imports WHERE external_id = ?", (external_id,)
             ).fetchone()
             return ImportRecord.from_row(row) if row else None
-    
+
     def import_exists(self, external_id: str) -> bool:
         """Check if an import exists for this external_id."""
         with self._transaction() as conn:
             row = conn.execute(
-                "SELECT 1 FROM imports WHERE external_id = ?",
-                (external_id,)
+                "SELECT 1 FROM imports WHERE external_id = ?", (external_id,)
             ).fetchone()
             return row is not None
-    
+
     def is_imported(self, external_id: str) -> bool:
         """Check if external_id was successfully imported."""
         with self._transaction() as conn:
             row = conn.execute(
                 "SELECT 1 FROM imports WHERE external_id = ? AND status = ?",
-                (external_id, ImportStatus.IMPORTED.value)
+                (external_id, ImportStatus.IMPORTED.value),
             ).fetchone()
             return row is not None
-    
+
     def delete_import(self, external_id: str) -> bool:
         """Delete an import record. Returns True if deleted."""
         with self._transaction() as conn:
-            cursor = conn.execute(
-                "DELETE FROM imports WHERE external_id = ?",
-                (external_id,)
-            )
+            cursor = conn.execute("DELETE FROM imports WHERE external_id = ?", (external_id,))
             return cursor.rowcount > 0
-    
+
     def get_pending_imports(self) -> list[ImportRecord]:
         """Get all pending imports."""
         with self._transaction() as conn:
             rows = conn.execute(
                 "SELECT * FROM imports WHERE status = ? ORDER BY created_at ASC",
-                (ImportStatus.PENDING.value,)
+                (ImportStatus.PENDING.value,),
             ).fetchall()
             return [ImportRecord.from_row(row) for row in rows]
-    
+
     # Vendor mapping methods
-    
+
     def save_vendor_mapping(
         self,
         vendor_pattern: str,
@@ -474,33 +561,37 @@ class StateStore:
         """Save or update a vendor mapping."""
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         tags_json = json.dumps(tags or [])
-        
+
         with self._transaction() as conn:
             existing = conn.execute(
-                "SELECT use_count FROM vendor_mappings WHERE vendor_pattern = ?",
-                (vendor_pattern,)
+                "SELECT use_count FROM vendor_mappings WHERE vendor_pattern = ?", (vendor_pattern,)
             ).fetchone()
-            
+
             if existing:
-                conn.execute("""
+                conn.execute(
+                    """
                     UPDATE vendor_mappings
                     SET destination_account = ?, category = ?, tags = ?,
                         updated_at = ?, use_count = use_count + 1
                     WHERE vendor_pattern = ?
-                """, (destination_account, category, tags_json, now, vendor_pattern))
+                """,
+                    (destination_account, category, tags_json, now, vendor_pattern),
+                )
             else:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO vendor_mappings
                     (vendor_pattern, destination_account, category, tags, created_at, updated_at)
                     VALUES (?, ?, ?, ?, ?, ?)
-                """, (vendor_pattern, destination_account, category, tags_json, now, now))
-    
+                """,
+                    (vendor_pattern, destination_account, category, tags_json, now, now),
+                )
+
     def get_vendor_mapping(self, vendor_pattern: str) -> Optional[dict[str, Any]]:
         """Get vendor mapping by pattern."""
         with self._transaction() as conn:
             row = conn.execute(
-                "SELECT * FROM vendor_mappings WHERE vendor_pattern = ?",
-                (vendor_pattern,)
+                "SELECT * FROM vendor_mappings WHERE vendor_pattern = ?", (vendor_pattern,)
             ).fetchone()
             if row:
                 return {
@@ -511,9 +602,9 @@ class StateStore:
                     "use_count": row["use_count"],
                 }
             return None
-    
+
     # Statistics
-    
+
     def get_stats(self) -> dict[str, Any]:
         """Get pipeline statistics."""
         with self._transaction() as conn:
@@ -525,13 +616,13 @@ class StateStore:
             imports = conn.execute("SELECT COUNT(*) as count FROM imports").fetchone()
             imported = conn.execute(
                 "SELECT COUNT(*) as count FROM imports WHERE status = ?",
-                (ImportStatus.IMPORTED.value,)
+                (ImportStatus.IMPORTED.value,),
             ).fetchone()
             failed = conn.execute(
                 "SELECT COUNT(*) as count FROM imports WHERE status = ?",
-                (ImportStatus.FAILED.value,)
+                (ImportStatus.FAILED.value,),
             ).fetchone()
-            
+
             return {
                 "documents_processed": docs["count"] if docs else 0,
                 "extractions_total": extractions["count"] if extractions else 0,

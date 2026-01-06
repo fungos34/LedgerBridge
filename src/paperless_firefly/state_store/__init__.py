@@ -11,11 +11,11 @@ Enforces uniqueness on external_id and doc_id.
 """
 
 from .sqlite_store import (
-    StateStore,
     DocumentRecord,
     ExtractionRecord,
     ImportRecord,
     ImportStatus,
+    StateStore,
 )
 
 __all__ = [

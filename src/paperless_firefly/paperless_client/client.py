@@ -3,13 +3,13 @@ Paperless-ngx API client implementation.
 """
 
 import hashlib
+import json
+import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Any, Iterator
+from typing import Any, Iterator, Optional
 from urllib.parse import urljoin
-import json
-import logging
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -20,11 +20,13 @@ logger = logging.getLogger(__name__)
 
 class PaperlessError(Exception):
     """Base exception for Paperless client errors."""
+
     pass
 
 
 class PaperlessAPIError(PaperlessError):
     """API returned an error response."""
+
     def __init__(self, status_code: int, message: str, response_body: Optional[str] = None):
         self.status_code = status_code
         self.message = message
@@ -34,19 +36,21 @@ class PaperlessAPIError(PaperlessError):
 
 class PaperlessConnectionError(PaperlessError):
     """Failed to connect to Paperless."""
+
     pass
 
 
 @dataclass
 class PaperlessDocument:
     """Paperless document representation."""
+
     id: int
     title: str
     content: str  # OCR text
     created: Optional[str]  # Document date
     added: str  # When added to Paperless
     modified: str
-    
+
     # Classification
     correspondent: Optional[str] = None
     correspondent_id: Optional[int] = None
@@ -54,32 +58,34 @@ class PaperlessDocument:
     document_type_id: Optional[int] = None
     tags: list[str] = field(default_factory=list)
     tag_ids: list[int] = field(default_factory=list)
-    
+
     # File info
     original_file_name: Optional[str] = None
     archive_serial_number: Optional[int] = None
-    
+
     # Custom fields
     custom_fields: dict[str, Any] = field(default_factory=dict)
-    
+
     # URLs
     download_url: Optional[str] = None
     original_download_url: Optional[str] = None
-    
+
     @classmethod
     def from_api_response(cls, data: dict, base_url: str) -> "PaperlessDocument":
         """Create from Paperless API response."""
         doc_id = data["id"]
-        
+
         # Build download URLs
         download_url = f"{base_url.rstrip('/')}/api/documents/{doc_id}/download/"
-        original_download_url = f"{base_url.rstrip('/')}/api/documents/{doc_id}/download/?original=true"
-        
+        original_download_url = (
+            f"{base_url.rstrip('/')}/api/documents/{doc_id}/download/?original=true"
+        )
+
         # Parse custom fields
         custom_fields = {}
         for cf in data.get("custom_fields", []):
             custom_fields[cf.get("field", cf.get("name", "unknown"))] = cf.get("value")
-        
+
         return cls(
             id=doc_id,
             title=data.get("title", ""),
@@ -91,7 +97,11 @@ class PaperlessDocument:
             correspondent_id=data.get("correspondent"),
             document_type=data.get("document_type__name"),
             document_type_id=data.get("document_type"),
-            tags=[t for t in data.get("tags__name", []) if t] if isinstance(data.get("tags__name"), list) else [],
+            tags=(
+                [t for t in data.get("tags__name", []) if t]
+                if isinstance(data.get("tags__name"), list)
+                else []
+            ),
             tag_ids=data.get("tags", []) if isinstance(data.get("tags"), list) else [],
             original_file_name=data.get("original_file_name"),
             archive_serial_number=data.get("archive_serial_number"),
@@ -104,17 +114,17 @@ class PaperlessDocument:
 class PaperlessClient:
     """
     Client for Paperless-ngx API.
-    
+
     Features:
     - List documents with filters
     - Get document details
     - Download original files
     - Automatic retry with backoff
     """
-    
+
     DEFAULT_TIMEOUT = 30
     DEFAULT_PAGE_SIZE = 25
-    
+
     def __init__(
         self,
         base_url: str,
@@ -125,7 +135,7 @@ class PaperlessClient:
     ):
         """
         Initialize Paperless client.
-        
+
         Args:
             base_url: Paperless instance URL (e.g., "http://192.168.1.138:8000")
             token: API token for authentication
@@ -136,14 +146,16 @@ class PaperlessClient:
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.timeout = timeout
-        
+
         # Configure session with retry
         self.session = requests.Session()
-        self.session.headers.update({
-            "Authorization": f"Token {token}",
-            "Accept": "application/json",
-        })
-        
+        self.session.headers.update(
+            {
+                "Authorization": f"Token {token}",
+                "Accept": "application/json",
+            }
+        )
+
         retry_strategy = Retry(
             total=max_retries,
             backoff_factor=backoff_factor,
@@ -153,7 +165,7 @@ class PaperlessClient:
         adapter = HTTPAdapter(max_retries=retry_strategy)
         self.session.mount("http://", adapter)
         self.session.mount("https://", adapter)
-    
+
     def _request(
         self,
         method: str,
@@ -164,7 +176,7 @@ class PaperlessClient:
     ) -> requests.Response:
         """Make an API request with error handling."""
         url = f"{self.base_url}{endpoint}"
-        
+
         try:
             response = self.session.request(
                 method=method,
@@ -175,12 +187,14 @@ class PaperlessClient:
                 stream=stream,
             )
         except requests.exceptions.ConnectionError as e:
-            raise PaperlessConnectionError(f"Failed to connect to Paperless at {self.base_url}: {e}")
+            raise PaperlessConnectionError(
+                f"Failed to connect to Paperless at {self.base_url}: {e}"
+            )
         except requests.exceptions.Timeout as e:
             raise PaperlessConnectionError(f"Request to Paperless timed out: {e}")
         except requests.exceptions.RequestException as e:
             raise PaperlessError(f"Request failed: {e}")
-        
+
         if not response.ok:
             try:
                 error_body = response.text
@@ -191,9 +205,9 @@ class PaperlessClient:
                 message=response.reason,
                 response_body=error_body,
             )
-        
+
         return response
-    
+
     def test_connection(self) -> bool:
         """Test connection to Paperless API."""
         try:
@@ -201,7 +215,7 @@ class PaperlessClient:
             return True
         except (PaperlessError, Exception):
             return False
-    
+
     def list_documents(
         self,
         tags: Optional[list[str]] = None,
@@ -216,7 +230,7 @@ class PaperlessClient:
     ) -> Iterator[PaperlessDocument]:
         """
         List documents with optional filters.
-        
+
         Args:
             tags: Filter by tag names (all must match)
             tag_ids: Filter by tag IDs (all must match)
@@ -227,7 +241,7 @@ class PaperlessClient:
             query: Full-text search query
             page_size: Results per page
             ordering: Sort order (prefix with - for descending)
-        
+
         Yields:
             PaperlessDocument objects
         """
@@ -235,7 +249,7 @@ class PaperlessClient:
             "page_size": page_size,
             "ordering": ordering,
         }
-        
+
         # Add filters
         if tag_ids:
             params["tags__id__all"] = ",".join(str(t) for t in tag_ids)
@@ -245,7 +259,7 @@ class PaperlessClient:
             params["correspondent__id"] = correspondent_id
         if query:
             params["query"] = query
-        
+
         # Fetch tag/type/correspondent IDs if names provided
         if tags:
             resolved_tag_ids = self._resolve_tag_ids(tags)
@@ -253,44 +267,44 @@ class PaperlessClient:
                 existing = params.get("tags__id__all", "")
                 new_ids = ",".join(str(t) for t in resolved_tag_ids)
                 params["tags__id__all"] = f"{existing},{new_ids}".strip(",")
-        
+
         if document_type and not document_type_id:
             type_id = self._resolve_document_type_id(document_type)
             if type_id:
                 params["document_type__id"] = type_id
-        
+
         if correspondent and not correspondent_id:
             corr_id = self._resolve_correspondent_id(correspondent)
             if corr_id:
                 params["correspondent__id"] = corr_id
-        
+
         # Paginate through results
         page = 1
         while True:
             params["page"] = page
             response = self._request("GET", "/api/documents/", params=params)
             data = response.json()
-            
+
             for doc_data in data.get("results", []):
                 yield PaperlessDocument.from_api_response(doc_data, self.base_url)
-            
+
             if not data.get("next"):
                 break
             page += 1
-    
+
     def get_document(self, document_id: int) -> PaperlessDocument:
         """
         Get full document details by ID.
-        
+
         Args:
             document_id: Paperless document ID
-        
+
         Returns:
             PaperlessDocument with full details
         """
         response = self._request("GET", f"/api/documents/{document_id}/")
         data = response.json()
-        
+
         # Fetch tag names
         tag_names = []
         for tag_id in data.get("tags", []):
@@ -300,41 +314,45 @@ class PaperlessClient:
                 tag_names.append(tag_data.get("name", ""))
             except PaperlessError:
                 pass
-        
+
         # Fetch correspondent name
         correspondent_name = None
         if data.get("correspondent"):
             try:
-                corr_response = self._request("GET", f"/api/correspondents/{data['correspondent']}/")
+                corr_response = self._request(
+                    "GET", f"/api/correspondents/{data['correspondent']}/"
+                )
                 corr_data = corr_response.json()
                 correspondent_name = corr_data.get("name")
             except PaperlessError:
                 pass
-        
+
         # Fetch document type name
         doc_type_name = None
         if data.get("document_type"):
             try:
-                type_response = self._request("GET", f"/api/document_types/{data['document_type']}/")
+                type_response = self._request(
+                    "GET", f"/api/document_types/{data['document_type']}/"
+                )
                 type_data = type_response.json()
                 doc_type_name = type_data.get("name")
             except PaperlessError:
                 pass
-        
+
         doc = PaperlessDocument.from_api_response(data, self.base_url)
         doc.tags = tag_names
         doc.correspondent = correspondent_name
         doc.document_type = doc_type_name
-        
+
         return doc
-    
+
     def download_original(self, document_id: int) -> tuple[bytes, str]:
         """
         Download original document file.
-        
+
         Args:
             document_id: Paperless document ID
-        
+
         Returns:
             Tuple of (file_bytes, filename)
         """
@@ -344,7 +362,7 @@ class PaperlessClient:
             params={"original": "true"},
             stream=True,
         )
-        
+
         # Get filename from Content-Disposition header
         filename = f"document_{document_id}"
         content_disp = response.headers.get("Content-Disposition", "")
@@ -352,18 +370,18 @@ class PaperlessClient:
             # Parse filename from header
             parts = content_disp.split("filename=")
             if len(parts) > 1:
-                filename = parts[1].strip('"\'')
-        
+                filename = parts[1].strip("\"'")
+
         file_bytes = response.content
         return file_bytes, filename
-    
+
     def download_archived(self, document_id: int) -> tuple[bytes, str]:
         """
         Download archived (processed) document file.
-        
+
         Args:
             document_id: Paperless document ID
-        
+
         Returns:
             Tuple of (file_bytes, filename)
         """
@@ -372,24 +390,24 @@ class PaperlessClient:
             f"/api/documents/{document_id}/download/",
             stream=True,
         )
-        
+
         filename = f"document_{document_id}.pdf"
         content_disp = response.headers.get("Content-Disposition", "")
         if "filename=" in content_disp:
             parts = content_disp.split("filename=")
             if len(parts) > 1:
-                filename = parts[1].strip('"\'')
-        
+                filename = parts[1].strip("\"'")
+
         file_bytes = response.content
         return file_bytes, filename
-    
+
     def get_document_ids_by_tag(self, tag_name: str) -> list[int]:
         """Get all document IDs with a specific tag."""
         doc_ids = []
         for doc in self.list_documents(tags=[tag_name]):
             doc_ids.append(doc.id)
         return doc_ids
-    
+
     def _resolve_tag_ids(self, tag_names: list[str]) -> list[int]:
         """Resolve tag names to IDs."""
         tag_ids = []
@@ -397,7 +415,7 @@ class PaperlessClient:
             response = self._request("GET", "/api/tags/", params={"page_size": 1000})
             tags_data = response.json().get("results", [])
             name_to_id = {t["name"].lower(): t["id"] for t in tags_data}
-            
+
             for name in tag_names:
                 if name.lower() in name_to_id:
                     tag_ids.append(name_to_id[name.lower()])
@@ -405,9 +423,9 @@ class PaperlessClient:
                     logger.warning(f"Tag not found: {name}")
         except PaperlessError as e:
             logger.warning(f"Failed to resolve tag IDs: {e}")
-        
+
         return tag_ids
-    
+
     def _resolve_document_type_id(self, type_name: str) -> Optional[int]:
         """Resolve document type name to ID."""
         try:
@@ -419,7 +437,7 @@ class PaperlessClient:
         except PaperlessError as e:
             logger.warning(f"Failed to resolve document type ID: {e}")
         return None
-    
+
     def _resolve_correspondent_id(self, corr_name: str) -> Optional[int]:
         """Resolve correspondent name to ID."""
         try:

@@ -9,7 +9,7 @@ Provides:
 Treats Firefly errors as loud failures with actionable messages.
 """
 
-from .client import FireflyClient, FireflyError, FireflyAPIError
+from .client import FireflyAPIError, FireflyClient, FireflyError
 
 __all__ = [
     "FireflyClient",

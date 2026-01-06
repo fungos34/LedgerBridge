@@ -10,10 +10,10 @@ Provides:
 Strategies are pluggable and testable.
 """
 
-from .router import ExtractorRouter
-from .ocr_extractor import OCRTextExtractor
-from .einvoice_extractor import EInvoiceExtractor
 from .base import BaseExtractor, ExtractionResult
+from .einvoice_extractor import EInvoiceExtractor
+from .ocr_extractor import OCRTextExtractor
+from .router import ExtractorRouter
 
 __all__ = [
     "ExtractorRouter",

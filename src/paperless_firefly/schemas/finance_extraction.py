@@ -15,6 +15,7 @@ from typing import Optional
 
 class TransactionType(str, Enum):
     """Transaction type for Firefly III."""
+
     WITHDRAWAL = "withdrawal"
     DEPOSIT = "deposit"
     TRANSFER = "transfer"
@@ -23,11 +24,12 @@ class TransactionType(str, Enum):
 class ReviewState(str, Enum):
     """
     Review requirement based on confidence scores.
-    
+
     AUTO: High confidence, can be imported automatically
     REVIEW: Medium confidence, user should confirm
     MANUAL: Low confidence, user must review and likely edit
     """
+
     AUTO = "AUTO"
     REVIEW = "REVIEW"
     MANUAL = "MANUAL"
@@ -36,6 +38,7 @@ class ReviewState(str, Enum):
 @dataclass
 class DocumentClassification:
     """Semantic classification from Paperless."""
+
     document_type: Optional[str] = None  # e.g., "Receipt", "Invoice"
     correspondent: Optional[str] = None  # e.g., "SPAR", "Amazon"
     tags: list[str] = field(default_factory=list)
@@ -45,6 +48,7 @@ class DocumentClassification:
 @dataclass
 class LineItem:
     """Individual line item from an invoice/receipt."""
+
     description: str
     quantity: Optional[Decimal] = None
     unit_price: Optional[Decimal] = None
@@ -57,37 +61,38 @@ class LineItem:
 class TransactionProposal:
     """
     Proposed transaction fields for Firefly III import.
-    
+
     This is the best-effort proposal generated from extraction.
     All fields should be populated when possible, with confidence
     scores indicating reliability.
     """
+
     # Required fields for Firefly
     transaction_type: TransactionType
     date: str  # ISO format YYYY-MM-DD
     amount: Decimal  # Always positive, with dot as decimal separator
     currency: str  # ISO code, e.g., "EUR"
     description: str
-    
+
     # Account mapping
     source_account: Optional[str] = None  # Firefly asset account name/id
     destination_account: Optional[str] = None  # Merchant or expense account
-    
+
     # Optional categorization
     category: Optional[str] = None
     tags: list[str] = field(default_factory=list)
-    
+
     # Provenance (always included in notes)
     notes: Optional[str] = None
-    
+
     # Dedupe key (deterministic)
     external_id: str = ""
-    
+
     # Invoice-specific fields
     invoice_number: Optional[str] = None
     due_date: Optional[str] = None  # ISO format YYYY-MM-DD
     payment_reference: Optional[str] = None
-    
+
     # Tax details
     total_net: Optional[Decimal] = None
     tax_amount: Optional[Decimal] = None
@@ -98,12 +103,13 @@ class TransactionProposal:
 class ConfidenceScores:
     """
     Confidence scoring for extraction.
-    
+
     All scores are floats in range [0.0, 1.0].
     Higher = more confident.
     """
+
     overall: float
-    
+
     # Per-field confidence
     amount: float = 0.0
     date: float = 0.0
@@ -112,14 +118,14 @@ class ConfidenceScores:
     vendor: float = 0.0
     invoice_number: float = 0.0
     line_items: float = 0.0
-    
+
     # Computed review state
     review_state: ReviewState = ReviewState.MANUAL
-    
+
     # Thresholds used
     auto_threshold: float = 0.85
     review_threshold: float = 0.60
-    
+
     def compute_review_state(self) -> ReviewState:
         """Compute review state based on overall confidence."""
         if self.overall >= self.auto_threshold:
@@ -133,6 +139,7 @@ class ConfidenceScores:
 @dataclass
 class Provenance:
     """Audit trail and reproducibility information."""
+
     source_system: str = "paperless"
     parser_version: str = ""
     parsed_at: str = ""  # ISO timestamp
@@ -143,6 +150,7 @@ class Provenance:
 @dataclass
 class StructuredPayload:
     """Detected embedded structured data (e.g., Factur-X XML)."""
+
     payload_type: str  # e.g., "Factur-X", "UBL", "ZUGFeRD"
     raw_content: str
     parsed_data: Optional[dict] = None
@@ -152,42 +160,43 @@ class StructuredPayload:
 class FinanceExtraction:
     """
     CANONICAL extracted finance object (SSOT).
-    
+
     This is the single source of truth for all extracted finance data.
     Every module in the pipeline uses this schema exclusively.
-    
+
     Required fields are marked; everything else is best-effort.
     """
+
     # Required: Document identity
     paperless_document_id: int
     source_hash: str  # SHA256 of original file bytes
     paperless_url: str
-    
+
     # Required: OCR/text content
     raw_text: str
-    
+
     # Required: Best-effort proposal
     proposal: TransactionProposal
-    
+
     # Required: Confidence assessment
     confidence: ConfidenceScores
-    
+
     # Required: Audit trail
     provenance: Provenance
-    
+
     # Optional: Document metadata
     paperless_title: Optional[str] = None
     document_classification: Optional[DocumentClassification] = None
-    
+
     # Optional: Embedded structured data (Factur-X, UBL, etc.)
     structured_payloads: list[StructuredPayload] = field(default_factory=list)
-    
+
     # Optional: Line items
     line_items: list[LineItem] = field(default_factory=list)
-    
+
     # Timestamps
     created_at: str = ""  # ISO timestamp when extraction was created
-    
+
     def to_dict(self) -> dict:
         """Serialize to dictionary for JSON storage."""
         return {
@@ -196,12 +205,16 @@ class FinanceExtraction:
             "paperless_url": self.paperless_url,
             "paperless_title": self.paperless_title,
             "raw_text": self.raw_text,
-            "document_classification": {
-                "document_type": self.document_classification.document_type,
-                "correspondent": self.document_classification.correspondent,
-                "tags": self.document_classification.tags,
-                "storage_path": self.document_classification.storage_path,
-            } if self.document_classification else None,
+            "document_classification": (
+                {
+                    "document_type": self.document_classification.document_type,
+                    "correspondent": self.document_classification.correspondent,
+                    "tags": self.document_classification.tags,
+                    "storage_path": self.document_classification.storage_path,
+                }
+                if self.document_classification
+                else None
+            ),
             "proposal": {
                 "transaction_type": self.proposal.transaction_type.value,
                 "date": self.proposal.date,
@@ -260,7 +273,7 @@ class FinanceExtraction:
             ],
             "created_at": self.created_at,
         }
-    
+
     @classmethod
     def from_dict(cls, data: dict) -> "FinanceExtraction":
         """Deserialize from dictionary."""
@@ -273,7 +286,7 @@ class FinanceExtraction:
                 tags=dc.get("tags", []),
                 storage_path=dc.get("storage_path"),
             )
-        
+
         proposal_data = data["proposal"]
         proposal = TransactionProposal(
             transaction_type=TransactionType(proposal_data["transaction_type"]),
@@ -290,11 +303,15 @@ class FinanceExtraction:
             invoice_number=proposal_data.get("invoice_number"),
             due_date=proposal_data.get("due_date"),
             payment_reference=proposal_data.get("payment_reference"),
-            total_net=Decimal(proposal_data["total_net"]) if proposal_data.get("total_net") else None,
-            tax_amount=Decimal(proposal_data["tax_amount"]) if proposal_data.get("tax_amount") else None,
+            total_net=(
+                Decimal(proposal_data["total_net"]) if proposal_data.get("total_net") else None
+            ),
+            tax_amount=(
+                Decimal(proposal_data["tax_amount"]) if proposal_data.get("tax_amount") else None
+            ),
             tax_rate=Decimal(proposal_data["tax_rate"]) if proposal_data.get("tax_rate") else None,
         )
-        
+
         conf_data = data["confidence"]
         confidence = ConfidenceScores(
             overall=conf_data["overall"],
@@ -307,7 +324,7 @@ class FinanceExtraction:
             line_items=conf_data.get("line_items", 0.0),
             review_state=ReviewState(conf_data.get("review_state", "MANUAL")),
         )
-        
+
         prov_data = data["provenance"]
         provenance = Provenance(
             source_system=prov_data.get("source_system", "paperless"),
@@ -316,26 +333,32 @@ class FinanceExtraction:
             ruleset_id=prov_data.get("ruleset_id"),
             extraction_strategy=prov_data.get("extraction_strategy"),
         )
-        
+
         line_items = []
         for item_data in data.get("line_items", []):
-            line_items.append(LineItem(
-                description=item_data["description"],
-                quantity=Decimal(item_data["quantity"]) if item_data.get("quantity") else None,
-                unit_price=Decimal(item_data["unit_price"]) if item_data.get("unit_price") else None,
-                total=Decimal(item_data["total"]) if item_data.get("total") else None,
-                tax_rate=Decimal(item_data["tax_rate"]) if item_data.get("tax_rate") else None,
-                position=item_data.get("position"),
-            ))
-        
+            line_items.append(
+                LineItem(
+                    description=item_data["description"],
+                    quantity=Decimal(item_data["quantity"]) if item_data.get("quantity") else None,
+                    unit_price=(
+                        Decimal(item_data["unit_price"]) if item_data.get("unit_price") else None
+                    ),
+                    total=Decimal(item_data["total"]) if item_data.get("total") else None,
+                    tax_rate=Decimal(item_data["tax_rate"]) if item_data.get("tax_rate") else None,
+                    position=item_data.get("position"),
+                )
+            )
+
         structured_payloads = []
         for sp_data in data.get("structured_payloads", []):
-            structured_payloads.append(StructuredPayload(
-                payload_type=sp_data["payload_type"],
-                raw_content=sp_data["raw_content"],
-                parsed_data=sp_data.get("parsed_data"),
-            ))
-        
+            structured_payloads.append(
+                StructuredPayload(
+                    payload_type=sp_data["payload_type"],
+                    raw_content=sp_data["raw_content"],
+                    parsed_data=sp_data.get("parsed_data"),
+                )
+            )
+
         return cls(
             paperless_document_id=data["paperless_document_id"],
             source_hash=data["source_hash"],

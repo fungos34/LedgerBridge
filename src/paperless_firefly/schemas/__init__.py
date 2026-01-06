@@ -5,22 +5,22 @@ These canonical schemas are the ONLY models used across all modules.
 No duplicated "near-same" models allowed.
 """
 
+from .dedupe import ExternalIdComponents, generate_external_id
 from .finance_extraction import (
-    FinanceExtraction,
-    TransactionProposal,
-    LineItem,
     ConfidenceScores,
-    Provenance,
     DocumentClassification,
+    FinanceExtraction,
+    LineItem,
+    Provenance,
     ReviewState,
+    TransactionProposal,
     TransactionType,
 )
 from .firefly_payload import (
-    FireflyTransactionStore,
     FireflyTransactionSplit,
+    FireflyTransactionStore,
     build_firefly_payload,
 )
-from .dedupe import generate_external_id, ExternalIdComponents
 
 __all__ = [
     # Finance Extraction (canonical input schema)

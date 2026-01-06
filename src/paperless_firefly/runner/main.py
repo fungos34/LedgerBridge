@@ -283,7 +283,7 @@ def cmd_import(
     source_account_override: Optional[str] = None,
 ) -> int:
     """Import transactions to Firefly III.
-    
+
     Args:
         config: Application configuration
         auto_only: Only import AUTO-confidence transactions
@@ -297,7 +297,7 @@ def cmd_import(
         base_url=config.firefly.base_url,
         token=config.firefly.token,
     )
-    
+
     # Use override if provided, otherwise use config
     default_source_account = source_account_override or config.firefly.default_source_account
 
@@ -342,30 +342,38 @@ def cmd_import(
     failed = 0
 
     for row in rows:
+        external_id = row["external_id"]
+        document_id = row["document_id"]
+
+        logger.info(f"Processing extraction: document_id={document_id}, external_id={external_id}")
+
         try:
             extraction = json.loads(row["extraction_json"])
             from ..schemas.finance_extraction import FinanceExtraction
 
             ext = FinanceExtraction.from_dict(extraction)
-
-            external_id = ext.proposal.external_id
+            logger.debug(f"Parsed extraction: {ext.proposal.description}")
 
             # Check if already imported (safety check) - includes failed imports
             existing_import = store.get_import_by_external_id(external_id)
             if existing_import:
                 if existing_import.status == ImportStatus.IMPORTED.value:
+                    logger.info(f"[{document_id}] Already imported, skipping")
                     print(f"  ⏭ [{ext.paperless_document_id}] Already imported")
                     continue
                 elif existing_import.status == ImportStatus.FAILED.value:
                     # Reset failed imports so they can be retried
+                    logger.info(f"[{document_id}] Retrying previously failed import")
                     store.delete_import(external_id)
 
             # Build Firefly payload
+            logger.debug(f"Building payload with source_account={default_source_account}")
             payload = build_firefly_payload(
                 ext,
                 default_source_account=default_source_account,
                 paperless_base_url=config.paperless.base_url,
             )
+            logger.debug(f"Built payload: {payload.to_json()}")
 
             print(f"  📤 [{ext.paperless_document_id}] {ext.proposal.description}")
             print(f"     → {ext.proposal.amount} {ext.proposal.currency} on {ext.proposal.date}")
@@ -374,37 +382,49 @@ def cmd_import(
                 print("     → [DRY RUN] Would import")
                 continue
 
-            # Create import record
+            # Create import record BEFORE sending to Firefly
             store.create_import(
                 external_id=external_id,
                 document_id=ext.paperless_document_id,
                 payload_json=payload.to_json(),
                 status=ImportStatus.PENDING,
             )
+            logger.debug(f"Created PENDING import record for {external_id}")
 
             # Send to Firefly
+            logger.info(f"Sending transaction to Firefly: {ext.proposal.description}")
             firefly_id = firefly.create_transaction(payload, skip_duplicates=True)
 
             if firefly_id:
                 store.update_import_success(external_id, firefly_id)
+                logger.info(f"[{document_id}] Import successful, firefly_id={firefly_id}")
                 print(f"     ✓ Imported (Firefly ID: {firefly_id})")
                 imported += 1
             else:
-                store.update_import_failed(external_id, "Duplicate detected")
+                store.update_import_failed(external_id, "Duplicate detected by Firefly")
+                logger.warning(f"[{document_id}] Duplicate detected")
                 print("     ⚠ Skipped (duplicate)")
+                failed += 1
 
         except Exception as e:
-            logger.exception("Import failed")
-            print(f"     ❌ Error: {e}")
-            # Note: row is sqlite3.Row, use bracket notation not .get()
-            if not dry_run and row["external_id"]:
-                # Only update if import record exists
+            error_msg = str(e)
+            logger.exception(f"Import failed for document_id={document_id}: {error_msg}")
+            print(f"     ❌ Error: {error_msg}")
+
+            # Always record the failure, creating import record if needed
+            if not dry_run and external_id:
                 try:
-                    store.update_import_failed(row["external_id"], str(e))
-                except Exception:
-                    pass  # Import record may not exist
+                    store.create_or_update_failed_import(
+                        external_id=external_id,
+                        document_id=document_id,
+                        error_message=error_msg,
+                    )
+                    logger.debug(f"Recorded failed import for {external_id}")
+                except Exception as store_error:
+                    logger.error(f"Failed to record import failure: {store_error}")
             failed += 1
 
+    logger.info(f"Import complete: imported={imported}, failed={failed}")
     print(f"\n✓ Imported: {imported}, Failed: {failed}")
     return failed  # Return actual failure count
 

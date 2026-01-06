@@ -25,7 +25,11 @@ urlpatterns = [
     # Import queue
     path("import-queue/", views.import_queue, name="import_queue"),
     path("import-queue/import/", views.run_import, name="run_import"),
-    path("import-queue/dismiss/<str:external_id>/", views.dismiss_failed_import, name="dismiss_import"),
+    path(
+        "import-queue/dismiss/<str:external_id>/",
+        views.dismiss_failed_import,
+        name="dismiss_import",
+    ),
     # Document browser (List/Unlist)
     path("documents/", views.document_browser, name="document_browser"),
     path(

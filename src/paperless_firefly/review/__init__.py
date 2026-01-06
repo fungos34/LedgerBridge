@@ -7,7 +7,7 @@ Provides:
 - Decision persistence
 """
 
-from .workflow import ReviewWorkflow, ReviewDecision
+from .workflow import ReviewDecision, ReviewWorkflow
 
 __all__ = [
     "ReviewWorkflow",

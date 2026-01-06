@@ -699,7 +699,7 @@ def run_import(request: HttpRequest) -> HttpResponse:
 
     # Get selected items or import all
     selected_ids = request.POST.getlist("selected_ids")
-    
+
     # Capture user's source account preference before starting thread
     user_source_account = None
     try:
@@ -729,8 +729,10 @@ def run_import(request: HttpRequest) -> HttpResponse:
             if not config_path.exists():
                 config_path = Path("/app/config/config.yaml")
 
+            logger.info(f"Loading config from {config_path}")
             config = load_config(config_path)
 
+            logger.info(f"Starting import with source_account_override={user_source_account}")
             _import_status["progress"] = "Importing to Firefly III..."
             result = cmd_import(
                 config,
@@ -739,6 +741,7 @@ def run_import(request: HttpRequest) -> HttpResponse:
                 source_account_override=user_source_account,
             )
 
+            logger.info(f"Import completed with result={result}")
             if result == 0:
                 _import_status["result"] = "Import completed successfully"
             else:
@@ -749,7 +752,7 @@ def run_import(request: HttpRequest) -> HttpResponse:
         except Exception as e:
             _import_status["error"] = str(e)
             _import_status["traceback"] = traceback.format_exc() if _is_debug_mode() else None
-            logger.exception("Import failed")
+            logger.exception("Import failed with exception")
         finally:
             _import_status["running"] = False
 
@@ -765,15 +768,14 @@ def run_import(request: HttpRequest) -> HttpResponse:
 def dismiss_failed_import(request: HttpRequest, external_id: str) -> HttpResponse:
     """Dismiss a failed import by rejecting the extraction (won't be retried)."""
     store = _get_store()
-    
+
     # Find the extraction by external_id
     conn = store._get_connection()
     try:
         row = conn.execute(
-            "SELECT id FROM extractions WHERE external_id = ?",
-            (external_id,)
+            "SELECT id FROM extractions WHERE external_id = ?", (external_id,)
         ).fetchone()
-        
+
         if row:
             # Mark extraction as rejected so it won't be imported
             store.update_extraction_review(row["id"], ReviewDecision.REJECTED.value)
@@ -784,7 +786,7 @@ def dismiss_failed_import(request: HttpRequest, external_id: str) -> HttpRespons
             messages.error(request, "Extraction not found.")
     finally:
         conn.close()
-    
+
     return redirect("import_queue")
 
 
