@@ -2,6 +2,7 @@
 URL configuration for the review web interface.
 """
 
+from django.contrib import admin
 from django.contrib.auth import views as auth_views
 from django.urls import path
 
@@ -10,11 +11,14 @@ from . import views
 # Note: No app_name since this is the ROOT_URLCONF
 
 urlpatterns = [
+    # Django admin
+    path("admin/", admin.site.urls),
     # Landing page / Home
     path("", views.landing_page, name="home"),
     # Authentication
     path("login/", auth_views.LoginView.as_view(template_name="review/login.html"), name="login"),
-    path("logout/", auth_views.LogoutView.as_view(), name="logout"),
+    path("logout/", auth_views.LogoutView.as_view(next_page="/login/"), name="logout"),
+    path("register/", views.register_user, name="register"),
     path("settings/", views.user_settings, name="settings"),
     # Main review queue
     path("review/", views.review_list, name="list"),

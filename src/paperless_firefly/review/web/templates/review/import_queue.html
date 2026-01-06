@@ -205,6 +205,42 @@
 </div>
 {% endif %}
 
+{% if failed_items %}
+<div class="card" style="margin-bottom: 1.5rem; border-left: 4px solid #dc2626;">
+    <div class="card-header" style="background: #fef2f2;">
+        <h2 style="color: #991b1b;">⚠️ Failed Imports ({{ failed_items|length }})</h2>
+    </div>
+    
+    <table class="queue-table">
+        <thead>
+            <tr>
+                <th>Document</th>
+                <th>Amount</th>
+                <th>Date</th>
+                <th>Error</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in failed_items %}
+            <tr>
+                <td>
+                    <a href="{% url 'detail' item.id %}">{{ item.title|truncatechars:40 }}</a>
+                </td>
+                <td class="amount-cell">{{ item.amount }} {{ item.currency }}</td>
+                <td>{{ item.date }}</td>
+                <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; color: #991b1b;">
+                    {{ item.error_message|default:"Unknown error" }}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div style="padding: 0.75rem 1rem; background: #fef2f2; font-size: 0.875rem; color: #7f1d1d;">
+        💡 Tip: These items will be retried when you click "Import All to Firefly"
+    </div>
+</div>
+{% endif %}
+
 <div class="card">
     <div class="card-header">
         <h2>Ready to Import ({{ ready_items|length }})</h2>
@@ -248,7 +284,7 @@
     {% else %}
     <div class="empty-state">
         <div class="empty-state-icon">📭</div>
-        <div>No transactions ready for import</div>
+        <div>No new transactions ready for import</div>
         <p>Review pending extractions or run a new extraction</p>
         <a href="{% url 'list' %}" class="btn btn-primary" style="margin-top: 1rem;">Go to Review Queue</a>
     </div>
@@ -256,15 +292,13 @@
 </div>
 
 {% if recent_imports %}
-<h3 class="section-title">Recent Import History</h3>
+<h3 class="section-title">✅ Successfully Imported</h3>
 <div class="card">
     <table class="queue-table">
         <thead>
             <tr>
                 <th>Document</th>
-                <th>Status</th>
-                <th>Firefly ID</th>
-                <th>Error</th>
+                <th>Firefly Transaction</th>
                 <th>Imported At</th>
             </tr>
         </thead>
@@ -277,25 +311,13 @@
                     </a>
                 </td>
                 <td>
-                    {% if imp.status == 'IMPORTED' %}
-                    <span class="status-badge imported">✓ Imported</span>
-                    {% elif imp.status == 'FAILED' %}
-                    <span class="status-badge failed">✗ Failed</span>
-                    {% else %}
-                    <span class="status-badge pending">Pending</span>
-                    {% endif %}
-                </td>
-                <td>
                     {% if imp.firefly_id %}
                     <a href="{{ firefly_url }}/transactions/show/{{ imp.firefly_id }}" target="_blank">
-                        #{{ imp.firefly_id }}
+                        💰 View Transaction #{{ imp.firefly_id }}
                     </a>
                     {% else %}
                     -
                     {% endif %}
-                </td>
-                <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis;">
-                    {{ imp.error_message|default:"-" }}
                 </td>
                 <td>{{ imp.created_at|slice:":19" }}</td>
             </tr>

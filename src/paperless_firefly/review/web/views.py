@@ -131,6 +131,78 @@ def landing_page(request: HttpRequest) -> HttpResponse:
     return render(request, "review/landing.html", context)
 
 
+def register_user(request: HttpRequest) -> HttpResponse:
+    """User registration page."""
+    from django.contrib.auth.models import User
+
+    from .models import UserProfile
+
+    if request.user.is_authenticated:
+        return redirect("home")
+
+    if request.method == "POST":
+        username = request.POST.get("username", "").strip()
+        email = request.POST.get("email", "").strip()
+        password = request.POST.get("password", "")
+        password_confirm = request.POST.get("password_confirm", "")
+
+        errors = []
+
+        # Validation
+        if not username:
+            errors.append("Username is required")
+        elif User.objects.filter(username=username).exists():
+            errors.append("Username already taken")
+
+        if not email:
+            errors.append("Email is required")
+        elif User.objects.filter(email=email).exists():
+            errors.append("Email already registered")
+
+        if not password:
+            errors.append("Password is required")
+        elif len(password) < 8:
+            errors.append("Password must be at least 8 characters")
+        elif password != password_confirm:
+            errors.append("Passwords do not match")
+
+        if errors:
+            for error in errors:
+                messages.error(request, error)
+            return render(
+                request,
+                "review/register.html",
+                {"username": username, "email": email},
+            )
+
+        # Create user
+        try:
+            user = User.objects.create_user(
+                username=username,
+                email=email,
+                password=password,
+            )
+            # Profile is created automatically via signal
+            UserProfile.objects.get_or_create(user=user)
+
+            # Log in the new user
+            login(request, user)
+            messages.success(
+                request,
+                f"Welcome {username}! Please configure your API tokens in Settings.",
+            )
+            return redirect("settings")
+        except Exception as e:
+            messages.error(request, f"Registration failed: {e}")
+            return render(
+                request,
+                "review/register.html",
+                {"username": username, "email": email},
+            )
+
+    return render(request, "review/register.html")
+
+
 @login_required
 def user_settings(request: HttpRequest) -> HttpResponse:
     """User settings page for configuring API tokens."""
@@ -522,17 +594,19 @@ def import_queue(request: HttpRequest) -> HttpResponse:
     """Show transactions ready to import to Firefly."""
     store = _get_store()
     ready_items = []
+    failed_items = []
     recent_imports = []
 
     # Get data from database - keep connection open during access
     conn = store._get_connection()
     try:
-        # Get extractions ready for import
+        # Get extractions ready for import (no import record exists OR import failed)
         extraction_rows = conn.execute(
             """
-            SELECT e.* FROM extractions e
+            SELECT e.*, i.status as import_status, i.error_message as import_error
+            FROM extractions e
             LEFT JOIN imports i ON e.external_id = i.external_id
-            WHERE i.id IS NULL
+            WHERE (i.id IS NULL OR i.status = 'FAILED')
             AND (e.review_state = 'AUTO' OR e.review_decision IN ('ACCEPTED', 'EDITED'))
             ORDER BY e.created_at DESC
         """
@@ -543,30 +617,35 @@ def import_queue(request: HttpRequest) -> HttpResponse:
             try:
                 data = json.loads(row["extraction_json"])
                 extraction = FinanceExtraction.from_dict(data)
-                ready_items.append(
-                    {
-                        "id": row["id"],
-                        "document_id": row["document_id"],
-                        "external_id": row["external_id"],
-                        "title": extraction.paperless_title,
-                        "amount": extraction.proposal.amount,
-                        "currency": extraction.proposal.currency,
-                        "date": extraction.proposal.date,
-                        "vendor": extraction.proposal.destination_account,
-                        "source_account": extraction.proposal.source_account or "Default",
-                        "review_state": row["review_state"],
-                        "review_decision": row["review_decision"],
-                    }
-                )
+                item = {
+                    "id": row["id"],
+                    "document_id": row["document_id"],
+                    "external_id": row["external_id"],
+                    "title": extraction.paperless_title,
+                    "amount": extraction.proposal.amount,
+                    "currency": extraction.proposal.currency,
+                    "date": extraction.proposal.date,
+                    "vendor": extraction.proposal.destination_account,
+                    "source_account": extraction.proposal.source_account or "Default",
+                    "review_state": row["review_state"],
+                    "review_decision": row["review_decision"],
+                }
+                # Separate failed imports from new items
+                if row["import_status"] == "FAILED":
+                    item["error_message"] = row["import_error"]
+                    failed_items.append(item)
+                else:
+                    ready_items.append(item)
             except Exception as e:
                 logger.error(f"Error parsing extraction {row['id']}: {e}")
 
-        # Get recent imports - join with extractions to get document title
+        # Get recent SUCCESSFUL imports only (for history display)
         import_rows = conn.execute(
             """
             SELECT i.*, e.extraction_json 
             FROM imports i
             LEFT JOIN extractions e ON i.external_id = e.external_id
+            WHERE i.status = 'IMPORTED'
             ORDER BY i.created_at DESC LIMIT 20
         """
         ).fetchall()
@@ -599,6 +678,7 @@ def import_queue(request: HttpRequest) -> HttpResponse:
 
     context = {
         "ready_items": ready_items,
+        "failed_items": failed_items,
         "recent_imports": recent_imports,
         "import_status": _import_status,
         "debug_mode": _is_debug_mode(),
@@ -645,7 +725,12 @@ def run_import(request: HttpRequest) -> HttpResponse:
             _import_status["progress"] = "Importing to Firefly III..."
             result = cmd_import(config, auto_only=False, dry_run=False)
 
-            _import_status["result"] = f"Import completed with exit code {result}"
+            if result == 0:
+                _import_status["result"] = "Import completed successfully"
+            else:
+                _import_status["result"] = (
+                    f"Import completed with {result} failure(s). Check the Failed Imports section below."
+                )
             _import_status["progress"] = "Done"
         except Exception as e:
             _import_status["error"] = str(e)

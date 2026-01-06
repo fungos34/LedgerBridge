@@ -464,7 +464,10 @@
             <div class="user-menu">
                 {% if user.is_authenticated %}
                 <span class="user-name">{{ user.username }}</span>
-                <a href="{% url 'logout' %}" class="btn btn-sm btn-outline">Logout</a>
+                <form method="post" action="{% url 'logout' %}" style="display: inline;">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-sm btn-outline">Logout</button>
+                </form>
                 {% endif %}
             </div>
         </div>
