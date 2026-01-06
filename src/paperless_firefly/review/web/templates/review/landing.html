@@ -108,6 +108,90 @@
         color: var(--gray-600);
     }
     
+    /* Pipeline Diagram */
+    .pipeline-diagram {
+        background: white;
+        border-radius: 0.75rem;
+        padding: 1.5rem;
+        margin-bottom: 2rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    
+    .pipeline-diagram h3 {
+        font-size: 0.875rem;
+        color: var(--gray-500);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 1rem;
+    }
+    
+    .pipeline-flow {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        padding: 1rem 0;
+    }
+    
+    .pipeline-node {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 0.75rem 1rem;
+        border-radius: 0.5rem;
+        min-width: 100px;
+        text-align: center;
+    }
+    
+    .pipeline-node.paperless {
+        background: #dcfce7;
+        border: 2px solid #86efac;
+    }
+    
+    .pipeline-node.ledgerbridge {
+        background: #dbeafe;
+        border: 2px solid #93c5fd;
+    }
+    
+    .pipeline-node.firefly {
+        background: #fef3c7;
+        border: 2px solid #fcd34d;
+    }
+    
+    .pipeline-node .node-icon {
+        font-size: 1.75rem;
+        margin-bottom: 0.25rem;
+    }
+    
+    .pipeline-node .node-name {
+        font-weight: 600;
+        font-size: 0.875rem;
+    }
+    
+    .pipeline-node .node-desc {
+        font-size: 0.7rem;
+        color: var(--gray-600);
+    }
+    
+    .pipeline-arrow {
+        font-size: 1.5rem;
+        color: var(--gray-400);
+    }
+    
+    .pipeline-steps {
+        display: flex;
+        justify-content: space-around;
+        margin-top: 1rem;
+        font-size: 0.75rem;
+        color: var(--gray-500);
+    }
+    
+    .pipeline-steps span {
+        text-align: center;
+        max-width: 120px;
+    }
+    
     @media (max-width: 640px) {
         .landing-grid {
             grid-template-columns: 1fr;
@@ -115,6 +199,14 @@
         
         .quick-stats {
             grid-template-columns: repeat(2, 1fr);
+        }
+        
+        .pipeline-flow {
+            flex-direction: column;
+        }
+        
+        .pipeline-arrow {
+            transform: rotate(90deg);
         }
     }
 </style>
@@ -124,6 +216,35 @@
 <div class="welcome-header">
     <h1>👋 Welcome, {{ user.username }}!</h1>
     <p>Manage your document-to-finance pipeline</p>
+</div>
+
+<!-- Pipeline Visualization Diagram -->
+<div class="pipeline-diagram">
+    <h3>🔄 How LedgerBridge Works</h3>
+    <div class="pipeline-flow">
+        <div class="pipeline-node paperless">
+            <span class="node-icon">📄</span>
+            <span class="node-name">Paperless-ngx</span>
+            <span class="node-desc">Document storage</span>
+        </div>
+        <span class="pipeline-arrow">→</span>
+        <div class="pipeline-node ledgerbridge">
+            <span class="node-icon">🌉</span>
+            <span class="node-name">LedgerBridge</span>
+            <span class="node-desc">AI Extraction + Review</span>
+        </div>
+        <span class="pipeline-arrow">→</span>
+        <div class="pipeline-node firefly">
+            <span class="node-icon">💰</span>
+            <span class="node-name">Firefly III</span>
+            <span class="node-desc">Finance tracking</span>
+        </div>
+    </div>
+    <div class="pipeline-steps">
+        <span>1️⃣ Documents tagged for processing</span>
+        <span>2️⃣ AI extracts invoice data & you review</span>
+        <span>3️⃣ Transactions auto-imported</span>
+    </div>
 </div>
 
 <div class="quick-stats">
@@ -166,6 +287,13 @@
         {% if ready_to_import > 0 %}
         <span class="service-badge ready">{{ ready_to_import }} ready</span>
         {% endif %}
+    </a>
+    
+    <!-- Document Browser (List/Unlist) -->
+    <a href="{% url 'document_browser' %}" class="service-card">
+        <div class="service-icon">📁</div>
+        <div class="service-title">Browse Documents</div>
+        <div class="service-desc">Select which Paperless documents to process</div>
     </a>
     
     <!-- Paperless -->

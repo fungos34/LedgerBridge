@@ -70,7 +70,7 @@ AUTH_PASSWORD_VALIDATORS = [
 # Authentication
 LOGIN_URL = "/login/"
 LOGIN_REDIRECT_URL = "/"
-LOGOUT_REDIRECT_URL = "/login/"
+LOGOUT_REDIRECT_URL = "/"
 
 # Static files
 STATIC_URL = "/static/"
@@ -111,8 +111,12 @@ STATE_DB_PATH = os.environ.get("STATE_DB_PATH", "state.db")
 
 # External URLs (for browser links - what users actually access)
 # If not set, falls back to internal URLs
-PAPERLESS_EXTERNAL_URL = os.environ.get("PAPERLESS_EXTERNAL_URL", os.environ.get("PAPERLESS_URL", "http://localhost:8000"))
-FIREFLY_EXTERNAL_URL = os.environ.get("FIREFLY_EXTERNAL_URL", os.environ.get("FIREFLY_URL", "http://localhost:8080"))
+PAPERLESS_EXTERNAL_URL = os.environ.get(
+    "PAPERLESS_EXTERNAL_URL", os.environ.get("PAPERLESS_URL", "http://localhost:8000")
+)
+FIREFLY_EXTERNAL_URL = os.environ.get(
+    "FIREFLY_EXTERNAL_URL", os.environ.get("FIREFLY_URL", "http://localhost:8080")
+)
 
 # Optional service links for landing page
 SYNCTHING_URL = os.environ.get("SYNCTHING_URL", "")
@@ -121,3 +125,11 @@ FIREFLY_IMPORTER_URL = os.environ.get("FIREFLY_IMPORTER_URL", "")
 # Session settings
 SESSION_COOKIE_AGE = 86400 * 7  # 1 week
 SESSION_SAVE_EVERY_REQUEST = True
+
+# LedgerBridge specific settings
+# Debug mode: When True, shows detailed tracebacks in error messages
+# Set via environment variable: LEDGERBRIDGE_DEBUG=true
+LEDGERBRIDGE_DEBUG = os.environ.get("LEDGERBRIDGE_DEBUG", "false").lower() in ("true", "1", "yes")
+
+# Filter tag for document extraction
+PAPERLESS_FILTER_TAG = os.environ.get("PAPERLESS_FILTER_TAG", "finance/inbox")

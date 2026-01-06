@@ -187,9 +187,15 @@
 {% elif import_status.error %}
 <div class="status-banner error">
     <span>❌</span>
-    <div>
+    <div style="flex: 1;">
         <strong>Import failed</strong>
         <div>{{ import_status.error }}</div>
+        {% if debug_mode and import_status.traceback %}
+        <details style="margin-top: 0.5rem;">
+            <summary style="cursor: pointer; font-size: 0.85rem; color: #dc2626;">🔍 Show detailed traceback</summary>
+            <pre style="margin-top: 0.5rem; padding: 0.75rem; background: #fef2f2; border-radius: 0.25rem; font-size: 0.75rem; overflow-x: auto; white-space: pre-wrap; word-wrap: break-word;">{{ import_status.traceback }}</pre>
+        </details>
+        {% endif %}
     </div>
 </div>
 {% elif import_status.result %}
@@ -259,13 +265,17 @@
                 <th>Status</th>
                 <th>Firefly ID</th>
                 <th>Error</th>
-                <th>Date</th>
+                <th>Imported At</th>
             </tr>
         </thead>
         <tbody>
             {% for imp in recent_imports %}
             <tr>
-                <td>Doc #{{ imp.document_id }}</td>
+                <td>
+                    <a href="{{ paperless_url }}/documents/{{ imp.document_id }}" target="_blank" title="Open in Paperless">
+                        📄 {% if imp.title %}{{ imp.title|truncatechars:35 }}{% else %}Doc #{{ imp.document_id }}{% endif %}
+                    </a>
+                </td>
                 <td>
                     {% if imp.status == 'IMPORTED' %}
                     <span class="status-badge imported">✓ Imported</span>
@@ -287,7 +297,7 @@
                 <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis;">
                     {{ imp.error_message|default:"-" }}
                 </td>
-                <td>{{ imp.created_at|slice:":10" }}</td>
+                <td>{{ imp.created_at|slice:":19" }}</td>
             </tr>
             {% endfor %}
         </tbody>

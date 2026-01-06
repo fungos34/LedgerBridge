@@ -1,0 +1,337 @@
+{% extends "review/base.html" %}
+
+{% block title %}Browse Documents - LedgerBridge{% endblock %}
+
+{% block extra_css %}
+<style>
+    .browser-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+        flex-wrap: wrap;
+        gap: 1rem;
+    }
+    
+    .filter-bar {
+        background: white;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin-bottom: 1rem;
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+        align-items: center;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    }
+    
+    .filter-bar input[type="text"] {
+        flex: 1;
+        min-width: 200px;
+        padding: 0.5rem 0.75rem;
+        border: 1px solid var(--gray-300);
+        border-radius: 0.375rem;
+    }
+    
+    .filter-bar select {
+        padding: 0.5rem 0.75rem;
+        border: 1px solid var(--gray-300);
+        border-radius: 0.375rem;
+        background: white;
+    }
+    
+    .doc-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+        gap: 1rem;
+    }
+    
+    .doc-card {
+        background: white;
+        border-radius: 0.5rem;
+        padding: 1rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        transition: transform 0.2s, box-shadow 0.2s;
+    }
+    
+    .doc-card:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    
+    .doc-card.listed {
+        border-left: 4px solid #10b981;
+    }
+    
+    .doc-card.unlisted {
+        border-left: 4px solid var(--gray-300);
+    }
+    
+    .doc-title {
+        font-weight: 600;
+        font-size: 0.95rem;
+        color: var(--gray-800);
+        word-break: break-word;
+    }
+    
+    .doc-meta {
+        font-size: 0.8rem;
+        color: var(--gray-500);
+    }
+    
+    .doc-actions {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: auto;
+        padding-top: 0.5rem;
+        border-top: 1px solid var(--gray-100);
+    }
+    
+    .toggle-btn {
+        flex: 1;
+        padding: 0.5rem;
+        border: none;
+        border-radius: 0.375rem;
+        cursor: pointer;
+        font-size: 0.85rem;
+        font-weight: 500;
+        transition: background 0.2s;
+    }
+    
+    .toggle-btn.list {
+        background: #d1fae5;
+        color: #065f46;
+    }
+    
+    .toggle-btn.list:hover {
+        background: #a7f3d0;
+    }
+    
+    .toggle-btn.unlist {
+        background: #fee2e2;
+        color: #991b1b;
+    }
+    
+    .toggle-btn.unlist:hover {
+        background: #fecaca;
+    }
+    
+    .toggle-btn:disabled {
+        opacity: 0.5;
+        cursor: wait;
+    }
+    
+    .status-indicator {
+        display: inline-block;
+        padding: 0.15rem 0.5rem;
+        border-radius: 9999px;
+        font-size: 0.7rem;
+        font-weight: 600;
+    }
+    
+    .status-indicator.listed {
+        background: #d1fae5;
+        color: #065f46;
+    }
+    
+    .status-indicator.unlisted {
+        background: var(--gray-100);
+        color: var(--gray-600);
+    }
+    
+    .pagination {
+        display: flex;
+        justify-content: center;
+        gap: 0.5rem;
+        margin-top: 2rem;
+        padding: 1rem;
+    }
+    
+    .pagination a, .pagination span {
+        padding: 0.5rem 1rem;
+        border-radius: 0.375rem;
+        text-decoration: none;
+    }
+    
+    .pagination a {
+        background: white;
+        color: var(--primary);
+        border: 1px solid var(--gray-200);
+    }
+    
+    .pagination a:hover {
+        background: var(--gray-50);
+    }
+    
+    .pagination .current {
+        background: var(--primary);
+        color: white;
+    }
+    
+    .info-banner {
+        background: #dbeafe;
+        border: 1px solid #93c5fd;
+        color: #1e40af;
+        padding: 0.75rem 1rem;
+        border-radius: 0.5rem;
+        margin-bottom: 1rem;
+        font-size: 0.875rem;
+    }
+    
+    .empty-state {
+        text-align: center;
+        padding: 3rem;
+        color: var(--gray-500);
+    }
+    
+    @media (max-width: 640px) {
+        .doc-grid {
+            grid-template-columns: 1fr;
+        }
+        
+        .filter-bar {
+            flex-direction: column;
+            align-items: stretch;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="browser-header">
+    <h1>📁 Document Browser</h1>
+    <a href="{% url 'home' %}" class="btn btn-outline">← Back</a>
+</div>
+
+<div class="info-banner">
+    <strong>💡 Tip:</strong> Documents tagged with <code>{{ filter_tag }}</code> will be processed during extraction. 
+    Use List/Unlist to manage which documents get imported to Firefly III.
+</div>
+
+<form method="get" class="filter-bar">
+    <input type="text" name="search" placeholder="Search documents..." value="{{ search }}">
+    <select name="listed">
+        <option value="all" {% if show_listed == 'all' %}selected{% endif %}>All Documents</option>
+        <option value="listed" {% if show_listed == 'listed' %}selected{% endif %}>Listed (tagged)</option>
+        <option value="unlisted" {% if show_listed == 'unlisted' %}selected{% endif %}>Unlisted</option>
+    </select>
+    <button type="submit" class="btn btn-secondary">Filter</button>
+</form>
+
+{% if documents %}
+<p style="margin-bottom: 1rem; color: var(--gray-600); font-size: 0.875rem;">
+    Showing {{ documents|length }} of {{ total_count }} documents
+</p>
+
+<div class="doc-grid">
+    {% for doc in documents %}
+    <div class="doc-card {% if doc.is_listed %}listed{% else %}unlisted{% endif %}" id="doc-{{ doc.id }}">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+            <span class="doc-title">{{ doc.title|truncatechars:60 }}</span>
+            <span class="status-indicator {% if doc.is_listed %}listed{% else %}unlisted{% endif %}">
+                {% if doc.is_listed %}Listed{% else %}Unlisted{% endif %}
+            </span>
+        </div>
+        <div class="doc-meta">
+            📅 {{ doc.created|slice:":10" }} &nbsp;|&nbsp; ID: {{ doc.id }}
+        </div>
+        <div class="doc-actions">
+            <a href="{{ paperless_url }}/documents/{{ doc.id }}" target="_blank" class="btn btn-sm btn-outline" style="flex: 1; text-align: center;">
+                View in Paperless
+            </a>
+            {% if doc.is_listed %}
+            <button type="button" class="toggle-btn unlist" onclick="toggleDocument({{ doc.id }}, 'unlist')">
+                ➖ Unlist
+            </button>
+            {% else %}
+            <button type="button" class="toggle-btn list" onclick="toggleDocument({{ doc.id }}, 'list')">
+                ➕ List
+            </button>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{% if total_pages > 1 %}
+<div class="pagination">
+    {% if has_prev %}
+    <a href="?page={{ page|add:"-1" }}&search={{ search }}&listed={{ show_listed }}">← Previous</a>
+    {% endif %}
+    
+    <span class="current">Page {{ page }} of {{ total_pages }}</span>
+    
+    {% if has_next %}
+    <a href="?page={{ page|add:"1" }}&search={{ search }}&listed={{ show_listed }}">Next →</a>
+    {% endif %}
+</div>
+{% endif %}
+
+{% else %}
+<div class="empty-state">
+    <div style="font-size: 3rem; margin-bottom: 1rem;">📭</div>
+    <div>No documents found</div>
+    <p>Try adjusting your search or filter settings</p>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function toggleDocument(docId, action) {
+    const card = document.getElementById('doc-' + docId);
+    const btn = card.querySelector('.toggle-btn');
+    
+    // Disable button during request
+    btn.disabled = true;
+    btn.textContent = 'Working...';
+    
+    fetch('{% url "toggle_listing" document_id=0 %}'.replace('0', docId), {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRFToken': '{{ csrf_token }}'
+        },
+        body: 'action=' + action
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Update UI
+            const indicator = card.querySelector('.status-indicator');
+            if (action === 'list') {
+                card.classList.remove('unlisted');
+                card.classList.add('listed');
+                indicator.classList.remove('unlisted');
+                indicator.classList.add('listed');
+                indicator.textContent = 'Listed';
+                btn.className = 'toggle-btn unlist';
+                btn.textContent = '➖ Unlist';
+                btn.onclick = function() { toggleDocument(docId, 'unlist'); };
+            } else {
+                card.classList.remove('listed');
+                card.classList.add('unlisted');
+                indicator.classList.remove('listed');
+                indicator.classList.add('unlisted');
+                indicator.textContent = 'Unlisted';
+                btn.className = 'toggle-btn list';
+                btn.textContent = '➕ List';
+                btn.onclick = function() { toggleDocument(docId, 'list'); };
+            }
+        } else {
+            alert('Error: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        alert('Error: ' + error);
+    })
+    .finally(() => {
+        btn.disabled = false;
+    });
+}
+</script>
+{% endblock %}
