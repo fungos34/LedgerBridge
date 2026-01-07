@@ -53,7 +53,6 @@ def run_server(
         paperless_url: Paperless base URL (overrides config)
         paperless_token: Paperless API token (overrides config)
     """
-    import sys
 
     # Set up Django settings
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "paperless_firefly.review.web.settings")

@@ -7,17 +7,14 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
 
 from ..config import Config, load_config
 from ..extractors import ExtractorRouter
-from ..firefly_client import FireflyClient, FireflyError
-from ..paperless_client import PaperlessClient, PaperlessError
-from ..review import ReviewDecision
+from ..firefly_client import FireflyClient
+from ..paperless_client import PaperlessClient
 from ..schemas.dedupe import compute_file_hash
-from ..schemas.finance_extraction import ReviewState
-from ..schemas.firefly_payload import build_firefly_payload, validate_firefly_payload
-from ..state_store import ImportStatus, StateStore
+from ..schemas.firefly_payload import build_firefly_payload
+from ..state_store import StateStore
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +142,7 @@ def create_cli() -> argparse.ArgumentParser:
     )
 
     # status command
-    status_parser = subparsers.add_parser("status", help="Show pipeline status and statistics")
+    subparsers.add_parser("status", help="Show pipeline status and statistics")
 
     return parser
 
@@ -174,7 +171,7 @@ def cmd_scan(config: Config, tag: str, limit: int) -> int:
     return 0
 
 
-def cmd_extract(config: Config, doc_id: Optional[int], tag: str, limit: int) -> int:
+def cmd_extract(config: Config, doc_id: int | None, tag: str, limit: int) -> int:
     """Extract finance data from documents."""
     print("📊 Extracting finance data...")
 
@@ -260,7 +257,7 @@ def cmd_review(config: Config, host: str = "127.0.0.1", port: int = 8080) -> int
     """Start web-based review interface."""
     from ..review.web.app import run_server
 
-    print(f"🌐 Starting review web interface...")
+    print("🌐 Starting review web interface...")
 
     try:
         run_server(
@@ -280,7 +277,7 @@ def cmd_import(
     config: Config,
     auto_only: bool,
     dry_run: bool,
-    source_account_override: Optional[str] = None,
+    source_account_override: str | None = None,
 ) -> int:
     """Import transactions to Firefly III.
 
@@ -475,7 +472,7 @@ def cmd_status(config: Config) -> int:
     return 0
 
 
-def main(args: Optional[list[str]] = None) -> int:
+def main(args: list[str] | None = None) -> int:
     """Main entry point."""
     parser = create_cli()
     parsed = parser.parse_args(args)

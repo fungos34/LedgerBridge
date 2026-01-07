@@ -6,7 +6,6 @@ which provide the highest confidence extraction.
 """
 
 from decimal import Decimal
-from pathlib import Path
 
 import pytest
 
@@ -22,7 +21,6 @@ from fixtures import (
     get_zugferd_sample,
 )
 
-from paperless_firefly.extractors.base import ExtractionResult
 from paperless_firefly.extractors.einvoice_extractor import (
     EInvoiceExtractor,
     _safe_date,
@@ -31,17 +29,17 @@ from paperless_firefly.extractors.einvoice_extractor import (
 
 # Sample CII (Cross Industry Invoice) XML - used by ZUGFeRD/Factur-X
 SAMPLE_CII_XML = """<?xml version="1.0" encoding="UTF-8"?>
-<rsm:CrossIndustryInvoice 
+<rsm:CrossIndustryInvoice
     xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100"
     xmlns:ram="urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100"
     xmlns:udt="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100">
-    
+
     <rsm:ExchangedDocumentContext>
         <ram:GuidelineSpecifiedDocumentContextParameter>
             <ram:ID>urn:factur-x.eu:1p0:extended</ram:ID>
         </ram:GuidelineSpecifiedDocumentContextParameter>
     </rsm:ExchangedDocumentContext>
-    
+
     <rsm:ExchangedDocument>
         <ram:ID>INV-2024-001234</ram:ID>
         <ram:Name>Rechnung</ram:Name>
@@ -50,7 +48,7 @@ SAMPLE_CII_XML = """<?xml version="1.0" encoding="UTF-8"?>
             <udt:DateTimeString format="102">20241118</udt:DateTimeString>
         </ram:IssueDateTime>
     </rsm:ExchangedDocument>
-    
+
     <rsm:SupplyChainTradeTransaction>
         <ram:ApplicableHeaderTradeAgreement>
             <ram:SellerTradeParty>
@@ -66,7 +64,7 @@ SAMPLE_CII_XML = """<?xml version="1.0" encoding="UTF-8"?>
                 <ram:Name>Kunde AG</ram:Name>
             </ram:BuyerTradeParty>
         </ram:ApplicableHeaderTradeAgreement>
-        
+
         <ram:IncludedSupplyChainTradeLineItem>
             <ram:AssociatedDocumentLineDocument>
                 <ram:LineID>1</ram:LineID>
@@ -88,7 +86,7 @@ SAMPLE_CII_XML = """<?xml version="1.0" encoding="UTF-8"?>
                 </ram:SpecifiedTradeSettlementLineMonetarySummation>
             </ram:SpecifiedLineTradeSettlement>
         </ram:IncludedSupplyChainTradeLineItem>
-        
+
         <ram:ApplicableHeaderTradeSettlement>
             <ram:InvoiceCurrencyCode>EUR</ram:InvoiceCurrencyCode>
             <ram:ApplicableTradeTax>
@@ -115,14 +113,14 @@ SAMPLE_UBL_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
          xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
          xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
-    
+
     <cbc:UBLVersionID>2.1</cbc:UBLVersionID>
     <cbc:CustomizationID>urn:cen.eu:en16931:2017#compliant#urn:xoev-de:kosit:standard:xrechnung_2.0</cbc:CustomizationID>
     <cbc:ID>XRECH-2024-00567</cbc:ID>
     <cbc:IssueDate>2024-11-20</cbc:IssueDate>
     <cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>
     <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
-    
+
     <cac:AccountingSupplierParty>
         <cac:Party>
             <cac:PartyName>
@@ -138,7 +136,7 @@ SAMPLE_UBL_XML = """<?xml version="1.0" encoding="UTF-8"?>
             </cac:PostalAddress>
         </cac:Party>
     </cac:AccountingSupplierParty>
-    
+
     <cac:AccountingCustomerParty>
         <cac:Party>
             <cac:PartyName>
@@ -146,7 +144,7 @@ SAMPLE_UBL_XML = """<?xml version="1.0" encoding="UTF-8"?>
             </cac:PartyName>
         </cac:Party>
     </cac:AccountingCustomerParty>
-    
+
     <cac:TaxTotal>
         <cbc:TaxAmount currencyID="EUR">190.00</cbc:TaxAmount>
         <cac:TaxSubtotal>
@@ -158,14 +156,14 @@ SAMPLE_UBL_XML = """<?xml version="1.0" encoding="UTF-8"?>
             </cac:TaxCategory>
         </cac:TaxSubtotal>
     </cac:TaxTotal>
-    
+
     <cac:LegalMonetaryTotal>
         <cbc:LineExtensionAmount currencyID="EUR">1000.00</cbc:LineExtensionAmount>
         <cbc:TaxExclusiveAmount currencyID="EUR">1000.00</cbc:TaxExclusiveAmount>
         <cbc:TaxInclusiveAmount currencyID="EUR">1190.00</cbc:TaxInclusiveAmount>
         <cbc:PayableAmount currencyID="EUR">1190.00</cbc:PayableAmount>
     </cac:LegalMonetaryTotal>
-    
+
     <cac:InvoiceLine>
         <cbc:ID>1</cbc:ID>
         <cbc:InvoicedQuantity unitCode="EA">1</cbc:InvoicedQuantity>
@@ -182,7 +180,7 @@ SAMPLE_UBL_XML = """<?xml version="1.0" encoding="UTF-8"?>
 
 # Minimal CII XML for edge case testing
 MINIMAL_CII_XML = """<?xml version="1.0"?>
-<rsm:CrossIndustryInvoice 
+<rsm:CrossIndustryInvoice
     xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100"
     xmlns:ram="urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100"
     xmlns:udt="urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100">
@@ -430,7 +428,7 @@ class TestCIIVariants:
         """Should handle ZUGFeRD BASIC profile."""
         # BASIC profile has minimal fields
         basic_xml = """<?xml version="1.0"?>
-        <rsm:CrossIndustryInvoice 
+        <rsm:CrossIndustryInvoice
             xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100"
             xmlns:ram="urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100">
             <rsm:ExchangedDocument>

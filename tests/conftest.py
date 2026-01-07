@@ -1,7 +1,5 @@
 """Test fixtures and utilities."""
 
-import json
-from decimal import Decimal
 from pathlib import Path
 
 import pytest

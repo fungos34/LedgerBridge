@@ -55,4 +55,30 @@ urlpatterns = [
     path("api/stats/", views.api_stats, name="api_stats"),
     path("api/accounts/", views.api_firefly_accounts, name="api_accounts"),
     path("api/extract/status/", views.api_extract_status, name="api_extract_status"),
+    # ============================================================================
+    # Reconciliation Routes (Phase 3)
+    # ============================================================================
+    path("reconciliation/", views.reconciliation_list, name="reconciliation_list"),
+    path(
+        "reconciliation/<int:proposal_id>/",
+        views.reconciliation_detail,
+        name="reconciliation_detail",
+    ),
+    path(
+        "reconciliation/<int:proposal_id>/accept/",
+        views.accept_proposal,
+        name="accept_proposal",
+    ),
+    path(
+        "reconciliation/<int:proposal_id>/reject/",
+        views.reject_proposal,
+        name="reject_proposal",
+    ),
+    path("reconciliation/manual-link/", views.manual_link, name="manual_link"),
+    path("reconciliation/unlinked/", views.unlinked_transactions, name="unlinked_transactions"),
+    # ============================================================================
+    # Audit Trail Routes (Phase 8)
+    # ============================================================================
+    path("audit-trail/", views.audit_trail_list, name="audit_trail_list"),
+    path("audit-trail/<int:run_id>/", views.audit_trail_detail, name="audit_trail_detail"),
 ]

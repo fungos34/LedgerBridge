@@ -11,12 +11,10 @@ These formats provide the highest confidence extraction because
 the data is structured XML, not OCR text.
 """
 
-import io
 import re
-import zipfile
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
-from typing import Any, Optional
+from typing import Any
 from xml.etree import ElementTree as ET
 
 from .base import BaseExtractor, ExtractionResult
@@ -46,7 +44,7 @@ ZUGFERD_FILENAMES = [
 ]
 
 
-def _safe_decimal(value: Optional[str]) -> Optional[Decimal]:
+def _safe_decimal(value: str | None) -> Decimal | None:
     """Safely convert string to Decimal.
 
     Handles various formats:
@@ -101,7 +99,7 @@ def _safe_decimal(value: Optional[str]) -> Optional[Decimal]:
         return None
 
 
-def _safe_date(value: Optional[str], formats: list[str] = None) -> Optional[str]:
+def _safe_date(value: str | None, formats: list[str] = None) -> str | None:
     """Parse date string to ISO format YYYY-MM-DD."""
     if not value:
         return None
@@ -145,7 +143,7 @@ class EInvoiceExtractor(BaseExtractor):
     def priority(self) -> int:
         return 100  # Highest priority - structured data
 
-    def can_extract(self, content: str, file_bytes: Optional[bytes] = None) -> bool:
+    def can_extract(self, content: str, file_bytes: bytes | None = None) -> bool:
         """
         Check if file contains e-invoice XML.
 
@@ -193,7 +191,7 @@ class EInvoiceExtractor(BaseExtractor):
             pass
         return False
 
-    def extract(self, content: str, file_bytes: Optional[bytes] = None) -> ExtractionResult:
+    def extract(self, content: str, file_bytes: bytes | None = None) -> ExtractionResult:
         """Extract finance data from e-invoice XML."""
         result = ExtractionResult(extraction_strategy=self.name)
         result.raw_matches = {}
@@ -242,7 +240,7 @@ class EInvoiceExtractor(BaseExtractor):
 
         return self._parse_ubl(root, result)
 
-    def _extract_xml_from_pdf(self, pdf_bytes: bytes) -> Optional[str]:
+    def _extract_xml_from_pdf(self, pdf_bytes: bytes) -> str | None:
         """
         Extract embedded XML from PDF (ZUGFeRD/Factur-X).
 
@@ -290,7 +288,7 @@ class EInvoiceExtractor(BaseExtractor):
                         except ET.ParseError:
                             continue
 
-        except Exception as e:
+        except Exception:
             pass
 
         return None
@@ -406,7 +404,7 @@ class EInvoiceExtractor(BaseExtractor):
 
     def _parse_cii_line_item(
         self, item: ET.Element, ns: dict, position: int
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Parse a CII line item."""
         try:
             data = {"position": position}
@@ -581,7 +579,7 @@ class EInvoiceExtractor(BaseExtractor):
 
     def _parse_ubl_line_item(
         self, line: ET.Element, ns: dict, position: int
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Parse a UBL Invoice line item."""
         try:
             data = {"position": position}

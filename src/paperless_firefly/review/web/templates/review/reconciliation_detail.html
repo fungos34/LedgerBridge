@@ -1,0 +1,410 @@
+{% extends "review/base.html" %}
+
+{% block title %}Review Match - Proposal #{{ proposal_id }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .match-layout {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1.5rem;
+        align-items: start;
+    }
+    
+    @media (max-width: 1024px) {
+        .match-layout {
+            grid-template-columns: 1fr;
+        }
+    }
+    
+    .match-panel {
+        background: white;
+        border-radius: 0.5rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        overflow: hidden;
+    }
+    
+    .panel-header {
+        padding: 1rem 1.5rem;
+        border-bottom: 1px solid var(--gray-200);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    
+    .panel-header h3 {
+        margin: 0;
+        font-size: 1rem;
+        font-weight: 600;
+    }
+    
+    .panel-body {
+        padding: 1.5rem;
+    }
+    
+    .detail-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+    }
+    
+    .detail-item {
+        margin-bottom: 0.75rem;
+    }
+    
+    .detail-item .label {
+        font-size: 0.625rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--gray-500);
+        margin-bottom: 0.25rem;
+    }
+    
+    .detail-item .value {
+        font-size: 0.875rem;
+        color: var(--gray-900);
+    }
+    
+    .detail-item .value.amount {
+        font-size: 1.25rem;
+        font-weight: 700;
+        font-family: "SFMono-Regular", Consolas, monospace;
+    }
+    
+    .match-score-large {
+        text-align: center;
+        padding: 1.5rem;
+        background: var(--gray-50);
+        border-radius: 0.5rem;
+        margin-bottom: 1.5rem;
+    }
+    
+    .match-score-large .score {
+        font-size: 3rem;
+        font-weight: 700;
+        line-height: 1;
+    }
+    
+    .match-score-large .label {
+        font-size: 0.75rem;
+        color: var(--gray-500);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-top: 0.5rem;
+    }
+    
+    .match-score-large.high .score { color: var(--success); }
+    .match-score-large.medium .score { color: var(--warning); }
+    .match-score-large.low .score { color: var(--danger); }
+    
+    .reasons-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+    
+    .reasons-list li {
+        padding: 0.5rem 0;
+        border-bottom: 1px solid var(--gray-100);
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    .reasons-list li:last-child {
+        border-bottom: none;
+    }
+    
+    .reason-icon {
+        width: 1.25rem;
+        height: 1.25rem;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.75rem;
+        background: var(--success);
+        color: white;
+    }
+    
+    .nav-buttons {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+    }
+    
+    .nav-buttons .position {
+        color: var(--gray-500);
+        font-size: 0.875rem;
+    }
+    
+    .action-buttons {
+        display: flex;
+        gap: 0.75rem;
+        margin-top: 1.5rem;
+    }
+    
+    .action-buttons form {
+        flex: 1;
+    }
+    
+    .action-buttons .btn {
+        width: 100%;
+    }
+    
+    .audit-section {
+        margin-top: 1.5rem;
+        border-top: 1px solid var(--gray-200);
+        padding-top: 1.5rem;
+    }
+    
+    .audit-section h4 {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--gray-500);
+        margin-bottom: 0.75rem;
+    }
+    
+    .audit-item {
+        font-size: 0.75rem;
+        padding: 0.5rem;
+        background: var(--gray-50);
+        border-radius: 0.25rem;
+        margin-bottom: 0.5rem;
+    }
+    
+    .audit-item .timestamp {
+        color: var(--gray-500);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="nav-buttons">
+    <div class="flex gap-2">
+        <a href="{% url 'reconciliation_list' %}" class="btn btn-outline">← Back to List</a>
+        {% if prev_id %}
+        <a href="{% url 'reconciliation_detail' prev_id %}" class="btn btn-outline">← Previous</a>
+        {% endif %}
+    </div>
+    <span class="position">{{ current_position }} of {{ pending_count }}</span>
+    <div>
+        {% if next_id %}
+        <a href="{% url 'reconciliation_detail' next_id %}" class="btn btn-outline">Next →</a>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Match Score Header -->
+<div class="match-score-large {% if score_pct >= 85 %}high{% elif score_pct >= 60 %}medium{% else %}low{% endif %}">
+    <div class="score">{{ score_pct|floatformat:0 }}%</div>
+    <div class="label">Match Confidence</div>
+</div>
+
+<div class="match-layout">
+    <!-- Transaction Panel (Left) -->
+    <div class="match-panel">
+        <div class="panel-header">
+            <h3>💳 Firefly Transaction</h3>
+            {% if tx_details %}
+            <a href="{{ firefly_url }}/transactions/show/{{ proposal.firefly_id }}" 
+               target="_blank" class="btn btn-sm btn-outline">
+                Open ↗
+            </a>
+            {% endif %}
+        </div>
+        <div class="panel-body">
+            {% if tx_details %}
+            <div class="detail-item">
+                <div class="label">Amount</div>
+                <div class="value amount">{{ tx_details.amount }} {{ tx_details.currency|default:"EUR" }}</div>
+            </div>
+            
+            <div class="detail-grid">
+                <div class="detail-item">
+                    <div class="label">Date</div>
+                    <div class="value">{{ tx_details.date }}</div>
+                </div>
+                <div class="detail-item">
+                    <div class="label">Transaction ID</div>
+                    <div class="value">#{{ proposal.firefly_id }}</div>
+                </div>
+            </div>
+            
+            <div class="detail-item">
+                <div class="label">Description</div>
+                <div class="value">{{ tx_details.description|default:"-" }}</div>
+            </div>
+            
+            <div class="detail-grid">
+                <div class="detail-item">
+                    <div class="label">Source Account</div>
+                    <div class="value">{{ tx_details.source_account|default:"-" }}</div>
+                </div>
+                <div class="detail-item">
+                    <div class="label">Destination</div>
+                    <div class="value">{{ tx_details.destination_account|default:"-" }}</div>
+                </div>
+            </div>
+            
+            {% if tx_details.category %}
+            <div class="detail-item">
+                <div class="label">Category</div>
+                <div class="value">{{ tx_details.category }}</div>
+            </div>
+            {% endif %}
+            
+            {% if tx_details.internal_reference %}
+            <div class="detail-item">
+                <div class="label">Internal Reference</div>
+                <div class="value text-mono" style="font-size: 0.75rem;">{{ tx_details.internal_reference }}</div>
+            </div>
+            {% endif %}
+            {% else %}
+            <div class="empty-state">
+                <p>Transaction details not available in cache.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    
+    <!-- Document Panel (Right) -->
+    <div class="match-panel">
+        <div class="panel-header">
+            <h3>📄 Paperless Document</h3>
+            {% if doc_record %}
+            <a href="{{ paperless_url }}/documents/{{ proposal.document_id }}/" 
+               target="_blank" class="btn btn-sm btn-outline">
+                Open ↗
+            </a>
+            {% endif %}
+        </div>
+        <div class="panel-body">
+            {% if doc_record %}
+            <div class="detail-item">
+                <div class="label">Title</div>
+                <div class="value"><strong>{{ doc_record.title|default:"Untitled" }}</strong></div>
+            </div>
+            
+            <div class="detail-grid">
+                <div class="detail-item">
+                    <div class="label">Document ID</div>
+                    <div class="value">#{{ proposal.document_id }}</div>
+                </div>
+                <div class="detail-item">
+                    <div class="label">Type</div>
+                    <div class="value">{{ doc_record.document_type|default:"-" }}</div>
+                </div>
+            </div>
+            
+            {% if doc_record.correspondent %}
+            <div class="detail-item">
+                <div class="label">Correspondent</div>
+                <div class="value">{{ doc_record.correspondent }}</div>
+            </div>
+            {% endif %}
+            
+            {% if extraction_data %}
+            <div class="detail-item">
+                <div class="label">Extracted Amount</div>
+                <div class="value amount">
+                    {{ extraction_data.proposal.amount }} {{ extraction_data.proposal.currency|default:"EUR" }}
+                </div>
+            </div>
+            
+            <div class="detail-grid">
+                <div class="detail-item">
+                    <div class="label">Extracted Date</div>
+                    <div class="value">{{ extraction_data.proposal.date|default:"-" }}</div>
+                </div>
+                <div class="detail-item">
+                    <div class="label">Confidence</div>
+                    <div class="value">{{ proposal.overall_confidence|default:0|floatformat:0 }}%</div>
+                </div>
+            </div>
+            
+            {% if extraction_data.proposal.destination_account %}
+            <div class="detail-item">
+                <div class="label">Vendor</div>
+                <div class="value">{{ extraction_data.proposal.destination_account }}</div>
+            </div>
+            {% endif %}
+            {% endif %}
+            {% else %}
+            <div class="empty-state">
+                <p>Document details not available.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Match Reasons Card -->
+<div class="card mt-4">
+    <div class="card-header">
+        <h3>🔍 Match Reasons</h3>
+    </div>
+    <div class="card-body">
+        {% if reasons_list %}
+        <ul class="reasons-list">
+            {% for reason in reasons_list %}
+            <li>
+                <span class="reason-icon">✓</span>
+                <span>{{ reason }}</span>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-muted">No specific match reasons recorded.</p>
+        {% endif %}
+        
+        <!-- Action Buttons -->
+        <div class="action-buttons">
+            <form method="post" action="{% url 'accept_proposal' proposal_id %}">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-success">
+                    ✓ Accept Match
+                </button>
+            </form>
+            <form method="post" action="{% url 'reject_proposal' proposal_id %}">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-danger">
+                    ✕ Reject Match
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Audit Trail Section -->
+{% if audit_trail %}
+<div class="card mt-4">
+    <div class="card-header">
+        <h3>📜 Audit Trail</h3>
+    </div>
+    <div class="card-body">
+        {% for run in audit_trail|slice:":5" %}
+        <div class="audit-item">
+            <div class="flex justify-between">
+                <strong>{{ run.final_state }}</strong>
+                <span class="timestamp">{{ run.run_timestamp|slice:":19" }}</span>
+            </div>
+            <div class="text-muted">
+                Source: {{ run.decision_source|default:"N/A" }}
+                {% if run.firefly_write_action %}
+                | Action: {{ run.firefly_write_action }}
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+        {% if audit_trail|length > 5 %}
+        <a href="{% url 'audit_trail_list' %}?document_id={{ proposal.document_id }}" class="btn btn-sm btn-outline mt-2">
+            View All ({{ audit_trail|length }})
+        </a>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+{% endblock %}

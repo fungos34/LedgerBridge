@@ -11,10 +11,9 @@ Supported formats:
 """
 
 import re
-from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
-from typing import Any, Optional
+from typing import Any
 
 from .base import BaseExtractor, ExtractionResult
 
@@ -114,9 +113,7 @@ def parse_english_amount(amount_str: str) -> Decimal:
     return Decimal(cleaned)
 
 
-def parse_date_match(
-    match: re.Match, date_format: Optional[str], pattern_type: str
-) -> Optional[str]:
+def parse_date_match(match: re.Match, date_format: str | None, pattern_type: str) -> str | None:
     """Parse a date regex match into YYYY-MM-DD format."""
     try:
         if pattern_type == "german_month":
@@ -150,11 +147,11 @@ class OCRTextExtractor(BaseExtractor):
     def priority(self) -> int:
         return 10  # Lowest priority (last resort)
 
-    def can_extract(self, content: str, file_bytes: Optional[bytes] = None) -> bool:
+    def can_extract(self, content: str, file_bytes: bytes | None = None) -> bool:
         """OCR extractor can always attempt extraction if there's content."""
         return bool(content and content.strip())
 
-    def extract(self, content: str, file_bytes: Optional[bytes] = None) -> ExtractionResult:
+    def extract(self, content: str, file_bytes: bytes | None = None) -> ExtractionResult:
         """Extract finance data using pattern matching."""
         result = ExtractionResult(extraction_strategy=self.name)
         result.raw_matches = {}
@@ -216,7 +213,7 @@ class OCRTextExtractor(BaseExtractor):
 
         return result
 
-    def _extract_date(self, content: str) -> Optional[dict[str, Any]]:
+    def _extract_date(self, content: str) -> dict[str, Any] | None:
         """Extract most likely document date."""
         candidates: list[dict[str, Any]] = []
 
@@ -256,7 +253,7 @@ class OCRTextExtractor(BaseExtractor):
         candidates.sort(key=lambda x: (-x["confidence"], x["position"]))
         return candidates[0]
 
-    def _extract_currency(self, content: str) -> Optional[dict[str, Any]]:
+    def _extract_currency(self, content: str) -> dict[str, Any] | None:
         """Extract currency from content."""
         for pattern, currency in CURRENCY_PATTERNS:
             if re.search(pattern, content):
@@ -266,9 +263,7 @@ class OCRTextExtractor(BaseExtractor):
                 }
         return None
 
-    def _extract_amount(
-        self, content: str, currency: Optional[str] = None
-    ) -> Optional[dict[str, Any]]:
+    def _extract_amount(self, content: str, currency: str | None = None) -> dict[str, Any] | None:
         """
         Extract the most likely total amount.
 
@@ -345,7 +340,7 @@ class OCRTextExtractor(BaseExtractor):
         candidates.sort(key=lambda x: (-x["confidence"], -x["amount"]))
         return candidates[0]
 
-    def _extract_invoice_number(self, content: str) -> Optional[dict[str, Any]]:
+    def _extract_invoice_number(self, content: str) -> dict[str, Any] | None:
         """Extract invoice/receipt number."""
         for pattern, number_type, confidence in INVOICE_PATTERNS:
             match = re.search(pattern, content, re.IGNORECASE)
@@ -358,7 +353,7 @@ class OCRTextExtractor(BaseExtractor):
                 }
         return None
 
-    def _extract_vendor(self, content: str) -> Optional[dict[str, Any]]:
+    def _extract_vendor(self, content: str) -> dict[str, Any] | None:
         """
         Extract vendor name from document.
 

@@ -4,26 +4,23 @@ Views for the review web interface.
 
 import json
 import logging
-import subprocess
 import threading
 import traceback
 from decimal import Decimal, InvalidOperation
-from functools import wraps
-from typing import Optional
 
 import requests
 from django.conf import settings
 from django.contrib import messages
-from django.contrib.auth import authenticate, login
+from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
-from django.http import HttpRequest, HttpResponse, HttpResponseRedirect, JsonResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_http_methods
 
-from ...firefly_client import FireflyClient, FireflyError
+from ...firefly_client import FireflyClient
 from ...schemas.dedupe import generate_external_id
-from ...schemas.finance_extraction import FinanceExtraction, ReviewState
-from ...state_store import ExtractionRecord, ImportStatus, StateStore
+from ...schemas.finance_extraction import FinanceExtraction
+from ...state_store import ExtractionRecord, StateStore
 from ..workflow import ReviewDecision
 
 logger = logging.getLogger(__name__)
@@ -56,7 +53,7 @@ def _get_store() -> StateStore:
     return StateStore(settings.STATE_DB_PATH)
 
 
-def _get_paperless_session(request: Optional[HttpRequest] = None) -> requests.Session:
+def _get_paperless_session(request: HttpRequest | None = None) -> requests.Session:
     """Get a session configured for Paperless API."""
     session = requests.Session()
 
@@ -74,7 +71,7 @@ def _get_paperless_session(request: Optional[HttpRequest] = None) -> requests.Se
     return session
 
 
-def _get_firefly_client(request: Optional[HttpRequest] = None) -> FireflyClient:
+def _get_firefly_client(request: HttpRequest | None = None) -> FireflyClient:
     """Get Firefly client, optionally using user-specific credentials."""
     base_url = settings.FIREFLY_BASE_URL
     token = settings.FIREFLY_TOKEN
@@ -741,7 +738,7 @@ def import_queue(request: HttpRequest) -> HttpResponse:
         # Get recent SUCCESSFUL imports only (for history display)
         import_rows = conn.execute(
             """
-            SELECT i.*, e.extraction_json 
+            SELECT i.*, e.extraction_json
             FROM imports i
             LEFT JOIN extractions e ON i.external_id = e.external_id
             WHERE i.status = 'IMPORTED'
@@ -756,7 +753,7 @@ def import_queue(request: HttpRequest) -> HttpResponse:
                 try:
                     ext_data = json.loads(irow["extraction_json"])
                     title = ext_data.get("paperless_title")
-                except:
+                except (json.JSONDecodeError, KeyError, TypeError):
                     pass
 
             recent_imports.append(
@@ -797,7 +794,7 @@ def run_import(request: HttpRequest) -> HttpResponse:
         return redirect("import_queue")
 
     # Get selected items or import all
-    selected_ids = request.POST.getlist("selected_ids")
+    request.POST.getlist("selected_ids")
 
     # Capture user's source account preference before starting thread
     user_source_account = None
@@ -1030,7 +1027,7 @@ def api_extraction_detail(request: HttpRequest, extraction_id: int) -> JsonRespo
 
     try:
         extraction_data = json.loads(row["extraction_json"])
-    except:
+    except (json.JSONDecodeError, TypeError):
         return JsonResponse({"error": "Invalid extraction data"}, status=500)
 
     return JsonResponse(
@@ -1223,3 +1220,525 @@ def toggle_document_listing(request: HttpRequest, document_id: int) -> HttpRespo
     except Exception as e:
         logger.error(f"Error toggling document listing: {e}")
         return JsonResponse({"error": str(e)}, status=500)
+
+
+# ============================================================================
+# Reconciliation Views (Phase 3 - Match Proposals UI)
+# ============================================================================
+
+
+@login_required
+def reconciliation_list(request: HttpRequest) -> HttpResponse:
+    """
+    List pending match proposals for review.
+
+    Displays proposals sorted by confidence score, with transaction and
+    document details for review.
+    """
+    store = _get_store()
+
+    # Get pending proposals from state store
+    proposals = store.get_pending_proposals()
+
+    # Parse match reasons for display
+    for proposal in proposals:
+        if proposal.get("match_reasons"):
+            try:
+                proposal["reasons_list"] = json.loads(proposal["match_reasons"])
+            except (json.JSONDecodeError, TypeError):
+                proposal["reasons_list"] = []
+        else:
+            proposal["reasons_list"] = []
+
+        # Format score as percentage
+        proposal["score_pct"] = proposal.get("match_score", 0) * 100
+
+    # Get reconciliation stats
+    stats = _get_reconciliation_stats(store)
+
+    context = {
+        "proposals": proposals,
+        "stats": stats,
+        "debug_mode": _is_debug_mode(),
+        **_get_external_urls(),
+    }
+    return render(request, "review/reconciliation_list.html", context)
+
+
+@login_required
+def reconciliation_detail(request: HttpRequest, proposal_id: int) -> HttpResponse:
+    """
+    Show detailed view of a match proposal for review.
+
+    Displays transaction and document side-by-side with matching details.
+    """
+    store = _get_store()
+
+    # Get the proposal
+    proposal = store.get_proposal_by_id(proposal_id)
+    if not proposal:
+        return render(
+            request,
+            "review/not_found.html",
+            {"message": f"Match proposal {proposal_id} not found"},
+            status=404,
+        )
+
+    # Parse match reasons
+    reasons_list = []
+    if proposal.get("match_reasons"):
+        try:
+            reasons_list = json.loads(proposal["match_reasons"])
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # Get full transaction details from Firefly cache
+    tx_details = store.get_firefly_cache_entry(proposal["firefly_id"])
+
+    # Get document details
+    doc_record = store.get_document(proposal["document_id"])
+
+    # Get extraction for the document if available
+    extraction_data = None
+    extraction = store.get_extraction_by_document(proposal["document_id"])
+    if extraction:
+        try:
+            extraction_data = json.loads(extraction.extraction_json)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # Get pending proposals for navigation
+    all_pending = store.get_pending_proposals()
+    pending_ids = [p["id"] for p in all_pending]
+    current_idx = pending_ids.index(proposal_id) if proposal_id in pending_ids else -1
+    prev_id = pending_ids[current_idx - 1] if current_idx > 0 else None
+    next_id = pending_ids[current_idx + 1] if current_idx < len(pending_ids) - 1 else None
+
+    # Get interpretation run history for this document
+    audit_trail = store.get_interpretation_runs(proposal["document_id"])
+
+    context = {
+        "proposal": proposal,
+        "proposal_id": proposal_id,
+        "reasons_list": reasons_list,
+        "score_pct": proposal.get("match_score", 0) * 100,
+        "tx_details": tx_details,
+        "doc_record": doc_record,
+        "extraction_data": extraction_data,
+        "prev_id": prev_id,
+        "next_id": next_id,
+        "pending_count": len(pending_ids),
+        "current_position": current_idx + 1 if current_idx >= 0 else 0,
+        "audit_trail": audit_trail,
+        **_get_external_urls(),
+    }
+    return render(request, "review/reconciliation_detail.html", context)
+
+
+@login_required
+@require_http_methods(["POST"])
+def accept_proposal(request: HttpRequest, proposal_id: int) -> HttpResponse:
+    """
+    Accept a match proposal and link the document to the transaction.
+
+    This writes linkage markers to Firefly and records the action in audit trail.
+    """
+    from ...services.reconciliation import ReconciliationService
+
+    store = _get_store()
+
+    # Get proposal
+    proposal = store.get_proposal_by_id(proposal_id)
+    if not proposal:
+        messages.error(request, "Proposal not found")
+        return redirect("reconciliation_list")
+
+    try:
+        # Get Firefly client and reconciliation service
+        firefly_client = _get_firefly_client(request)
+
+        from ...config import load_config
+
+        config = load_config()
+
+        service = ReconciliationService(
+            config=config,
+            state_store=store,
+            firefly_client=firefly_client,
+        )
+
+        # Execute the link (user_decision=True means accept)
+        success = service.link_proposal(proposal_id, user_decision=True)
+
+        if success:
+            messages.success(
+                request,
+                f"Successfully linked document {proposal['document_id']} "
+                f"to transaction {proposal['firefly_id']}",
+            )
+        else:
+            messages.error(request, "Failed to link document to transaction")
+
+    except Exception as e:
+        logger.error(f"Error accepting proposal {proposal_id}: {e}")
+        messages.error(request, f"Error accepting proposal: {e}")
+
+    # Navigate to next pending proposal
+    pending = store.get_pending_proposals()
+    if pending:
+        return redirect("reconciliation_detail", proposal_id=pending[0]["id"])
+    return redirect("reconciliation_list")
+
+
+@login_required
+@require_http_methods(["POST"])
+def reject_proposal(request: HttpRequest, proposal_id: int) -> HttpResponse:
+    """
+    Reject a match proposal.
+
+    The proposal is marked as rejected and won't be shown again.
+    """
+    store = _get_store()
+
+    # Get proposal
+    proposal = store.get_proposal_by_id(proposal_id)
+    if not proposal:
+        messages.error(request, "Proposal not found")
+        return redirect("reconciliation_list")
+
+    try:
+        # Update status to REJECTED
+        store.update_proposal_status(proposal_id, "REJECTED")
+
+        # Record in audit trail
+        store.create_interpretation_run(
+            document_id=proposal["document_id"],
+            firefly_id=proposal["firefly_id"],
+            external_id=None,
+            pipeline_version="1.0.0",
+            inputs_summary={
+                "action": "reject_proposal",
+                "proposal_id": proposal_id,
+                "match_score": proposal.get("match_score"),
+            },
+            final_state="REJECTED",
+            decision_source="USER",
+            firefly_write_action=None,
+        )
+
+        messages.success(request, "Match proposal rejected")
+
+    except Exception as e:
+        logger.error(f"Error rejecting proposal {proposal_id}: {e}")
+        messages.error(request, f"Error rejecting proposal: {e}")
+
+    # Navigate to next pending proposal
+    pending = store.get_pending_proposals()
+    if pending:
+        return redirect("reconciliation_detail", proposal_id=pending[0]["id"])
+    return redirect("reconciliation_list")
+
+
+@login_required
+@require_http_methods(["POST"])
+def manual_link(request: HttpRequest) -> HttpResponse:
+    """
+    Manually link a document to a Firefly transaction.
+
+    This allows linking documents that weren't matched automatically.
+    """
+    from ...services.reconciliation import ReconciliationService
+
+    document_id = request.POST.get("document_id")
+    firefly_id = request.POST.get("firefly_id")
+
+    if not document_id or not firefly_id:
+        messages.error(request, "Both document_id and firefly_id are required")
+        return redirect("reconciliation_list")
+
+    try:
+        document_id_int = int(document_id)
+        firefly_id_int = int(firefly_id)
+    except ValueError:
+        messages.error(request, "Invalid document_id or firefly_id")
+        return redirect("reconciliation_list")
+
+    store = _get_store()
+
+    try:
+        firefly_client = _get_firefly_client(request)
+        from ...config import load_config
+
+        config = load_config()
+
+        service = ReconciliationService(
+            config=config,
+            state_store=store,
+            firefly_client=firefly_client,
+        )
+
+        success = service.manual_link(
+            document_id=document_id_int,
+            firefly_id=firefly_id_int,
+        )
+
+        if success:
+            messages.success(
+                request,
+                f"Successfully linked document {document_id_int} to transaction {firefly_id_int}",
+            )
+        else:
+            messages.error(request, "Failed to link document to transaction")
+
+    except Exception as e:
+        logger.error(f"Error manual linking doc {document_id} to tx {firefly_id}: {e}")
+        messages.error(request, f"Error creating manual link: {e}")
+
+    return redirect("reconciliation_list")
+
+
+@login_required
+def unlinked_transactions(request: HttpRequest) -> HttpResponse:
+    """
+    Show Firefly transactions that don't have linked documents.
+
+    Useful for finding transactions that need receipts.
+    """
+    store = _get_store()
+
+    # Get unmatched transactions from cache (UNMATCHED status)
+    unmatched = store.get_unmatched_firefly_transactions()
+
+    # Parse and format for display
+    transactions = []
+    for tx in unmatched[:100]:  # Limit to 100
+        transactions.append(
+            {
+                "firefly_id": tx["firefly_id"],
+                "date": tx["date"],
+                "amount": tx["amount"],
+                "description": tx.get("description"),
+                "source_account": tx.get("source_account"),
+                "destination_account": tx.get("destination_account"),
+                "category": tx.get("category_name"),
+                "cached_at": tx.get("synced_at"),
+            }
+        )
+
+    context = {
+        "transactions": transactions,
+        "total_count": len(transactions),
+        **_get_external_urls(),
+    }
+    return render(request, "review/unlinked_transactions.html", context)
+
+
+def _get_reconciliation_stats(store: StateStore) -> dict:
+    """Get statistics for reconciliation dashboard."""
+    conn = store._get_connection()
+    try:
+        # Pending proposals
+        pending = conn.execute(
+            "SELECT COUNT(*) as count FROM match_proposals WHERE status = 'PENDING'"
+        ).fetchone()
+        pending_count = pending["count"] if pending else 0
+
+        # Accepted proposals
+        accepted = conn.execute(
+            "SELECT COUNT(*) as count FROM match_proposals WHERE status = 'ACCEPTED'"
+        ).fetchone()
+        accepted_count = accepted["count"] if accepted else 0
+
+        # Rejected proposals
+        rejected = conn.execute(
+            "SELECT COUNT(*) as count FROM match_proposals WHERE status = 'REJECTED'"
+        ).fetchone()
+        rejected_count = rejected["count"] if rejected else 0
+
+        # Auto-matched
+        auto_matched = conn.execute(
+            "SELECT COUNT(*) as count FROM match_proposals WHERE status = 'AUTO_MATCHED'"
+        ).fetchone()
+        auto_count = auto_matched["count"] if auto_matched else 0
+
+        # Unmatched transactions (in cache with UNMATCHED status)
+        unmatched = conn.execute(
+            "SELECT COUNT(*) as count FROM firefly_cache WHERE match_status = 'UNMATCHED'"
+        ).fetchone()
+        unmatched_count = unmatched["count"] if unmatched else 0
+
+        return {
+            "pending": pending_count,
+            "accepted": accepted_count,
+            "rejected": rejected_count,
+            "auto_matched": auto_count,
+            "unlinked": unmatched_count,  # Keep "unlinked" key for template compatibility
+        }
+    finally:
+        conn.close()
+
+
+# ============================================================================
+# Audit Trail Views (Phase 8)
+# ============================================================================
+
+
+@login_required
+def audit_trail_list(request: HttpRequest) -> HttpResponse:
+    """
+    List all interpretation runs (audit trail).
+
+    Read-only view showing history of all reconciliation decisions.
+    """
+    store = _get_store()
+
+    # Pagination
+    page = int(request.GET.get("page", 1))
+    page_size = 50
+
+    # Filter options
+    filter_document = request.GET.get("document_id")
+    filter_firefly = request.GET.get("firefly_id")
+    filter_source = request.GET.get("decision_source")
+
+    conn = store._get_connection()
+    try:
+        # Build query with filters
+        query = "SELECT * FROM interpretation_runs WHERE 1=1"
+        params = []
+
+        if filter_document:
+            query += " AND document_id = ?"
+            params.append(int(filter_document))
+
+        if filter_firefly:
+            query += " AND firefly_id = ?"
+            params.append(int(filter_firefly))
+
+        if filter_source:
+            query += " AND decision_source = ?"
+            params.append(filter_source)
+
+        # Count total
+        count_query = query.replace("SELECT *", "SELECT COUNT(*)")
+        total_count = conn.execute(count_query, params).fetchone()[0]
+
+        # Add ordering and pagination
+        query += " ORDER BY run_timestamp DESC LIMIT ? OFFSET ?"
+        params.extend([page_size, (page - 1) * page_size])
+
+        rows = conn.execute(query, params).fetchall()
+        runs = [dict(row) for row in rows]
+
+        # Parse JSON fields
+        for run in runs:
+            if run.get("inputs_summary"):
+                try:
+                    run["inputs_summary"] = json.loads(run["inputs_summary"])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            if run.get("rules_applied"):
+                try:
+                    run["rules_applied"] = json.loads(run["rules_applied"])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            if run.get("llm_result"):
+                try:
+                    run["llm_result"] = json.loads(run["llm_result"])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            if run.get("linkage_marker_written"):
+                try:
+                    run["linkage_marker_written"] = json.loads(run["linkage_marker_written"])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+    finally:
+        conn.close()
+
+    # Pagination
+    total_pages = (total_count + page_size - 1) // page_size
+
+    context = {
+        "runs": runs,
+        "page": page,
+        "total_pages": total_pages,
+        "total_count": total_count,
+        "has_prev": page > 1,
+        "has_next": page < total_pages,
+        "filter_document": filter_document or "",
+        "filter_firefly": filter_firefly or "",
+        "filter_source": filter_source or "",
+        **_get_external_urls(),
+    }
+    return render(request, "review/audit_trail_list.html", context)
+
+
+@login_required
+def audit_trail_detail(request: HttpRequest, run_id: int) -> HttpResponse:
+    """
+    Show detailed view of a single interpretation run.
+    """
+    store = _get_store()
+
+    conn = store._get_connection()
+    try:
+        row = conn.execute("SELECT * FROM interpretation_runs WHERE id = ?", (run_id,)).fetchone()
+
+        if not row:
+            return render(
+                request,
+                "review/not_found.html",
+                {"message": f"Interpretation run {run_id} not found"},
+                status=404,
+            )
+
+        run = dict(row)
+
+        # Parse JSON fields
+        if run.get("inputs_summary"):
+            try:
+                run["inputs_summary"] = json.loads(run["inputs_summary"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+        if run.get("rules_applied"):
+            try:
+                run["rules_applied"] = json.loads(run["rules_applied"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+        if run.get("llm_result"):
+            try:
+                run["llm_result"] = json.loads(run["llm_result"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+        if run.get("suggested_splits"):
+            try:
+                run["suggested_splits"] = json.loads(run["suggested_splits"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+        if run.get("linkage_marker_written"):
+            try:
+                run["linkage_marker_written"] = json.loads(run["linkage_marker_written"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # Get related document info if available
+        doc_record = None
+        if run.get("document_id"):
+            doc_record = store.get_document(run["document_id"])
+
+        # Get related transaction info if available
+        tx_details = None
+        if run.get("firefly_id"):
+            tx_details = store.get_firefly_cache_entry(run["firefly_id"])
+
+    finally:
+        conn.close()
+
+    context = {
+        "run": run,
+        "run_id": run_id,
+        "doc_record": doc_record,
+        "tx_details": tx_details,
+        **_get_external_urls(),
+    }
+    return render(request, "review/audit_trail_detail.html", context)

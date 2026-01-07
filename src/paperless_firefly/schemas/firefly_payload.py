@@ -13,7 +13,7 @@ Rules:
 import json
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Any, Optional
+from typing import Any
 
 from .finance_extraction import FinanceExtraction, TransactionType
 
@@ -33,49 +33,49 @@ class FireflyTransactionSplit:
     description: str
 
     # Account mapping
-    source_name: Optional[str] = None
-    source_id: Optional[str] = None
-    destination_name: Optional[str] = None
-    destination_id: Optional[str] = None
+    source_name: str | None = None
+    source_id: str | None = None
+    destination_name: str | None = None
+    destination_id: str | None = None
 
     # Currency
-    currency_code: Optional[str] = None
-    currency_id: Optional[str] = None
+    currency_code: str | None = None
+    currency_id: str | None = None
 
     # Categorization
-    category_name: Optional[str] = None
-    category_id: Optional[str] = None
-    budget_name: Optional[str] = None
-    budget_id: Optional[str] = None
+    category_name: str | None = None
+    category_id: str | None = None
+    budget_name: str | None = None
+    budget_id: str | None = None
 
     # Tags and notes
     tags: list[str] = field(default_factory=list)
-    notes: Optional[str] = None
+    notes: str | None = None
 
     # Idempotency and linking
-    internal_reference: Optional[str] = None
-    external_id: Optional[str] = None
-    external_url: Optional[str] = None
+    internal_reference: str | None = None
+    external_id: str | None = None
+    external_url: str | None = None
 
     # Date fields
-    book_date: Optional[str] = None
-    process_date: Optional[str] = None
-    due_date: Optional[str] = None
-    payment_date: Optional[str] = None
-    invoice_date: Optional[str] = None
+    book_date: str | None = None
+    process_date: str | None = None
+    due_date: str | None = None
+    payment_date: str | None = None
+    invoice_date: str | None = None
 
     # SEPA fields (optional)
-    sepa_cc: Optional[str] = None
-    sepa_ct_op: Optional[str] = None
-    sepa_ct_id: Optional[str] = None
-    sepa_db: Optional[str] = None
-    sepa_country: Optional[str] = None
-    sepa_ep: Optional[str] = None
-    sepa_ci: Optional[str] = None
-    sepa_batch_id: Optional[str] = None
+    sepa_cc: str | None = None
+    sepa_ct_op: str | None = None
+    sepa_ct_id: str | None = None
+    sepa_db: str | None = None
+    sepa_country: str | None = None
+    sepa_ep: str | None = None
+    sepa_ci: str | None = None
+    sepa_batch_id: str | None = None
 
     # Order (for splits)
-    order: Optional[int] = None
+    order: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to Firefly API JSON format."""
@@ -142,7 +142,7 @@ class FireflyTransactionStore:
     error_if_duplicate_hash: bool = False
     apply_rules: bool = True
     fire_webhooks: bool = True
-    group_title: Optional[str] = None
+    group_title: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to Firefly API JSON format."""
@@ -214,8 +214,8 @@ def build_firefly_payload(
     external_url = f"{paperless_base_url}/documents/{extraction.paperless_document_id}/"
 
     # Determine source and destination based on transaction type
-    source_name: Optional[str] = None
-    destination_name: Optional[str] = None
+    source_name: str | None = None
+    destination_name: str | None = None
 
     if proposal.transaction_type == TransactionType.WITHDRAWAL:
         source_name = proposal.source_account or default_source_account

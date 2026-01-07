@@ -5,16 +5,11 @@ These tests use responses library to mock HTTP requests,
 validating client behavior without making real API calls.
 """
 
-import json
-from decimal import Decimal
-from unittest.mock import MagicMock, patch
-
 import pytest
 import responses
 
 from paperless_firefly.firefly_client import (
     FireflyClient,
-    FireflyError,
 )
 from paperless_firefly.paperless_client import (
     PaperlessClient,

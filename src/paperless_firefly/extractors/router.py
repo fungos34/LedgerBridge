@@ -4,7 +4,6 @@ Extractor router - chooses and applies extraction strategies.
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Optional
 
 from ..paperless_client import PaperlessDocument
 from ..schemas.dedupe import generate_external_id
@@ -14,7 +13,6 @@ from ..schemas.finance_extraction import (
     FinanceExtraction,
     LineItem,
     Provenance,
-    ReviewState,
     TransactionProposal,
     TransactionType,
 )
@@ -70,7 +68,7 @@ class ExtractorRouter:
         content = document.content or ""
 
         # Try extractors in order
-        extraction_result: Optional[ExtractionResult] = None
+        extraction_result: ExtractionResult | None = None
         extractor_name = "none"
 
         for extractor in self.extractors:

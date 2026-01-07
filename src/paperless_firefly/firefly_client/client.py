@@ -5,8 +5,6 @@ Firefly III API client implementation.
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any, Optional
-from urllib.parse import quote, urljoin
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -30,8 +28,8 @@ class FireflyAPIError(FireflyError):
         self,
         status_code: int,
         message: str,
-        response_body: Optional[str] = None,
-        errors: Optional[dict] = None,
+        response_body: str | None = None,
+        errors: dict | None = None,
     ):
         self.status_code = status_code
         self.message = message
@@ -60,7 +58,7 @@ class FireflyConnectionError(FireflyError):
 class FireflyDuplicateError(FireflyError):
     """Transaction already exists (duplicate external_id)."""
 
-    def __init__(self, external_id: str, existing_id: Optional[int] = None):
+    def __init__(self, external_id: str, existing_id: int | None = None):
         self.external_id = external_id
         self.existing_id = existing_id
         super().__init__(f"Transaction with external_id '{external_id}' already exists")
@@ -75,9 +73,22 @@ class FireflyTransaction:
     date: str
     amount: str
     description: str
-    external_id: Optional[str] = None
-    source_name: Optional[str] = None
-    destination_name: Optional[str] = None
+    external_id: str | None = None
+    source_name: str | None = None
+    destination_name: str | None = None
+    internal_reference: str | None = None
+    notes: str | None = None
+    category_name: str | None = None
+    tags: list[str] | None = None
+
+
+@dataclass
+class FireflyCategory:
+    """Firefly category representation."""
+
+    id: int
+    name: str
+    notes: str | None = None
 
 
 class FireflyClient:
@@ -139,8 +150,8 @@ class FireflyClient:
         self,
         method: str,
         endpoint: str,
-        params: Optional[dict] = None,
-        json_data: Optional[dict] = None,
+        params: dict | None = None,
+        json_data: dict | None = None,
     ) -> requests.Response:
         """Make an API request with error handling."""
         url = f"{self.base_url}{endpoint}"
@@ -159,13 +170,15 @@ class FireflyClient:
             )
         except requests.exceptions.ConnectionError as e:
             logger.error(f"Connection error to {url}: {e}")
-            raise FireflyConnectionError(f"Failed to connect to Firefly at {self.base_url}: {e}")
+            raise FireflyConnectionError(
+                f"Failed to connect to Firefly at {self.base_url}: {e}"
+            ) from e
         except requests.exceptions.Timeout as e:
             logger.error(f"Timeout for {url}: {e}")
-            raise FireflyConnectionError(f"Request to Firefly timed out: {e}")
+            raise FireflyConnectionError(f"Request to Firefly timed out: {e}") from e
         except requests.exceptions.RequestException as e:
             logger.error(f"Request error for {url}: {e}")
-            raise FireflyError(f"Request failed: {e}")
+            raise FireflyError(f"Request failed: {e}") from e
 
         logger.debug(f"Response status: {response.status_code}")
 
@@ -211,7 +224,7 @@ class FireflyClient:
         self,
         payload: FireflyTransactionStore,
         skip_duplicates: bool = True,
-    ) -> Optional[int]:
+    ) -> int | None:
         """
         Create a transaction in Firefly III.
 
@@ -257,7 +270,7 @@ class FireflyClient:
             # Check if it's a duplicate hash error
             if e.status_code == 422 and "duplicate" in str(e.errors).lower():
                 if skip_duplicates:
-                    logger.warning(f"Duplicate transaction detected by Firefly")
+                    logger.warning("Duplicate transaction detected by Firefly")
                     return None
                 raise
             raise
@@ -295,7 +308,7 @@ class FireflyClient:
         if validation_errors:
             raise ValueError(f"Invalid payload: {'; '.join(validation_errors)}")
 
-        response = self._request(
+        self._request(
             "PUT",
             f"/api/v1/transactions/{transaction_id}",
             json_data=payload.to_dict(),
@@ -304,7 +317,7 @@ class FireflyClient:
         logger.info(f"Updated Firefly transaction id={transaction_id}")
         return True
 
-    def find_by_external_id(self, external_id: str) -> Optional[FireflyTransaction]:
+    def find_by_external_id(self, external_id: str) -> FireflyTransaction | None:
         """
         Find a transaction by external_id.
 
@@ -344,7 +357,7 @@ class FireflyClient:
 
         return None
 
-    def get_transaction(self, transaction_id: int) -> Optional[FireflyTransaction]:
+    def get_transaction(self, transaction_id: int) -> FireflyTransaction | None:
         """Get a transaction by ID."""
         try:
             response = self._request("GET", f"/api/v1/transactions/{transaction_id}")
@@ -444,3 +457,192 @@ class FireflyClient:
 
         data = response.json()
         return int(data.get("data", {}).get("id", 0))
+
+    def list_transactions(
+        self,
+        start_date: str,
+        end_date: str,
+        type_filter: str | None = None,
+        limit: int | None = None,
+    ) -> list[FireflyTransaction]:
+        """
+        List transactions in a date range.
+
+        Args:
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD)
+            type_filter: Optional filter: withdrawal, deposit, transfer
+            limit: Optional max results (None = all)
+
+        Returns:
+            List of FireflyTransaction objects
+        """
+        transactions = []
+        page = 1
+
+        while True:
+            params = {
+                "start": start_date,
+                "end": end_date,
+                "page": page,
+            }
+            if type_filter:
+                params["type"] = type_filter
+
+            response = self._request("GET", "/api/v1/transactions", params=params)
+            data = response.json()
+
+            for item in data.get("data", []):
+                attrs = item.get("attributes", {})
+                tx_list = attrs.get("transactions", [])
+
+                for tx in tx_list:
+                    transactions.append(
+                        FireflyTransaction(
+                            id=int(item.get("id", 0)),
+                            type=tx.get("type", ""),
+                            date=tx.get("date", ""),
+                            amount=tx.get("amount", ""),
+                            description=tx.get("description", ""),
+                            external_id=tx.get("external_id"),
+                            source_name=tx.get("source_name"),
+                            destination_name=tx.get("destination_name"),
+                            internal_reference=tx.get("internal_reference"),
+                            notes=tx.get("notes"),
+                            category_name=tx.get("category_name"),
+                            tags=[t.get("tag") for t in tx.get("tags", []) if t.get("tag")],
+                        )
+                    )
+
+            # Check limit
+            if limit and len(transactions) >= limit:
+                return transactions[:limit]
+
+            # Check for more pages
+            meta = data.get("meta", {}).get("pagination", {})
+            if page >= meta.get("total_pages", 1):
+                break
+            page += 1
+
+        return transactions
+
+    def list_categories(self) -> list[FireflyCategory]:
+        """
+        List all categories from Firefly.
+
+        Returns:
+            List of FireflyCategory objects
+        """
+        categories = []
+        page = 1
+
+        while True:
+            response = self._request("GET", "/api/v1/categories", params={"page": page})
+            data = response.json()
+
+            for item in data.get("data", []):
+                attrs = item.get("attributes", {})
+                categories.append(
+                    FireflyCategory(
+                        id=int(item.get("id", 0)),
+                        name=attrs.get("name", ""),
+                        notes=attrs.get("notes"),
+                    )
+                )
+
+            # Check for more pages
+            meta = data.get("meta", {}).get("pagination", {})
+            if page >= meta.get("total_pages", 1):
+                break
+            page += 1
+
+        return categories
+
+    def get_unlinked_transactions(
+        self,
+        start_date: str,
+        end_date: str,
+        type_filter: str | None = None,
+    ) -> list[FireflyTransaction]:
+        """
+        Get transactions not linked to Spark/LedgerBridge.
+
+        A transaction is "unlinked" if:
+        - external_id does NOT start with "paperless:"
+        - internal_reference does NOT contain "PAPERLESS:"
+        - notes do NOT contain "Paperless doc_id="
+
+        Args:
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD)
+            type_filter: Optional filter: withdrawal, deposit, transfer
+
+        Returns:
+            List of unlinked FireflyTransaction objects
+        """
+        from ..schemas.linkage import is_linked_to_spark
+
+        all_transactions = self.list_transactions(start_date, end_date, type_filter)
+
+        return [
+            tx
+            for tx in all_transactions
+            if not is_linked_to_spark(tx.external_id, tx.internal_reference, tx.notes)
+        ]
+
+    def update_transaction_linkage(
+        self,
+        transaction_id: int,
+        external_id: str,
+        internal_reference: str,
+        notes_to_append: str,
+    ) -> bool:
+        """
+        Update an existing transaction with linkage markers.
+
+        This adds Spark linkage to an existing transaction (e.g., bank import).
+
+        Args:
+            transaction_id: Firefly transaction ID
+            external_id: External ID to set
+            internal_reference: Internal reference to set
+            notes_to_append: Text to append to existing notes
+
+        Returns:
+            True if updated successfully
+        """
+        # Get existing transaction to preserve data
+        existing = self.get_transaction(transaction_id)
+        if not existing:
+            raise FireflyAPIError(404, f"Transaction {transaction_id} not found")
+
+        # Build notes (append to existing)
+        new_notes = existing.notes or ""
+        if new_notes:
+            new_notes += "\n\n"
+        new_notes += notes_to_append
+
+        # Update via PUT - need to get full transaction data first
+        response = self._request("GET", f"/api/v1/transactions/{transaction_id}")
+        data = response.json().get("data", {})
+        attrs = data.get("attributes", {})
+        tx_list = attrs.get("transactions", [])
+
+        if not tx_list:
+            raise FireflyAPIError(500, f"Transaction {transaction_id} has no splits")
+
+        # Update the first split with linkage
+        tx = tx_list[0]
+        tx["external_id"] = external_id
+        tx["internal_reference"] = internal_reference
+        tx["notes"] = new_notes
+
+        # Send update
+        self._request(
+            "PUT",
+            f"/api/v1/transactions/{transaction_id}",
+            json_data={"transactions": tx_list},
+        )
+
+        logger.info(f"Updated transaction {transaction_id} with linkage markers")
+        return True

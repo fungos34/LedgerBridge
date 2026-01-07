@@ -5,7 +5,7 @@ Base extractor interface and common types.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Any, Optional
+from typing import Any
 
 
 @dataclass
@@ -13,17 +13,17 @@ class ExtractionResult:
     """Result from an extraction attempt."""
 
     # Extracted values
-    amount: Optional[Decimal] = None
-    currency: Optional[str] = None
-    date: Optional[str] = None  # YYYY-MM-DD
-    vendor: Optional[str] = None
-    description: Optional[str] = None
-    invoice_number: Optional[str] = None
+    amount: Decimal | None = None
+    currency: str | None = None
+    date: str | None = None  # YYYY-MM-DD
+    vendor: str | None = None
+    description: str | None = None
+    invoice_number: str | None = None
 
     # Tax details
-    total_net: Optional[Decimal] = None
-    tax_amount: Optional[Decimal] = None
-    tax_rate: Optional[Decimal] = None
+    total_net: Decimal | None = None
+    tax_amount: Decimal | None = None
+    tax_rate: Decimal | None = None
 
     # Line items (if found)
     line_items: list[dict[str, Any]] = field(default_factory=list)
@@ -68,7 +68,7 @@ class BaseExtractor(ABC):
         pass
 
     @abstractmethod
-    def can_extract(self, content: str, file_bytes: Optional[bytes] = None) -> bool:
+    def can_extract(self, content: str, file_bytes: bytes | None = None) -> bool:
         """
         Check if this extractor can handle the given content.
 
@@ -82,7 +82,7 @@ class BaseExtractor(ABC):
         pass
 
     @abstractmethod
-    def extract(self, content: str, file_bytes: Optional[bytes] = None) -> ExtractionResult:
+    def extract(self, content: str, file_bytes: bytes | None = None) -> ExtractionResult:
         """
         Extract finance data from content.
 

@@ -15,7 +15,6 @@ The external_id must be:
 import hashlib
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Union
 
 
 @dataclass
@@ -45,7 +44,7 @@ class ExternalIdComponents:
 def generate_external_id(
     document_id: int,
     source_hash: str,
-    amount: Union[Decimal, str, float],
+    amount: Decimal | str | float,
     date: str,
 ) -> str:
     """
@@ -144,7 +143,7 @@ def parse_external_id(external_id: str) -> ExternalIdComponents:
         amount = Decimal(parts[3])
         date = parts[4]
     except (ValueError, IndexError) as e:
-        raise ValueError(f"Failed to parse external_id components: {e}")
+        raise ValueError(f"Failed to parse external_id components: {e}") from e
 
     return ExternalIdComponents(
         document_id=document_id,

@@ -5,7 +5,6 @@ Review workflow management.
 import json
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
 
 from ..schemas.finance_extraction import FinanceExtraction
 from ..state_store import ExtractionRecord, StateStore
@@ -47,7 +46,7 @@ class ReviewWorkflow:
         """Get all extractions pending review."""
         return self.store.get_extractions_for_review()
 
-    def get_extraction(self, extraction_id: int) -> Optional[FinanceExtraction]:
+    def get_extraction(self, extraction_id: int) -> FinanceExtraction | None:
         """Load extraction by ID."""
         records = self.store.get_extractions_for_review()
         for record in records:
@@ -59,7 +58,7 @@ class ReviewWorkflow:
         self,
         extraction_id: int,
         decision: ReviewDecision,
-        updated_extraction: Optional[FinanceExtraction] = None,
+        updated_extraction: FinanceExtraction | None = None,
     ) -> None:
         """
         Record review decision.

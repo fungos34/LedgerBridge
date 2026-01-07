@@ -3,7 +3,6 @@ Confidence scoring implementation.
 """
 
 from dataclasses import dataclass
-from typing import Optional
 
 from ..schemas.finance_extraction import (
     ConfidenceScores,
@@ -46,7 +45,7 @@ class ConfidenceScorer:
         "none": 0.10,
     }
 
-    def __init__(self, thresholds: Optional[ConfidenceThresholds] = None):
+    def __init__(self, thresholds: ConfidenceThresholds | None = None):
         """Initialize scorer with thresholds."""
         self.thresholds = thresholds or ConfidenceThresholds()
 

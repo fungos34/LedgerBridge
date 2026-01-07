@@ -13,10 +13,7 @@ Tests cover:
 import json
 import os
 import sqlite3
-import tempfile
-from decimal import Decimal
 from pathlib import Path
-from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
@@ -256,7 +253,7 @@ class TestLandingPage:
         # Create test user
         from django.contrib.auth.models import User
 
-        user = User.objects.create_user(username="testuser", password="testpass")
+        User.objects.create_user(username="testuser", password="testpass")
 
         client = Client()
         client.login(username="testuser", password="testpass")
@@ -299,7 +296,7 @@ class TestImportQueue:
                 reviewed_at TEXT,
                 review_decision TEXT
             );
-            
+
             CREATE TABLE IF NOT EXISTS imports (
                 id INTEGER PRIMARY KEY,
                 external_id TEXT NOT NULL,
@@ -313,9 +310,9 @@ class TestImportQueue:
         # Insert approved extraction
         conn.execute(
             """
-            INSERT INTO extractions 
+            INSERT INTO extractions
             (document_id, external_id, extraction_json, overall_confidence, review_state, created_at, review_decision, reviewed_at)
-            VALUES (123, 'test-ext-1', '{"proposal": {"amount": "100.00"}}', 0.85, 'REVIEW', 
+            VALUES (123, 'test-ext-1', '{"proposal": {"amount": "100.00"}}', 0.85, 'REVIEW',
                     '2024-01-01', 'ACCEPTED', '2024-01-02')
         """
         )
@@ -344,7 +341,6 @@ class TestFireflyAccountsAPI:
         ]
 
         # The API should return properly formatted JSON
-        import json
 
         result = json.dumps(mock_accounts)
         parsed = json.loads(result)

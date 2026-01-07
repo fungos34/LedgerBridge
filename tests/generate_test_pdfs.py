@@ -20,13 +20,11 @@ Output:
         - zugferd_invoice.pdf (with embedded XML)
 """
 
-import os
 import sys
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 # Add project root to path for imports
 project_root = Path(__file__).parent.parent
@@ -56,10 +54,10 @@ class InvoiceData:
 
     invoice_id: str
     issue_date: str
-    due_date: Optional[str]
+    due_date: str | None
     seller_name: str
     seller_address: str
-    seller_vat: Optional[str]
+    seller_vat: str | None
     buyer_name: str
     buyer_address: str
     currency: str
@@ -67,7 +65,7 @@ class InvoiceData:
     tax_amount: str
     total: str
     line_items: list
-    notes: Optional[str] = None
+    notes: str | None = None
     format_type: str = "Unknown"
 
 
@@ -83,7 +81,7 @@ def parse_ubl_invoice(xml_path: Path) -> InvoiceData:
         "cbc": "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2",
     }
 
-    def get_text(xpath: str) -> Optional[str]:
+    def get_text(xpath: str) -> str | None:
         elem = root.find(xpath, ns)
         return elem.text if elem is not None else None
 
@@ -235,7 +233,7 @@ def parse_zugferd_invoice(xml_path: Path) -> InvoiceData:
         "udt": "urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100",
     }
 
-    def get_text(xpath: str) -> Optional[str]:
+    def get_text(xpath: str) -> str | None:
         elem = root.find(xpath, ns)
         return elem.text if elem is not None else None
 
@@ -388,7 +386,7 @@ def parse_zugferd_invoice(xml_path: Path) -> InvoiceData:
     )
 
 
-def generate_pdf(invoice: InvoiceData, output_path: Path, xml_content: Optional[str] = None):
+def generate_pdf(invoice: InvoiceData, output_path: Path, xml_content: str | None = None):
     """Generate a PDF invoice from parsed data."""
 
     doc = SimpleDocTemplate(
@@ -481,8 +479,8 @@ def generate_pdf(invoice: InvoiceData, output_path: Path, xml_content: Optional[
                     item["id"],
                     item["description"][:50] + ("..." if len(item["description"]) > 50 else ""),
                     item["quantity"],
-                    f'{invoice.currency} {item["unit_price"]}',
-                    f'{invoice.currency} {item["total"]}',
+                    f"{invoice.currency} {item['unit_price']}",
+                    f"{invoice.currency} {item['total']}",
                 ]
             )
 

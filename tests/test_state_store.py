@@ -1,15 +1,10 @@
 """Tests for state store."""
 
-import json
-from decimal import Decimal
-from pathlib import Path
+import sqlite3
 
 import pytest
 
 from paperless_firefly.state_store import (
-    DocumentRecord,
-    ExtractionRecord,
-    ImportRecord,
     ImportStatus,
     StateStore,
 )
@@ -25,7 +20,7 @@ class TestStateStore:
 
     def test_init_creates_db(self, temp_db):
         """Initializing creates database file."""
-        store = StateStore(temp_db)
+        StateStore(temp_db)
         assert temp_db.exists()
 
     def test_init_creates_tables(self, store):
@@ -162,7 +157,7 @@ class TestExtractionOperations:
             review_state="REVIEW",
         )
 
-        with pytest.raises(Exception):  # IntegrityError
+        with pytest.raises(sqlite3.IntegrityError):
             store.save_extraction(
                 document_id=123,
                 external_id="unique-id",

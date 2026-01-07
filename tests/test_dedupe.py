@@ -5,7 +5,6 @@ from decimal import Decimal
 import pytest
 
 from paperless_firefly.schemas.dedupe import (
-    ExternalIdComponents,
     compute_file_hash,
     generate_external_id,
     parse_external_id,

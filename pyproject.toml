@@ -23,6 +23,7 @@ dependencies = [
     "pyyaml>=6.0",
     "django>=4.2",
     "lxml>=4.9.0",  # XML parsing for e-invoices
+    "httpx>=0.25.0",  # Async HTTP client for LLM API
 ]
 
 [project.optional-dependencies]
@@ -37,6 +38,7 @@ dev = [
     "types-lxml>=2023.3.28",
     "reportlab>=4.0",  # PDF generation for test fixtures
     "isort>=5.12.0",
+    "ruff>=0.1.0",
 ]
 
 [project.scripts]
@@ -56,6 +58,33 @@ addopts = "-v --tb=short"
 [tool.black]
 line-length = 100
 target-version = ["py310"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+known_first_party = ["paperless_firefly"]
+skip = ["__pycache__", ".git", ".venv", "venv"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long (handled by black)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011", "B017"]  # Allow assert and blind exception tests
 
 [tool.mypy]
 python_version = "3.10"

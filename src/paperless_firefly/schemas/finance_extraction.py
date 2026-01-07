@@ -7,10 +7,8 @@ Everything maps into/out of this.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Optional
 
 
 class TransactionType(str, Enum):
@@ -39,10 +37,10 @@ class ReviewState(str, Enum):
 class DocumentClassification:
     """Semantic classification from Paperless."""
 
-    document_type: Optional[str] = None  # e.g., "Receipt", "Invoice"
-    correspondent: Optional[str] = None  # e.g., "SPAR", "Amazon"
+    document_type: str | None = None  # e.g., "Receipt", "Invoice"
+    correspondent: str | None = None  # e.g., "SPAR", "Amazon"
     tags: list[str] = field(default_factory=list)
-    storage_path: Optional[str] = None
+    storage_path: str | None = None
 
 
 @dataclass
@@ -50,11 +48,11 @@ class LineItem:
     """Individual line item from an invoice/receipt."""
 
     description: str
-    quantity: Optional[Decimal] = None
-    unit_price: Optional[Decimal] = None
-    total: Optional[Decimal] = None
-    tax_rate: Optional[Decimal] = None  # As percentage, e.g., 20 for 20%
-    position: Optional[int] = None
+    quantity: Decimal | None = None
+    unit_price: Decimal | None = None
+    total: Decimal | None = None
+    tax_rate: Decimal | None = None  # As percentage, e.g., 20 for 20%
+    position: int | None = None
 
 
 @dataclass
@@ -75,28 +73,28 @@ class TransactionProposal:
     description: str
 
     # Account mapping
-    source_account: Optional[str] = None  # Firefly asset account name/id
-    destination_account: Optional[str] = None  # Merchant or expense account
+    source_account: str | None = None  # Firefly asset account name/id
+    destination_account: str | None = None  # Merchant or expense account
 
     # Optional categorization
-    category: Optional[str] = None
+    category: str | None = None
     tags: list[str] = field(default_factory=list)
 
     # Provenance (always included in notes)
-    notes: Optional[str] = None
+    notes: str | None = None
 
     # Dedupe key (deterministic)
     external_id: str = ""
 
     # Invoice-specific fields
-    invoice_number: Optional[str] = None
-    due_date: Optional[str] = None  # ISO format YYYY-MM-DD
-    payment_reference: Optional[str] = None
+    invoice_number: str | None = None
+    due_date: str | None = None  # ISO format YYYY-MM-DD
+    payment_reference: str | None = None
 
     # Tax details
-    total_net: Optional[Decimal] = None
-    tax_amount: Optional[Decimal] = None
-    tax_rate: Optional[Decimal] = None
+    total_net: Decimal | None = None
+    tax_amount: Decimal | None = None
+    tax_rate: Decimal | None = None
 
 
 @dataclass
@@ -143,8 +141,8 @@ class Provenance:
     source_system: str = "paperless"
     parser_version: str = ""
     parsed_at: str = ""  # ISO timestamp
-    ruleset_id: Optional[str] = None
-    extraction_strategy: Optional[str] = None  # e.g., "ocr_heuristic", "factur_x"
+    ruleset_id: str | None = None
+    extraction_strategy: str | None = None  # e.g., "ocr_heuristic", "factur_x"
 
 
 @dataclass
@@ -153,7 +151,7 @@ class StructuredPayload:
 
     payload_type: str  # e.g., "Factur-X", "UBL", "ZUGFeRD"
     raw_content: str
-    parsed_data: Optional[dict] = None
+    parsed_data: dict | None = None
 
 
 @dataclass
@@ -185,8 +183,8 @@ class FinanceExtraction:
     provenance: Provenance
 
     # Optional: Document metadata
-    paperless_title: Optional[str] = None
-    document_classification: Optional[DocumentClassification] = None
+    paperless_title: str | None = None
+    document_classification: DocumentClassification | None = None
 
     # Optional: Embedded structured data (Factur-X, UBL, etc.)
     structured_payloads: list[StructuredPayload] = field(default_factory=list)

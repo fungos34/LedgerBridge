@@ -8,10 +8,8 @@ ensuring proper document display, form processing, and state transitions.
 import json
 import os
 import sqlite3
-import tempfile
 from decimal import Decimal
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -135,7 +133,7 @@ def populated_state_db(temp_state_db, sample_extraction_json):
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY);
-        
+
         CREATE TABLE IF NOT EXISTS paperless_documents (
             document_id INTEGER PRIMARY KEY,
             source_hash TEXT NOT NULL,
@@ -146,7 +144,7 @@ def populated_state_db(temp_state_db, sample_extraction_json):
             first_seen TEXT NOT NULL,
             last_seen TEXT NOT NULL
         );
-        
+
         CREATE TABLE IF NOT EXISTS extractions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             document_id INTEGER NOT NULL,
@@ -158,7 +156,7 @@ def populated_state_db(temp_state_db, sample_extraction_json):
             reviewed_at TEXT,
             review_decision TEXT
         );
-        
+
         CREATE TABLE IF NOT EXISTS imports (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             external_id TEXT NOT NULL UNIQUE,
@@ -176,9 +174,9 @@ def populated_state_db(temp_state_db, sample_extraction_json):
     # Insert test document
     conn.execute(
         """
-        INSERT INTO paperless_documents 
+        INSERT INTO paperless_documents
         (document_id, source_hash, title, document_type, correspondent, tags, first_seen, last_seen)
-        VALUES (12345, 'abc123', 'Test Receipt', 'Receipt', 'SPAR', '["finance/inbox"]', 
+        VALUES (12345, 'abc123', 'Test Receipt', 'Receipt', 'SPAR', '["finance/inbox"]',
                 '2024-11-19T10:00:00Z', '2024-11-19T10:00:00Z')
     """
     )
@@ -186,7 +184,7 @@ def populated_state_db(temp_state_db, sample_extraction_json):
     # Insert test extraction pending review
     conn.execute(
         """
-        INSERT INTO extractions 
+        INSERT INTO extractions
         (document_id, external_id, extraction_json, overall_confidence, review_state, created_at)
         VALUES (12345, 'paperless:12345:abc123def4567890:11.48:2024-11-18', ?, 0.72, 'REVIEW', '2024-11-19T10:00:00Z')
     """,
@@ -203,16 +201,16 @@ def populated_state_db(temp_state_db, sample_extraction_json):
 
     conn.execute(
         """
-        INSERT INTO paperless_documents 
+        INSERT INTO paperless_documents
         (document_id, source_hash, title, document_type, correspondent, tags, first_seen, last_seen)
-        VALUES (12346, 'def456', 'Test Invoice', 'Invoice', 'Vendor', '["finance/inbox"]', 
+        VALUES (12346, 'def456', 'Test Invoice', 'Invoice', 'Vendor', '["finance/inbox"]',
                 '2024-11-20T10:00:00Z', '2024-11-20T10:00:00Z')
     """
     )
 
     conn.execute(
         """
-        INSERT INTO extractions 
+        INSERT INTO extractions
         (document_id, external_id, extraction_json, overall_confidence, review_state, created_at)
         VALUES (12346, 'paperless:12346:def456:50.00:2024-11-20', ?, 0.65, 'REVIEW', '2024-11-20T10:00:00Z')
     """,
@@ -607,4 +605,376 @@ class TestNavigationLogic:
         next_id = pending_ids[current_idx + 1] if current_idx < len(pending_ids) - 1 else None
 
         assert prev_id == pending_ids[0]
+        assert next_id is None
+
+
+# ============================================================================
+# Reconciliation UI Tests (Phase 3)
+# ============================================================================
+
+
+@pytest.fixture
+def populated_reconciliation_db(tmp_path, sample_extraction_json):
+    """Create a state database with reconciliation test data."""
+    db_path = tmp_path / "test_reconciliation_state.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+
+    # Create full schema including reconciliation tables
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY);
+
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            applied_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS paperless_documents (
+            document_id INTEGER PRIMARY KEY,
+            source_hash TEXT NOT NULL,
+            title TEXT,
+            document_type TEXT,
+            correspondent TEXT,
+            tags TEXT,
+            first_seen TEXT NOT NULL,
+            last_seen TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS extractions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            document_id INTEGER NOT NULL,
+            external_id TEXT NOT NULL UNIQUE,
+            extraction_json TEXT NOT NULL,
+            overall_confidence REAL NOT NULL,
+            review_state TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            reviewed_at TEXT,
+            review_decision TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS imports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            external_id TEXT NOT NULL UNIQUE,
+            document_id INTEGER NOT NULL,
+            firefly_id INTEGER,
+            status TEXT NOT NULL,
+            error_message TEXT,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            imported_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS firefly_cache (
+            firefly_id INTEGER PRIMARY KEY,
+            external_id TEXT,
+            internal_reference TEXT,
+            type TEXT NOT NULL,
+            date TEXT NOT NULL,
+            amount TEXT NOT NULL,
+            description TEXT,
+            source_account TEXT,
+            destination_account TEXT,
+            notes TEXT,
+            category_name TEXT,
+            tags TEXT,
+            synced_at TEXT NOT NULL,
+            match_status TEXT DEFAULT 'UNMATCHED',
+            matched_document_id INTEGER,
+            match_confidence REAL
+        );
+
+        CREATE TABLE IF NOT EXISTS match_proposals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            firefly_id INTEGER NOT NULL,
+            document_id INTEGER NOT NULL,
+            match_score REAL NOT NULL,
+            match_reasons TEXT,
+            status TEXT DEFAULT 'PENDING',
+            created_at TEXT NOT NULL,
+            reviewed_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS interpretation_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            document_id INTEGER,
+            firefly_id INTEGER,
+            external_id TEXT,
+            run_timestamp TEXT NOT NULL,
+            duration_ms INTEGER,
+            pipeline_version TEXT NOT NULL,
+            algorithm_version TEXT,
+            inputs_summary TEXT,
+            rules_applied TEXT,
+            llm_result TEXT,
+            final_state TEXT NOT NULL,
+            suggested_category TEXT,
+            suggested_splits TEXT,
+            auto_applied INTEGER DEFAULT 0,
+            decision_source TEXT,
+            firefly_write_action TEXT,
+            firefly_target_id INTEGER,
+            linkage_marker_written TEXT,
+            taxonomy_version TEXT
+        );
+    """
+    )
+
+    # Insert test documents
+    conn.execute(
+        """
+        INSERT INTO paperless_documents
+        (document_id, source_hash, title, document_type, correspondent, tags, first_seen, last_seen)
+        VALUES (100, 'hash100', 'SPAR Receipt Dec', 'Receipt', 'SPAR', '["finance/inbox"]',
+                '2024-12-01T10:00:00Z', '2024-12-01T10:00:00Z')
+    """
+    )
+    conn.execute(
+        """
+        INSERT INTO paperless_documents
+        (document_id, source_hash, title, document_type, correspondent, tags, first_seen, last_seen)
+        VALUES (101, 'hash101', 'Amazon Invoice', 'Invoice', 'Amazon', '["finance/inbox"]',
+                '2024-12-02T10:00:00Z', '2024-12-02T10:00:00Z')
+    """
+    )
+
+    # Insert extraction for doc 100
+    conn.execute(
+        """
+        INSERT INTO extractions
+        (document_id, external_id, extraction_json, overall_confidence, review_state, created_at)
+        VALUES (100, 'paperless:100:hash100:25.50:2024-12-01', ?, 0.85, 'AUTO', '2024-12-01T10:00:00Z')
+    """,
+        (sample_extraction_json,),
+    )
+
+    # Insert firefly cache entries
+    conn.execute(
+        """
+        INSERT INTO firefly_cache
+        (firefly_id, type, date, amount, description, source_account, destination_account, synced_at, match_status)
+        VALUES (500, 'withdrawal', '2024-12-01', '25.50', 'SPAR Einkauf', 'Checking', 'SPAR', '2024-12-01T12:00:00Z', 'UNMATCHED')
+    """
+    )
+    conn.execute(
+        """
+        INSERT INTO firefly_cache
+        (firefly_id, type, date, amount, description, source_account, destination_account, synced_at, match_status)
+        VALUES (501, 'withdrawal', '2024-12-02', '99.99', 'Amazon Order', 'Checking', 'Amazon', '2024-12-02T12:00:00Z', 'UNMATCHED')
+    """
+    )
+    conn.execute(
+        """
+        INSERT INTO firefly_cache
+        (firefly_id, type, date, amount, description, source_account, destination_account, synced_at, match_status)
+        VALUES (502, 'withdrawal', '2024-12-03', '15.00', 'Coffee Shop', 'Checking', 'Coffee', '2024-12-03T12:00:00Z', 'CONFIRMED')
+    """
+    )
+
+    # Insert match proposals
+    conn.execute(
+        """
+        INSERT INTO match_proposals
+        (firefly_id, document_id, match_score, match_reasons, status, created_at)
+        VALUES (500, 100, 0.92, '["amount_exact", "date_within_3_days", "vendor_fuzzy"]', 'PENDING', '2024-12-01T14:00:00Z')
+    """
+    )
+    conn.execute(
+        """
+        INSERT INTO match_proposals
+        (firefly_id, document_id, match_score, match_reasons, status, created_at)
+        VALUES (501, 101, 0.75, '["amount_close", "vendor_partial"]', 'PENDING', '2024-12-02T14:00:00Z')
+    """
+    )
+    conn.execute(
+        """
+        INSERT INTO match_proposals
+        (firefly_id, document_id, match_score, match_reasons, status, created_at, reviewed_at)
+        VALUES (502, 100, 0.65, '["date_match"]', 'REJECTED', '2024-12-03T14:00:00Z', '2024-12-03T15:00:00Z')
+    """
+    )
+
+    # Insert interpretation runs for audit trail
+    conn.execute(
+        """
+        INSERT INTO interpretation_runs
+        (document_id, firefly_id, external_id, run_timestamp, pipeline_version, inputs_summary, final_state, decision_source)
+        VALUES (100, 500, 'paperless:100:hash100', '2024-12-01T14:00:00Z', '1.0.0', '{"action": "propose_match"}', 'PROPOSED', 'RULES')
+    """
+    )
+    conn.execute(
+        """
+        INSERT INTO interpretation_runs
+        (document_id, firefly_id, external_id, run_timestamp, pipeline_version, inputs_summary, final_state, decision_source, firefly_write_action)
+        VALUES (100, 502, 'paperless:100:hash100', '2024-12-03T15:00:00Z', '1.0.0', '{"action": "reject_proposal"}', 'REJECTED', 'USER', NULL)
+    """
+    )
+
+    conn.commit()
+    conn.close()
+
+    return db_path
+
+
+class TestReconciliationStatsCalculation:
+    """Test reconciliation statistics calculation."""
+
+    def test_get_pending_proposals(self, populated_reconciliation_db):
+        """Test retrieving pending match proposals."""
+        from paperless_firefly.state_store import StateStore
+
+        store = StateStore(populated_reconciliation_db)
+        proposals = store.get_pending_proposals()
+
+        # Should have 2 pending proposals
+        assert len(proposals) == 2
+
+        # Check first proposal (highest score first due to ORDER BY)
+        prop = proposals[0]
+        assert prop["firefly_id"] == 500
+        assert prop["document_id"] == 100
+        assert prop["match_score"] == 0.92
+        assert prop["status"] == "PENDING"
+
+    def test_get_proposal_by_id(self, populated_reconciliation_db):
+        """Test retrieving a single proposal by ID."""
+        from paperless_firefly.state_store import StateStore
+
+        store = StateStore(populated_reconciliation_db)
+        proposals = store.get_pending_proposals()
+        proposal_id = proposals[0]["id"]
+
+        proposal = store.get_proposal_by_id(proposal_id)
+        assert proposal is not None
+        assert proposal["id"] == proposal_id
+        assert proposal["match_score"] == 0.92
+
+    def test_update_proposal_status(self, populated_reconciliation_db):
+        """Test updating proposal status."""
+        from paperless_firefly.state_store import StateStore
+
+        store = StateStore(populated_reconciliation_db)
+        proposals = store.get_pending_proposals()
+        proposal_id = proposals[0]["id"]
+
+        # Accept the proposal
+        store.update_proposal_status(proposal_id, "ACCEPTED")
+
+        # Verify it's no longer pending
+        updated_proposals = store.get_pending_proposals()
+        assert len(updated_proposals) == 1
+        assert updated_proposals[0]["id"] != proposal_id
+
+        # Verify the status was updated
+        accepted = store.get_proposal_by_id(proposal_id)
+        assert accepted["status"] == "ACCEPTED"
+        assert accepted["reviewed_at"] is not None
+
+    def test_get_unmatched_firefly_transactions(self, populated_reconciliation_db):
+        """Test retrieving unmatched Firefly transactions."""
+        from paperless_firefly.state_store import StateStore
+
+        store = StateStore(populated_reconciliation_db)
+        unmatched = store.get_unmatched_firefly_transactions()
+
+        # Should have 2 unmatched transactions
+        assert len(unmatched) == 2
+        firefly_ids = [tx["firefly_id"] for tx in unmatched]
+        assert 500 in firefly_ids
+        assert 501 in firefly_ids
+        assert 502 not in firefly_ids  # This one is CONFIRMED
+
+
+class TestReconciliationStatsHelper:
+    """Test the _get_reconciliation_stats helper function."""
+
+    def test_reconciliation_stats_counts(self, populated_reconciliation_db, monkeypatch):
+        """Test that reconciliation stats are calculated correctly."""
+        # Mock the settings to use our test database
+        import paperless_firefly.review.web.views as views_module
+        from paperless_firefly.state_store import StateStore
+
+        store = StateStore(populated_reconciliation_db)
+
+        # Call the stats function directly
+        stats = views_module._get_reconciliation_stats(store)
+
+        assert stats["pending"] == 2
+        assert stats["rejected"] == 1
+        assert stats["accepted"] == 0
+        assert stats["unlinked"] == 2  # UNMATCHED transactions
+
+
+class TestAuditTrailFunctions:
+    """Test audit trail state store functions."""
+
+    def test_get_interpretation_runs(self, populated_reconciliation_db):
+        """Test retrieving interpretation runs for a document."""
+        from paperless_firefly.state_store import StateStore
+
+        store = StateStore(populated_reconciliation_db)
+        runs = store.get_interpretation_runs(100)
+
+        # Should have 2 runs for document 100
+        assert len(runs) == 2
+
+        # Check runs are ordered by timestamp DESC
+        assert runs[0]["final_state"] == "REJECTED"  # More recent
+        assert runs[1]["final_state"] == "PROPOSED"
+
+    def test_create_interpretation_run(self, populated_reconciliation_db):
+        """Test creating a new interpretation run."""
+        from paperless_firefly.state_store import StateStore
+
+        store = StateStore(populated_reconciliation_db)
+
+        run_id = store.create_interpretation_run(
+            document_id=101,
+            firefly_id=501,
+            external_id="paperless:101:hash101",
+            pipeline_version="1.0.0",
+            inputs_summary={"action": "accept_proposal"},
+            final_state="LINKED",
+            decision_source="USER",
+            firefly_write_action="UPDATE_LINKAGE",
+            firefly_target_id=501,
+        )
+
+        assert run_id > 0
+
+        # Verify it was created
+        runs = store.get_interpretation_runs(101)
+        assert len(runs) == 1
+        assert runs[0]["final_state"] == "LINKED"
+        assert runs[0]["decision_source"] == "USER"
+
+
+class TestReconciliationNavigationLogic:
+    """Test reconciliation queue navigation."""
+
+    def test_proposal_navigation_indices(self, populated_reconciliation_db):
+        """Test prev/next calculation for proposal navigation."""
+        from paperless_firefly.state_store import StateStore
+
+        store = StateStore(populated_reconciliation_db)
+        proposals = store.get_pending_proposals()
+        proposal_ids = [p["id"] for p in proposals]
+
+        assert len(proposal_ids) == 2
+
+        # At first item
+        current_idx = 0
+        prev_id = proposal_ids[current_idx - 1] if current_idx > 0 else None
+        next_id = proposal_ids[current_idx + 1] if current_idx < len(proposal_ids) - 1 else None
+
+        assert prev_id is None
+        assert next_id == proposal_ids[1]
+
+        # At second item
+        current_idx = 1
+        prev_id = proposal_ids[current_idx - 1] if current_idx > 0 else None
+        next_id = proposal_ids[current_idx + 1] if current_idx < len(proposal_ids) - 1 else None
+
+        assert prev_id == proposal_ids[0]
         assert next_id is None

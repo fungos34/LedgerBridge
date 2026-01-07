@@ -3,13 +3,10 @@ Paperless-ngx API client implementation.
 """
 
 import hashlib
-import json
 import logging
-import time
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Iterator, Optional
-from urllib.parse import urljoin
+from typing import Any
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -27,7 +24,7 @@ class PaperlessError(Exception):
 class PaperlessAPIError(PaperlessError):
     """API returned an error response."""
 
-    def __init__(self, status_code: int, message: str, response_body: Optional[str] = None):
+    def __init__(self, status_code: int, message: str, response_body: str | None = None):
         self.status_code = status_code
         self.message = message
         self.response_body = response_body
@@ -47,28 +44,28 @@ class PaperlessDocument:
     id: int
     title: str
     content: str  # OCR text
-    created: Optional[str]  # Document date
+    created: str | None  # Document date
     added: str  # When added to Paperless
     modified: str
 
     # Classification
-    correspondent: Optional[str] = None
-    correspondent_id: Optional[int] = None
-    document_type: Optional[str] = None
-    document_type_id: Optional[int] = None
+    correspondent: str | None = None
+    correspondent_id: int | None = None
+    document_type: str | None = None
+    document_type_id: int | None = None
     tags: list[str] = field(default_factory=list)
     tag_ids: list[int] = field(default_factory=list)
 
     # File info
-    original_file_name: Optional[str] = None
-    archive_serial_number: Optional[int] = None
+    original_file_name: str | None = None
+    archive_serial_number: int | None = None
 
     # Custom fields
     custom_fields: dict[str, Any] = field(default_factory=dict)
 
     # URLs
-    download_url: Optional[str] = None
-    original_download_url: Optional[str] = None
+    download_url: str | None = None
+    original_download_url: str | None = None
 
     @classmethod
     def from_api_response(cls, data: dict, base_url: str) -> "PaperlessDocument":
@@ -170,8 +167,8 @@ class PaperlessClient:
         self,
         method: str,
         endpoint: str,
-        params: Optional[dict] = None,
-        json_data: Optional[dict] = None,
+        params: dict | None = None,
+        json_data: dict | None = None,
         stream: bool = False,
     ) -> requests.Response:
         """Make an API request with error handling."""
@@ -189,11 +186,11 @@ class PaperlessClient:
         except requests.exceptions.ConnectionError as e:
             raise PaperlessConnectionError(
                 f"Failed to connect to Paperless at {self.base_url}: {e}"
-            )
+            ) from e
         except requests.exceptions.Timeout as e:
-            raise PaperlessConnectionError(f"Request to Paperless timed out: {e}")
+            raise PaperlessConnectionError(f"Request to Paperless timed out: {e}") from e
         except requests.exceptions.RequestException as e:
-            raise PaperlessError(f"Request failed: {e}")
+            raise PaperlessError(f"Request failed: {e}") from e
 
         if not response.ok:
             try:
@@ -218,13 +215,13 @@ class PaperlessClient:
 
     def list_documents(
         self,
-        tags: Optional[list[str]] = None,
-        tag_ids: Optional[list[int]] = None,
-        document_type: Optional[str] = None,
-        document_type_id: Optional[int] = None,
-        correspondent: Optional[str] = None,
-        correspondent_id: Optional[int] = None,
-        query: Optional[str] = None,
+        tags: list[str] | None = None,
+        tag_ids: list[int] | None = None,
+        document_type: str | None = None,
+        document_type_id: int | None = None,
+        correspondent: str | None = None,
+        correspondent_id: int | None = None,
+        query: str | None = None,
         page_size: int = DEFAULT_PAGE_SIZE,
         ordering: str = "-added",
     ) -> Iterator[PaperlessDocument]:
@@ -426,7 +423,7 @@ class PaperlessClient:
 
         return tag_ids
 
-    def _resolve_document_type_id(self, type_name: str) -> Optional[int]:
+    def _resolve_document_type_id(self, type_name: str) -> int | None:
         """Resolve document type name to ID."""
         try:
             response = self._request("GET", "/api/document_types/", params={"page_size": 1000})
@@ -438,7 +435,7 @@ class PaperlessClient:
             logger.warning(f"Failed to resolve document type ID: {e}")
         return None
 
-    def _resolve_correspondent_id(self, corr_name: str) -> Optional[int]:
+    def _resolve_correspondent_id(self, corr_name: str) -> int | None:
         """Resolve correspondent name to ID."""
         try:
             response = self._request("GET", "/api/correspondents/", params={"page_size": 1000})

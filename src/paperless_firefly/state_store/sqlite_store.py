@@ -10,12 +10,13 @@ Tables:
 
 import json
 import sqlite3
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any
 
 
 class ImportStatus(str, Enum):
@@ -34,9 +35,9 @@ class DocumentRecord:
 
     document_id: int
     source_hash: str
-    title: Optional[str]
-    document_type: Optional[str]
-    correspondent: Optional[str]
+    title: str | None
+    document_type: str | None
+    correspondent: str | None
     tags: list[str]
     first_seen: str  # ISO timestamp
     last_seen: str  # ISO timestamp
@@ -67,8 +68,8 @@ class ExtractionRecord:
     overall_confidence: float
     review_state: str
     created_at: str
-    reviewed_at: Optional[str]
-    review_decision: Optional[str]  # ACCEPTED, REJECTED, EDITED
+    reviewed_at: str | None
+    review_decision: str | None  # ACCEPTED, REJECTED, EDITED
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "ExtractionRecord":
@@ -93,12 +94,12 @@ class ImportRecord:
     id: int
     external_id: str
     document_id: int
-    firefly_id: Optional[int]
+    firefly_id: int | None
     status: ImportStatus
-    error_message: Optional[str]
+    error_message: str | None
     payload_json: str
     created_at: str
-    imported_at: Optional[str]
+    imported_at: str | None
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "ImportRecord":
@@ -124,22 +125,28 @@ class StateStore:
     - Processed documents
     - Generated extractions
     - Firefly imports
+    - Firefly cache (for reconciliation)
+    - Match proposals
+    - Interpretation runs (audit trail)
 
     Thread-safe for single-writer scenarios.
     """
 
     SCHEMA_VERSION = 1
 
-    def __init__(self, db_path: Path | str):
+    def __init__(self, db_path: Path | str, run_migrations: bool = True):
         """
         Initialize state store.
 
         Args:
             db_path: Path to SQLite database file
+            run_migrations: Whether to run pending migrations (default True)
         """
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
+        if run_migrations:
+            self._run_migrations()
 
     def _get_connection(self) -> sqlite3.Connection:
         """Get a database connection with row factory."""
@@ -270,16 +277,27 @@ class StateStore:
                 "INSERT OR REPLACE INTO schema_version (version) VALUES (?)", (self.SCHEMA_VERSION,)
             )
 
+    def _run_migrations(self) -> None:
+        """Run pending database migrations."""
+        from .migrations import MigrationRunner
+
+        conn = self._get_connection()
+        try:
+            runner = MigrationRunner(conn)
+            runner.run_pending()
+        finally:
+            conn.close()
+
     # Document methods
 
     def upsert_document(
         self,
         document_id: int,
         source_hash: str,
-        title: Optional[str] = None,
-        document_type: Optional[str] = None,
-        correspondent: Optional[str] = None,
-        tags: Optional[list[str]] = None,
+        title: str | None = None,
+        document_type: str | None = None,
+        correspondent: str | None = None,
+        tags: list[str] | None = None,
     ) -> None:
         """Insert or update a document record."""
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -320,7 +338,7 @@ class StateStore:
                     ),
                 )
 
-    def get_document(self, document_id: int) -> Optional[DocumentRecord]:
+    def get_document(self, document_id: int) -> DocumentRecord | None:
         """Get a document record by ID."""
         with self._transaction() as conn:
             row = conn.execute(
@@ -360,7 +378,7 @@ class StateStore:
             )
             return cursor.lastrowid or 0
 
-    def get_extraction_by_document(self, document_id: int) -> Optional[ExtractionRecord]:
+    def get_extraction_by_document(self, document_id: int) -> ExtractionRecord | None:
         """Get the latest extraction for a document."""
         with self._transaction() as conn:
             row = conn.execute(
@@ -369,7 +387,7 @@ class StateStore:
             ).fetchone()
             return ExtractionRecord.from_row(row) if row else None
 
-    def get_extraction_by_external_id(self, external_id: str) -> Optional[ExtractionRecord]:
+    def get_extraction_by_external_id(self, external_id: str) -> ExtractionRecord | None:
         """Get extraction by external_id."""
         with self._transaction() as conn:
             row = conn.execute(
@@ -381,7 +399,7 @@ class StateStore:
         self,
         extraction_id: int,
         decision: str,
-        updated_json: Optional[str] = None,
+        updated_json: str | None = None,
     ) -> None:
         """Update extraction with review decision."""
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -547,7 +565,7 @@ class StateStore:
                     ),
                 )
 
-    def get_import_by_external_id(self, external_id: str) -> Optional[ImportRecord]:
+    def get_import_by_external_id(self, external_id: str) -> ImportRecord | None:
         """Get import record by external_id."""
         with self._transaction() as conn:
             row = conn.execute(
@@ -578,7 +596,7 @@ class StateStore:
             cursor = conn.execute("DELETE FROM imports WHERE external_id = ?", (external_id,))
             return cursor.rowcount > 0
 
-    def reset_import_for_retry(self, external_id: str) -> Optional[int]:
+    def reset_import_for_retry(self, external_id: str) -> int | None:
         """
         Reset an import to PENDING for reimport.
 
@@ -609,7 +627,7 @@ class StateStore:
 
             return firefly_id
 
-    def get_import_by_document(self, document_id: int) -> Optional[ImportRecord]:
+    def get_import_by_document(self, document_id: int) -> ImportRecord | None:
         """Get import record by document_id."""
         with self._transaction() as conn:
             row = conn.execute(
@@ -632,9 +650,9 @@ class StateStore:
     def save_vendor_mapping(
         self,
         vendor_pattern: str,
-        destination_account: Optional[str] = None,
-        category: Optional[str] = None,
-        tags: Optional[list[str]] = None,
+        destination_account: str | None = None,
+        category: str | None = None,
+        tags: list[str] | None = None,
     ) -> None:
         """Save or update a vendor mapping."""
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -665,7 +683,7 @@ class StateStore:
                     (vendor_pattern, destination_account, category, tags_json, now, now),
                 )
 
-    def get_vendor_mapping(self, vendor_pattern: str) -> Optional[dict[str, Any]]:
+    def get_vendor_mapping(self, vendor_pattern: str) -> dict[str, Any] | None:
         """Get vendor mapping by pattern."""
         with self._transaction() as conn:
             row = conn.execute(
@@ -747,3 +765,376 @@ class StateStore:
                 "imports_success": imported["count"] if imported else 0,
                 "imports_failed": failed["count"] if failed else 0,
             }
+
+    # === Firefly Cache Methods ===
+
+    def upsert_firefly_cache(
+        self,
+        firefly_id: int,
+        type_: str,
+        date: str,
+        amount: str,
+        description: str | None = None,
+        external_id: str | None = None,
+        internal_reference: str | None = None,
+        source_account: str | None = None,
+        destination_account: str | None = None,
+        notes: str | None = None,
+        category_name: str | None = None,
+        tags: list[str] | None = None,
+    ) -> None:
+        """Upsert a Firefly transaction into the cache."""
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        tags_json = json.dumps(tags or [])
+
+        with self._transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO firefly_cache
+                (firefly_id, external_id, internal_reference, type, date, amount, description,
+                 source_account, destination_account, notes, category_name, tags, synced_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(firefly_id) DO UPDATE SET
+                    external_id = excluded.external_id,
+                    internal_reference = excluded.internal_reference,
+                    type = excluded.type,
+                    date = excluded.date,
+                    amount = excluded.amount,
+                    description = excluded.description,
+                    source_account = excluded.source_account,
+                    destination_account = excluded.destination_account,
+                    notes = excluded.notes,
+                    category_name = excluded.category_name,
+                    tags = excluded.tags,
+                    synced_at = excluded.synced_at
+            """,
+                (
+                    firefly_id,
+                    external_id,
+                    internal_reference,
+                    type_,
+                    date,
+                    amount,
+                    description,
+                    source_account,
+                    destination_account,
+                    notes,
+                    category_name,
+                    tags_json,
+                    now,
+                ),
+            )
+
+    def get_unmatched_firefly_transactions(self) -> list[dict[str, Any]]:
+        """Get cached Firefly transactions that are not yet matched."""
+        with self._transaction() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM firefly_cache
+                WHERE match_status = 'UNMATCHED'
+                ORDER BY date DESC
+            """
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def update_firefly_match_status(
+        self,
+        firefly_id: int,
+        status: str,
+        document_id: int | None = None,
+        confidence: float | None = None,
+    ) -> None:
+        """Update match status for a cached Firefly transaction."""
+        with self._transaction() as conn:
+            conn.execute(
+                """
+                UPDATE firefly_cache
+                SET match_status = ?, matched_document_id = ?, match_confidence = ?
+                WHERE firefly_id = ?
+            """,
+                (status, document_id, confidence, firefly_id),
+            )
+
+    def get_firefly_cache_entry(self, firefly_id: int) -> dict[str, Any] | None:
+        """Get a single cached Firefly transaction."""
+        with self._transaction() as conn:
+            row = conn.execute(
+                "SELECT * FROM firefly_cache WHERE firefly_id = ?", (firefly_id,)
+            ).fetchone()
+            return dict(row) if row else None
+
+    def clear_firefly_cache(self) -> int:
+        """Clear all cached Firefly transactions. Returns count of deleted rows."""
+        with self._transaction() as conn:
+            cursor = conn.execute("DELETE FROM firefly_cache")
+            return cursor.rowcount
+
+    # === Match Proposals Methods ===
+
+    def create_match_proposal(
+        self,
+        firefly_id: int,
+        document_id: int,
+        match_score: float,
+        match_reasons: list[str] | None = None,
+    ) -> int:
+        """Create a match proposal. Returns the proposal ID."""
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        reasons_json = json.dumps(match_reasons or [])
+
+        with self._transaction() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO match_proposals
+                (firefly_id, document_id, match_score, match_reasons, created_at)
+                VALUES (?, ?, ?, ?, ?)
+            """,
+                (firefly_id, document_id, match_score, reasons_json, now),
+            )
+            return cursor.lastrowid or 0
+
+    def get_pending_proposals(self) -> list[dict[str, Any]]:
+        """Get all pending match proposals."""
+        with self._transaction() as conn:
+            rows = conn.execute(
+                """
+                SELECT mp.*, fc.date as tx_date, fc.amount as tx_amount,
+                       fc.description as tx_description, fc.source_account, fc.destination_account,
+                       pd.title as doc_title, e.overall_confidence
+                FROM match_proposals mp
+                JOIN firefly_cache fc ON mp.firefly_id = fc.firefly_id
+                JOIN paperless_documents pd ON mp.document_id = pd.document_id
+                LEFT JOIN extractions e ON mp.document_id = e.document_id
+                WHERE mp.status = 'PENDING'
+                ORDER BY mp.match_score DESC
+            """
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def update_proposal_status(self, proposal_id: int, status: str) -> None:
+        """Update match proposal status (ACCEPTED, REJECTED)."""
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        with self._transaction() as conn:
+            conn.execute(
+                """
+                UPDATE match_proposals
+                SET status = ?, reviewed_at = ?
+                WHERE id = ?
+            """,
+                (status, now, proposal_id),
+            )
+
+    def get_proposal_by_id(self, proposal_id: int) -> dict[str, Any] | None:
+        """Get a match proposal by ID."""
+        with self._transaction() as conn:
+            row = conn.execute(
+                "SELECT * FROM match_proposals WHERE id = ?", (proposal_id,)
+            ).fetchone()
+            return dict(row) if row else None
+
+    # === Interpretation Runs Methods ===
+
+    def create_interpretation_run(
+        self,
+        document_id: int | None,
+        firefly_id: int | None,
+        external_id: str | None,
+        pipeline_version: str,
+        inputs_summary: dict,
+        final_state: str,
+        duration_ms: int | None = None,
+        algorithm_version: str | None = None,
+        rules_applied: list[dict] | None = None,
+        llm_result: dict | None = None,
+        suggested_category: str | None = None,
+        suggested_splits: list[dict] | None = None,
+        auto_applied: bool = False,
+        decision_source: str | None = None,
+        firefly_write_action: str | None = None,
+        firefly_target_id: int | None = None,
+        linkage_marker_written: dict | None = None,
+        taxonomy_version: str | None = None,
+    ) -> int:
+        """Create an interpretation run record. Returns the run ID."""
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+        with self._transaction() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO interpretation_runs
+                (document_id, firefly_id, external_id, run_timestamp, duration_ms,
+                 pipeline_version, algorithm_version, inputs_summary, rules_applied,
+                 llm_result, final_state, suggested_category, suggested_splits,
+                 auto_applied, decision_source, firefly_write_action, firefly_target_id,
+                 linkage_marker_written, taxonomy_version)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+                (
+                    document_id,
+                    firefly_id,
+                    external_id,
+                    now,
+                    duration_ms,
+                    pipeline_version,
+                    algorithm_version,
+                    json.dumps(inputs_summary),
+                    json.dumps(rules_applied) if rules_applied else None,
+                    json.dumps(llm_result) if llm_result else None,
+                    final_state,
+                    suggested_category,
+                    json.dumps(suggested_splits) if suggested_splits else None,
+                    auto_applied,
+                    decision_source,
+                    firefly_write_action,
+                    firefly_target_id,
+                    json.dumps(linkage_marker_written) if linkage_marker_written else None,
+                    taxonomy_version,
+                ),
+            )
+            return cursor.lastrowid or 0
+
+    def get_interpretation_runs(self, document_id: int) -> list[dict[str, Any]]:
+        """Get all interpretation runs for a document."""
+        with self._transaction() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM interpretation_runs
+                WHERE document_id = ?
+                ORDER BY run_timestamp DESC
+            """,
+                (document_id,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def get_latest_interpretation_run(self, document_id: int) -> dict[str, Any] | None:
+        """Get the most recent interpretation run for a document."""
+        with self._transaction() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM interpretation_runs
+                WHERE document_id = ?
+                ORDER BY run_timestamp DESC
+                LIMIT 1
+            """,
+                (document_id,),
+            ).fetchone()
+            return dict(row) if row else None
+
+    # === LLM Feedback Methods ===
+
+    def record_llm_feedback(
+        self,
+        run_id: int,
+        suggested_category: str,
+        actual_category: str,
+        feedback_type: str,
+        notes: str | None = None,
+    ) -> int:
+        """Record feedback on an LLM suggestion. Returns feedback ID."""
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+        with self._transaction() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO llm_feedback
+                (run_id, suggested_category, actual_category, feedback_type, notes, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """,
+                (run_id, suggested_category, actual_category, feedback_type, notes, now),
+            )
+            return cursor.lastrowid or 0
+
+    def get_llm_feedback_stats(self) -> dict[str, int]:
+        """Get statistics on LLM feedback."""
+        with self._transaction() as conn:
+            total = conn.execute("SELECT COUNT(*) FROM llm_feedback").fetchone()[0]
+            wrong = conn.execute(
+                "SELECT COUNT(*) FROM llm_feedback WHERE feedback_type = 'WRONG'"
+            ).fetchone()[0]
+            correct = conn.execute(
+                "SELECT COUNT(*) FROM llm_feedback WHERE feedback_type = 'CORRECT'"
+            ).fetchone()[0]
+
+            return {
+                "total": total,
+                "wrong": wrong,
+                "correct": correct,
+                "accuracy": (correct / total) if total > 0 else 0.0,
+            }
+
+    # === LLM Cache Methods ===
+
+    def get_llm_cache(self, cache_key: str) -> dict[str, Any] | None:
+        """Get cached LLM response by key."""
+        with self._transaction() as conn:
+            now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            row = conn.execute(
+                """
+                SELECT * FROM llm_cache
+                WHERE cache_key = ? AND expires_at > ?
+            """,
+                (cache_key, now),
+            ).fetchone()
+
+            if row:
+                # Update hit count
+                conn.execute(
+                    "UPDATE llm_cache SET hit_count = hit_count + 1 WHERE cache_key = ?",
+                    (cache_key,),
+                )
+                return dict(row)
+            return None
+
+    def set_llm_cache(
+        self,
+        cache_key: str,
+        model: str,
+        prompt_version: str,
+        taxonomy_version: str,
+        response_json: str,
+        ttl_days: int = 30,
+    ) -> None:
+        """Store LLM response in cache."""
+        now = datetime.now(timezone.utc)
+        expires = now + __import__("datetime").timedelta(days=ttl_days)
+
+        with self._transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO llm_cache
+                (cache_key, model, prompt_version, taxonomy_version, response_json, created_at, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(cache_key) DO UPDATE SET
+                    response_json = excluded.response_json,
+                    created_at = excluded.created_at,
+                    expires_at = excluded.expires_at,
+                    hit_count = 1
+            """,
+                (
+                    cache_key,
+                    model,
+                    prompt_version,
+                    taxonomy_version,
+                    response_json,
+                    now.isoformat().replace("+00:00", "Z"),
+                    expires.isoformat().replace("+00:00", "Z"),
+                ),
+            )
+
+    def clear_expired_llm_cache(self) -> int:
+        """Clear expired LLM cache entries. Returns count of deleted rows."""
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        with self._transaction() as conn:
+            cursor = conn.execute("DELETE FROM llm_cache WHERE expires_at < ?", (now,))
+            return cursor.rowcount
+
+    def get_llm_suggestion_count(self) -> int:
+        """Get total number of LLM suggestions made (for calibration)."""
+        with self._transaction() as conn:
+            result = conn.execute(
+                """
+                SELECT COUNT(*) FROM interpretation_runs
+                WHERE llm_result IS NOT NULL
+            """
+            ).fetchone()
+            return result[0] if result else 0

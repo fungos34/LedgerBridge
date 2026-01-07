@@ -1,0 +1,232 @@
+{% extends "review/base.html" %}
+
+{% block title %}Reconciliation - Match Proposals{% endblock %}
+
+{% block extra_css %}
+<style>
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+    }
+    
+    @media (max-width: 1024px) {
+        .stats-grid {
+            grid-template-columns: repeat(3, 1fr);
+        }
+    }
+    
+    @media (max-width: 640px) {
+        .stats-grid {
+            grid-template-columns: repeat(2, 1fr);
+        }
+    }
+    
+    .stat-card {
+        background: white;
+        border-radius: 0.5rem;
+        padding: 1rem;
+        text-align: center;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+    
+    .stat-card .value {
+        font-size: 1.75rem;
+        font-weight: 700;
+        color: var(--gray-900);
+    }
+    
+    .stat-card .label {
+        font-size: 0.75rem;
+        color: var(--gray-500);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+    
+    .stat-card.pending .value { color: var(--warning); }
+    .stat-card.accepted .value { color: var(--success); }
+    .stat-card.rejected .value { color: var(--danger); }
+    .stat-card.auto .value { color: var(--primary); }
+    
+    .match-reasons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.25rem;
+    }
+    
+    .reason-tag {
+        font-size: 0.625rem;
+        padding: 0.125rem 0.375rem;
+        background: var(--gray-100);
+        border-radius: 0.25rem;
+        color: var(--gray-700);
+    }
+    
+    .proposal-row {
+        transition: background-color 0.15s ease;
+    }
+    
+    .proposal-row:hover {
+        background-color: var(--gray-50);
+    }
+    
+    .quick-actions {
+        display: flex;
+        gap: 0.25rem;
+    }
+    
+    .tx-info {
+        font-size: 0.875rem;
+    }
+    
+    .tx-info .amount {
+        font-weight: 600;
+        font-family: "SFMono-Regular", Consolas, monospace;
+    }
+    
+    .tx-info .description {
+        color: var(--gray-600);
+        max-width: 300px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="stats-grid">
+    <div class="stat-card pending">
+        <div class="value">{{ stats.pending }}</div>
+        <div class="label">Pending</div>
+    </div>
+    <div class="stat-card accepted">
+        <div class="value">{{ stats.accepted }}</div>
+        <div class="label">Accepted</div>
+    </div>
+    <div class="stat-card rejected">
+        <div class="value">{{ stats.rejected }}</div>
+        <div class="label">Rejected</div>
+    </div>
+    <div class="stat-card auto">
+        <div class="value">{{ stats.auto_matched }}</div>
+        <div class="label">Auto-Matched</div>
+    </div>
+    <div class="stat-card">
+        <div class="value">{{ stats.unlinked }}</div>
+        <div class="label">Unlinked Tx</div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2>📋 Pending Match Proposals ({{ proposals|length }})</h2>
+        <div class="flex gap-2">
+            <a href="{% url 'unlinked_transactions' %}" class="btn btn-outline">
+                🔍 View Unlinked
+            </a>
+            {% if proposals %}
+            <a href="{% url 'reconciliation_detail' proposals.0.id %}" class="btn btn-primary">
+                Start Review →
+            </a>
+            {% endif %}
+        </div>
+    </div>
+    
+    {% if proposals %}
+    <table>
+        <thead>
+            <tr>
+                <th>Score</th>
+                <th>Transaction</th>
+                <th>Document</th>
+                <th>Match Reasons</th>
+                <th>Created</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for proposal in proposals %}
+            <tr class="proposal-row">
+                <td>
+                    <div class="mb-1 text-mono">{{ proposal.score_pct|floatformat:0 }}%</div>
+                    <div class="confidence-bar" style="width: 60px;">
+                        <div class="confidence-bar-fill {% if proposal.score_pct >= 85 %}confidence-high{% elif proposal.score_pct >= 60 %}confidence-medium{% else %}confidence-low{% endif %}"
+                             style="width: {{ proposal.score_pct }}%"></div>
+                    </div>
+                </td>
+                <td class="tx-info">
+                    <div class="amount">{{ proposal.tx_amount }} {{ proposal.tx_currency|default:"EUR" }}</div>
+                    <div class="description" title="{{ proposal.tx_description }}">{{ proposal.tx_description|truncatechars:40 }}</div>
+                    <div class="text-sm text-muted">{{ proposal.tx_date }}</div>
+                </td>
+                <td>
+                    <div><strong>{{ proposal.doc_title|truncatechars:35 }}</strong></div>
+                    <div class="text-sm text-muted">Doc #{{ proposal.document_id }}</div>
+                </td>
+                <td>
+                    <div class="match-reasons">
+                        {% for reason in proposal.reasons_list %}
+                        <span class="reason-tag">{{ reason }}</span>
+                        {% empty %}
+                        <span class="text-muted text-sm">-</span>
+                        {% endfor %}
+                    </div>
+                </td>
+                <td class="text-sm text-muted">
+                    {{ proposal.created_at|slice:":10" }}
+                </td>
+                <td>
+                    <div class="quick-actions">
+                        <a href="{% url 'reconciliation_detail' proposal.id %}" class="btn btn-sm btn-outline" title="Review">
+                            👁
+                        </a>
+                        <form method="post" action="{% url 'accept_proposal' proposal.id %}" style="display: inline;">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-sm btn-success" title="Accept">✓</button>
+                        </form>
+                        <form method="post" action="{% url 'reject_proposal' proposal.id %}" style="display: inline;">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-sm btn-danger" title="Reject">✕</button>
+                        </form>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <h3>✅ No pending proposals</h3>
+        <p>All match proposals have been reviewed.</p>
+        <p class="mt-4">
+            <a href="{% url 'unlinked_transactions' %}" class="btn btn-primary">
+                🔍 View Unlinked Transactions
+            </a>
+        </p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Manual Link Form -->
+<div class="card mt-4">
+    <div class="card-header">
+        <h3>🔗 Manual Link</h3>
+    </div>
+    <div class="card-body">
+        <form method="post" action="{% url 'manual_link' %}" class="flex gap-2 items-end flex-wrap">
+            {% csrf_token %}
+            <div class="form-group" style="flex: 1; min-width: 150px;">
+                <label for="document_id">Document ID</label>
+                <input type="number" id="document_id" name="document_id" class="form-input" placeholder="e.g., 123" required>
+            </div>
+            <div class="form-group" style="flex: 1; min-width: 150px;">
+                <label for="firefly_id">Firefly Transaction ID</label>
+                <input type="number" id="firefly_id" name="firefly_id" class="form-input" placeholder="e.g., 456" required>
+            </div>
+            <button type="submit" class="btn btn-primary">Link</button>
+        </form>
+    </div>
+</div>
+{% endblock %}
