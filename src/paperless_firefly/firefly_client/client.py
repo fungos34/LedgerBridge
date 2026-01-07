@@ -91,6 +91,63 @@ class FireflyCategory:
     notes: str | None = None
 
 
+def _normalize_tags(raw: object) -> list[str] | None:
+    """Normalize Firefly tags payload to list[str] or None (SSOT).
+
+    Firefly III API returns tags in varying formats depending on version/context:
+    - None → None
+    - [] → None (empty treated as absent)
+    - ["groceries", "rent"] → ["groceries", "rent"]
+    - [{"tag": "groceries"}, {"tag": "rent"}] → ["groceries", "rent"]
+    - [{"name": "groceries"}] → ["groceries"] (alternate key)
+    - Mixed lists → extract strings safely, skip unknowns
+
+    Args:
+        raw: The raw tags value from Firefly API response.
+
+    Returns:
+        Normalized list of tag strings, or None if empty/absent.
+
+    Raises:
+        FireflyAPIError: If raw is a completely unexpected type (dict, int, etc.)
+    """
+    if raw is None:
+        return None
+
+    if not isinstance(raw, list):
+        raise FireflyAPIError(
+            500,
+            f"Unexpected tags format: expected list or None, got {type(raw).__name__}",
+        )
+
+    result: list[str] = []
+    _logged_unknown = False
+
+    for item in raw:
+        if item is None:
+            continue
+        elif isinstance(item, str):
+            if item:  # Skip empty strings
+                result.append(item)
+        elif isinstance(item, dict):
+            # Try "tag" key first (Firefly standard), then "name" (alternate)
+            tag_value = item.get("tag") or item.get("name")
+            if tag_value and isinstance(tag_value, str):
+                result.append(tag_value)
+            elif not _logged_unknown:
+                logger.debug(
+                    "Unknown tag dict format (no 'tag' or 'name' key): %s",
+                    item,
+                )
+                _logged_unknown = True
+        else:
+            if not _logged_unknown:
+                logger.debug("Skipping unknown tag item type: %s", type(item).__name__)
+                _logged_unknown = True
+
+    return result if result else None
+
+
 class FireflyClient:
     """
     Client for Firefly III API.
@@ -510,7 +567,7 @@ class FireflyClient:
                             internal_reference=tx.get("internal_reference"),
                             notes=tx.get("notes"),
                             category_name=tx.get("category_name"),
-                            tags=[t.get("tag") for t in tx.get("tags", []) if t.get("tag")],
+                            tags=_normalize_tags(tx.get("tags")),
                         )
                     )
 

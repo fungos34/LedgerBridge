@@ -11,6 +11,21 @@ Quick reference for running Spark (Paperless-Firefly Bridge) with Docker.
 
 ---
 
+## Service Architecture
+
+**Understanding the two types of services:**
+
+| Service Type | Behavior | How to Run |
+|--------------|----------|------------|
+| **Web UI** | Long-running, continuous | `docker compose up -d` |
+| **Workers/Commands** | One-shot, exit when done | `docker compose run --rm ...` |
+
+- **Web UI** runs continuously and serves the review interface
+- **Workers** (reconcile, extract, import) are one-shot commands that exit after completing
+- Do NOT use `docker compose up` for workers - they will keep restarting!
+
+---
+
 ## Initial Setup
 
 ### 1. Create `.env` file
@@ -88,6 +103,9 @@ http://YOUR_HOST_IP:8080/review/
 ---
 
 ## Running Commands (Spark v1.0)
+
+> **⚠️ Important:** Use `docker compose run --rm` for one-shot commands (reconcile, extract, import).  
+> Do NOT use `docker compose up` for these - they will exit and keep restarting!
 
 ### Bank Reconciliation Pipeline
 

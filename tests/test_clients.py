@@ -688,3 +688,113 @@ class TestClientErrorHandling:
             client.create_transaction(payload)
 
         assert exc_info.value.status_code == 422
+
+
+class TestNormalizeTags:
+    """Tests for _normalize_tags() SSOT function.
+
+    Firefly III returns tags in varying formats:
+    - list[str]: ["groceries", "rent"]
+    - list[dict]: [{"tag": "groceries"}, {"tag": "rent"}]
+    - Mixed: [{"tag": "groceries"}, "rent", None]
+    - None: null
+
+    The normalizer must handle all these robustly.
+    """
+
+    def test_case_a_list_of_strings(self):
+        """Case A: tags=[\"groceries\",\"rent\"] → same list."""
+        from paperless_firefly.firefly_client.client import _normalize_tags
+
+        result = _normalize_tags(["groceries", "rent"])
+        assert result == ["groceries", "rent"]
+
+    def test_case_b_list_of_dicts_with_tag_key(self):
+        """Case B: tags=[{\"tag\":\"groceries\"},{\"tag\":\"rent\"}] → list[str]."""
+        from paperless_firefly.firefly_client.client import _normalize_tags
+
+        result = _normalize_tags([{"tag": "groceries"}, {"tag": "rent"}])
+        assert result == ["groceries", "rent"]
+
+    def test_case_c_mixed_list(self):
+        """Case C: tags=[{\"tag\":\"groceries\"},\"rent\",None,{\"foo\":\"bar\"}] → [\"groceries\",\"rent\"]."""
+        from paperless_firefly.firefly_client.client import _normalize_tags
+
+        result = _normalize_tags([{"tag": "groceries"}, "rent", None, {"foo": "bar"}])
+        assert result == ["groceries", "rent"]
+
+    def test_case_d_none_returns_none(self):
+        """Case D: tags=None → None."""
+        from paperless_firefly.firefly_client.client import _normalize_tags
+
+        result = _normalize_tags(None)
+        assert result is None
+
+    def test_empty_list_returns_none(self):
+        """Empty list [] → None (treat empty as absent)."""
+        from paperless_firefly.firefly_client.client import _normalize_tags
+
+        result = _normalize_tags([])
+        assert result is None
+
+    def test_list_with_only_none_returns_none(self):
+        """[None, None] → None."""
+        from paperless_firefly.firefly_client.client import _normalize_tags
+
+        result = _normalize_tags([None, None])
+        assert result is None
+
+    def test_dict_with_name_key(self):
+        """Alternate key \"name\" should work: [{\"name\":\"groceries\"}] → [\"groceries\"]."""
+        from paperless_firefly.firefly_client.client import _normalize_tags
+
+        result = _normalize_tags([{"name": "groceries"}, {"name": "rent"}])
+        assert result == ["groceries", "rent"]
+
+    def test_dict_with_tag_preferred_over_name(self):
+        """'tag' key takes precedence over 'name'."""
+        from paperless_firefly.firefly_client.client import _normalize_tags
+
+        result = _normalize_tags([{"tag": "preferred", "name": "fallback"}])
+        assert result == ["preferred"]
+
+    def test_empty_strings_filtered(self):
+        """Empty strings should be filtered out."""
+        from paperless_firefly.firefly_client.client import _normalize_tags
+
+        result = _normalize_tags(["groceries", "", "rent", ""])
+        assert result == ["groceries", "rent"]
+
+    def test_unexpected_type_raises_error(self):
+        """Non-list, non-None raises FireflyAPIError."""
+        from paperless_firefly.firefly_client.client import (
+            FireflyAPIError,
+            _normalize_tags,
+        )
+
+        with pytest.raises(FireflyAPIError) as exc_info:
+            _normalize_tags({"tag": "invalid"})  # dict, not list
+        assert "expected list or None" in str(exc_info.value)
+
+        with pytest.raises(FireflyAPIError):
+            _normalize_tags(42)  # int
+
+        with pytest.raises(FireflyAPIError):
+            _normalize_tags("groceries")  # string, not list
+
+    def test_complex_mixed_scenario(self):
+        """Complex scenario with all variations."""
+        from paperless_firefly.firefly_client.client import _normalize_tags
+
+        raw = [
+            "direct_string",
+            {"tag": "from_tag_key"},
+            {"name": "from_name_key"},
+            None,
+            "",
+            {"unknown": "ignored"},
+            {"tag": ""},  # empty tag value
+            {"name": ""},  # empty name value
+        ]
+        result = _normalize_tags(raw)
+        assert result == ["direct_string", "from_tag_key", "from_name_key"]
