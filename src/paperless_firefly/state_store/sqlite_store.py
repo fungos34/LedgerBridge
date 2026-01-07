@@ -70,6 +70,7 @@ class ExtractionRecord:
     created_at: str
     reviewed_at: str | None
     review_decision: str | None  # ACCEPTED, REJECTED, EDITED
+    llm_opt_out: bool = False  # Per-document LLM opt-out (Spark v1.0)
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "ExtractionRecord":
@@ -84,6 +85,7 @@ class ExtractionRecord:
             created_at=row["created_at"],
             reviewed_at=row["reviewed_at"],
             review_decision=row["review_decision"],
+            llm_opt_out=bool(row["llm_opt_out"]) if "llm_opt_out" in row.keys() else False,
         )
 
 
@@ -423,6 +425,33 @@ class StateStore:
                 """,
                     (now, decision, extraction_id),
                 )
+
+    def update_extraction_llm_opt_out(
+        self,
+        extraction_id: int,
+        opt_out: bool,
+    ) -> bool:
+        """Update LLM opt-out setting for an extraction.
+
+        Per SPARK_EVALUATION_REPORT.md 6.7.2: Per-document opt-out support.
+
+        Args:
+            extraction_id: The extraction ID to update.
+            opt_out: True to disable LLM for this document, False to enable.
+
+        Returns:
+            True if updated, False if extraction not found.
+        """
+        with self._transaction() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE extractions
+                SET llm_opt_out = ?
+                WHERE id = ?
+                """,
+                (opt_out, extraction_id),
+            )
+            return cursor.rowcount > 0
 
     def reset_extraction_for_review(self, extraction_id: int) -> bool:
         """

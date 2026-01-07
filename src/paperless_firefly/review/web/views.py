@@ -377,6 +377,46 @@ def extraction_archive(request: HttpRequest) -> HttpResponse:
     return render(request, "review/archive.html", context)
 
 
+def _get_llm_suggestion_for_document(store: StateStore, document_id: int) -> dict | None:
+    """Get the most recent LLM suggestion for a document.
+
+    Per SPARK_EVALUATION_REPORT.md 6.6: LLM suggestions shown as 'AI suggestion' badge.
+
+    Returns:
+        Dict with 'category', 'confidence', 'run_id' if LLM was used, else None.
+    """
+    runs = store.get_interpretation_runs(document_id)
+    for run in runs:
+        # Find runs with LLM results (most recent first)
+        if run.get("llm_result") and run.get("suggested_category"):
+            try:
+                llm_data = (
+                    json.loads(run["llm_result"])
+                    if isinstance(run["llm_result"], str)
+                    else run["llm_result"]
+                )
+                return {
+                    "category": run["suggested_category"],
+                    "confidence": llm_data.get("confidence", 0),
+                    "run_id": run["id"],
+                    "timestamp": run["run_timestamp"],
+                }
+            except (json.JSONDecodeError, TypeError):
+                continue
+    return None
+
+
+def _is_llm_globally_enabled() -> bool:
+    """Check if LLM is globally enabled via config."""
+    from ..config import load_config
+
+    try:
+        config = load_config()
+        return getattr(config, "llm_enabled", True)
+    except Exception:
+        return True  # Default to enabled if config unavailable
+
+
 @login_required
 def review_detail(request: HttpRequest, extraction_id: int) -> HttpResponse:
     """Show single extraction for review with document preview."""
@@ -450,6 +490,10 @@ def review_detail(request: HttpRequest, extraction_id: int) -> HttpResponse:
     except Exception as e:
         logger.warning(f"Could not fetch Firefly accounts: {e}")
 
+    # LLM context (Spark v1.0 - SPARK_EVALUATION_REPORT.md 6.6/6.7)
+    llm_suggestion = _get_llm_suggestion_for_document(store, extraction.paperless_document_id)
+    llm_globally_enabled = _is_llm_globally_enabled()
+
     context = {
         "record": record,
         "extraction": extraction,
@@ -463,6 +507,10 @@ def review_detail(request: HttpRequest, extraction_id: int) -> HttpResponse:
         "current_position": current_idx + 1 if current_idx >= 0 else 0,
         "already_reviewed": record.review_decision is not None,
         "firefly_accounts": firefly_accounts,
+        # LLM context
+        "llm_suggestion": llm_suggestion,
+        "llm_globally_enabled": llm_globally_enabled,
+        "llm_opt_out": record.llm_opt_out,
         **_get_external_urls(),
     }
     return render(request, "review/detail.html", context)
@@ -661,6 +709,107 @@ def save_extraction(request: HttpRequest, extraction_id: int) -> HttpResponse:
     if pending:
         return redirect("detail", extraction_id=pending[0].id)
     return redirect("list")
+
+
+# ============================================================================
+# LLM Control Actions (Phase 6-7 - SPARK_EVALUATION_REPORT.md 6.7/6.8)
+# ============================================================================
+
+
+@login_required
+@require_http_methods(["POST"])
+def toggle_llm_opt_out(request: HttpRequest, extraction_id: int) -> HttpResponse:
+    """Toggle LLM opt-out for a specific extraction.
+
+    Per SPARK_EVALUATION_REPORT.md 6.7.2: Per-document opt-out support.
+    UI Toggle: "Use AI suggestions" checkbox.
+    """
+    store = _get_store()
+
+    # Get current state
+    conn = store._get_connection()
+    try:
+        row = conn.execute(
+            "SELECT llm_opt_out FROM extractions WHERE id = ?", (extraction_id,)
+        ).fetchone()
+        if not row:
+            messages.error(request, "Extraction not found")
+            return redirect("list")
+
+        current_opt_out = bool(row["llm_opt_out"])
+    finally:
+        conn.close()
+
+    # Toggle the state
+    new_opt_out = not current_opt_out
+    if store.update_extraction_llm_opt_out(extraction_id, new_opt_out):
+        if new_opt_out:
+            messages.info(request, "AI suggestions disabled for this document")
+        else:
+            messages.info(request, "AI suggestions enabled for this document")
+    else:
+        messages.error(request, "Failed to update LLM settings")
+
+    return redirect("detail", extraction_id=extraction_id)
+
+
+@login_required
+@require_http_methods(["POST"])
+def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpResponse:
+    """Re-run interpretation for a document.
+
+    Per SPARK_EVALUATION_REPORT.md 6.8: Rescheduling / Re-Running Interpretation.
+    Creates a new InterpretationRun record while preserving history.
+    """
+    store = _get_store()
+
+    # Get extraction details
+    conn = store._get_connection()
+    try:
+        row = conn.execute(
+            "SELECT document_id, external_id FROM extractions WHERE id = ?",
+            (extraction_id,),
+        ).fetchone()
+        if not row:
+            messages.error(request, "Extraction not found")
+            return redirect("list")
+
+        document_id = row["document_id"]
+        external_id = row["external_id"]
+    finally:
+        conn.close()
+
+    # Get the reason if provided
+    reason = request.POST.get("reason", "User requested")
+
+    try:
+        # Record re-run request in interpretation_runs (audit trail)
+        store.create_interpretation_run(
+            document_id=document_id,
+            external_id=external_id,
+            pipeline_version="1.0.0",
+            inputs_summary={
+                "action": "rerun_interpretation",
+                "extraction_id": extraction_id,
+                "reason": reason,
+                "triggered_by": "user",
+            },
+            final_state="PENDING_RERUN",
+            decision_source="USER",
+        )
+
+        # Reset the extraction for re-processing
+        store.reset_extraction_for_review(extraction_id)
+
+        messages.success(
+            request,
+            f"Interpretation queued for re-run. Reason: {reason}",
+        )
+    except Exception as e:
+        logger.error(f"Error scheduling rerun for extraction {extraction_id}: {e}")
+        messages.error(request, f"Failed to schedule re-run: {e}")
+
+    return redirect("detail", extraction_id=extraction_id)
 
 
 # ============================================================================

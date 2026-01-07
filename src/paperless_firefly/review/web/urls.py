@@ -77,6 +77,19 @@ urlpatterns = [
     path("reconciliation/manual-link/", views.manual_link, name="manual_link"),
     path("reconciliation/unlinked/", views.unlinked_transactions, name="unlinked_transactions"),
     # ============================================================================
+    # LLM Control Routes (Phase 6-7 - SPARK_EVALUATION_REPORT.md 6.7/6.8)
+    # ============================================================================
+    path(
+        "extraction/<int:extraction_id>/llm-opt-out/",
+        views.toggle_llm_opt_out,
+        name="toggle_llm_opt_out",
+    ),
+    path(
+        "extraction/<int:extraction_id>/rerun/",
+        views.rerun_interpretation,
+        name="rerun_interpretation",
+    ),
+    # ============================================================================
     # Audit Trail Routes (Phase 8)
     # ============================================================================
     path("audit-trail/", views.audit_trail_list, name="audit_trail_list"),

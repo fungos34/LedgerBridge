@@ -157,6 +157,39 @@
         border-radius: 0.375rem;
         margin-bottom: 1rem;
     }
+    
+    /* AI badge styling */
+    .badge-ai {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        background: linear-gradient(135deg, #818cf8, #6366f1);
+        color: white;
+        font-size: 0.625rem;
+        font-weight: 600;
+        padding: 0.125rem 0.375rem;
+        border-radius: 0.25rem;
+        margin-left: 0.5rem;
+        vertical-align: middle;
+        cursor: help;
+    }
+    
+    .btn-xs {
+        font-size: 0.625rem;
+        padding: 0.125rem 0.375rem;
+        border-radius: 0.25rem;
+    }
+    
+    .btn-outline {
+        background: transparent;
+        border: 1px solid var(--gray-300);
+        color: var(--gray-700);
+    }
+    
+    .btn-outline:hover {
+        background: var(--gray-50);
+        border-color: var(--gray-400);
+    }
 </style>
 {% endblock %}
 
@@ -317,13 +350,29 @@
                         <div class="form-section-title">Classification</div>
                         <div class="form-row">
                             <div class="form-group">
-                                <label class="form-label" for="category">Category</label>
+                                <label class="form-label" for="category">
+                                    Category
+                                    {% if llm_suggestion %}
+                                    <span class="badge badge-ai" title="AI suggested: {{ llm_suggestion.category }} ({{ llm_suggestion.confidence|floatformat:0 }}% confidence)">
+                                        🤖 AI
+                                    </span>
+                                    {% endif %}
+                                </label>
                                 <input type="text" 
                                        id="category" 
                                        name="category" 
                                        class="form-input" 
                                        value="{{ proposal.category|default:'' }}"
                                        placeholder="e.g., Groceries">
+                                {% if llm_suggestion %}
+                                <div class="form-help">
+                                    AI suggested: <strong>{{ llm_suggestion.category }}</strong>
+                                    <button type="button" class="btn btn-xs btn-outline" 
+                                            onclick="document.getElementById('category').value='{{ llm_suggestion.category }}'">
+                                        Use suggestion
+                                    </button>
+                                </div>
+                                {% endif %}
                             </div>
                             <div class="form-group">
                                 <label class="form-label" for="transaction_type">Transaction Type *</label>
@@ -365,6 +414,40 @@
                     </div>
                 </div>
             </div>
+            
+            <!-- LLM Settings -->
+            {% if llm_globally_enabled %}
+            <div class="card mt-4">
+                <div class="card-header">
+                    <h2>🤖 AI Settings</h2>
+                </div>
+                <div class="card-body">
+                    <div class="form-row" style="align-items: center; gap: 1rem;">
+                        <div class="form-group" style="flex: 1;">
+                            <label class="form-label" style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                                <input type="checkbox" 
+                                       id="llm_opt_out_checkbox"
+                                       {% if not llm_opt_out %}checked{% endif %}
+                                       onchange="toggleLlmOptOut(this.checked)"
+                                       style="width: 1.25rem; height: 1.25rem;">
+                                <span>Use AI suggestions for this document</span>
+                            </label>
+                            <div class="form-help">
+                                When enabled, AI will assist with category suggestions. Disable to rely only on rule-based extraction.
+                            </div>
+                        </div>
+                        <div>
+                            <button type="button" 
+                                    class="btn btn-outline"
+                                    onclick="rerunInterpretation()"
+                                    title="Re-run AI interpretation for this document">
+                                🔄 Re-run Interpretation
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
             
             <!-- Action Buttons -->
             <div class="card mt-4">
@@ -451,4 +534,74 @@
         </div>
     </div>
 </div>
+
+<script>
+// LLM opt-out toggle
+function toggleLlmOptOut(enableAi) {
+    const optOut = !enableAi;
+    fetch('{% url "toggle_llm_opt_out" record.id %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}'
+        },
+        body: JSON.stringify({ opt_out: optOut })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Show brief feedback
+            const checkbox = document.getElementById('llm_opt_out_checkbox');
+            const originalLabel = checkbox.nextElementSibling.textContent;
+            checkbox.nextElementSibling.textContent = data.message;
+            setTimeout(() => {
+                checkbox.nextElementSibling.textContent = originalLabel;
+            }, 2000);
+        } else {
+            alert('Failed to update setting: ' + data.error);
+            // Revert checkbox state
+            document.getElementById('llm_opt_out_checkbox').checked = enableAi;
+        }
+    })
+    .catch(error => {
+        alert('Network error: ' + error);
+        document.getElementById('llm_opt_out_checkbox').checked = enableAi;
+    });
+}
+
+// Re-run interpretation
+function rerunInterpretation() {
+    if (!confirm('Re-run AI interpretation for this document? This will refresh the page with updated suggestions.')) {
+        return;
+    }
+    
+    const btn = event.target;
+    const originalText = btn.textContent;
+    btn.textContent = '⏳ Processing...';
+    btn.disabled = true;
+    
+    fetch('{% url "rerun_interpretation" record.id %}', {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Reload to show updated suggestions
+            window.location.reload();
+        } else {
+            alert('Failed to re-run interpretation: ' + data.error);
+            btn.textContent = originalText;
+            btn.disabled = false;
+        }
+    })
+    .catch(error => {
+        alert('Network error: ' + error);
+        btn.textContent = originalText;
+        btn.disabled = false;
+    });
+}
+</script>
 {% endblock %}
