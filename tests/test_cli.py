@@ -98,13 +98,15 @@ class TestReconcileCommandArguments:
     def test_reconcile_all_options_together(self):
         """Reconcile should accept all options together."""
         parser = create_cli()
-        args = parser.parse_args([
-            "reconcile",
-            "--no-sync",
-            "--no-match",
-            "--full-sync",
-            "--dry-run",
-        ])
+        args = parser.parse_args(
+            [
+                "reconcile",
+                "--no-sync",
+                "--no-match",
+                "--full-sync",
+                "--dry-run",
+            ]
+        )
 
         assert args.sync is False
         assert args.match is False
@@ -140,10 +142,7 @@ class TestHelpOutput:
         help_text = parser.format_help()
 
         assert "reconcile" in help_text
-        assert (
-            "bank reconciliation" in help_text.lower()
-            or "reconciliation" in help_text.lower()
-        )
+        assert "bank reconciliation" in help_text.lower() or "reconciliation" in help_text.lower()
 
     def test_reconcile_subcommand_help(self):
         """Reconcile subcommand should have descriptive help."""

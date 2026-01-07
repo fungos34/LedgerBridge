@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 from paperless_firefly.schemas.linkage import is_linked_to_spark
@@ -96,11 +96,26 @@ class FireflySyncService:
             logger.info("Performing full sync - clearing existing cache")
             self.store.clear_firefly_cache()
 
+        # Compute date range from config if not provided
+        # SSOT: config.reconciliation.sync_days defines the lookback window
+        if start_date is None:
+            sync_days = self.config.reconciliation.sync_days
+            start_date = (datetime.now() - timedelta(days=sync_days)).strftime("%Y-%m-%d")
+            logger.debug(
+                "Using default start_date from config: %s (sync_days=%d)", start_date, sync_days
+            )
+        if end_date is None:
+            end_date = datetime.now().strftime("%Y-%m-%d")
+            logger.debug("Using default end_date: %s", end_date)
+
         try:
             # Use unlinked transactions endpoint for efficiency
-            if not full_sync and start_date is None and end_date is None:
-                # Fast path: only get unlinked transactions
-                transactions = self.firefly.get_unlinked_transactions()
+            if not full_sync:
+                # Fast path: only get unlinked transactions within date range
+                transactions = self.firefly.get_unlinked_transactions(
+                    start_date=start_date,
+                    end_date=end_date,
+                )
             else:
                 # Full path: get all and filter locally
                 transactions = self.firefly.list_transactions(

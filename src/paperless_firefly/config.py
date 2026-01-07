@@ -33,6 +33,8 @@ class ReconciliationConfig:
 
     # Time window for fuzzy date matching (days)
     date_tolerance_days: int = 7
+    # Default sync window for fetching Firefly transactions (days back from today)
+    sync_days: int = 90
     # Minimum score to auto-confirm match
     auto_match_threshold: float = 0.90
     # Minimum score to show in proposals
@@ -118,8 +120,17 @@ def load_config(config_path: Path) -> Config:
 
     # Reconciliation config
     recon_data = data.get("reconciliation", {})
+    sync_days_env = os.environ.get("SPARK_RECONCILIATION_SYNC_DAYS", "")
+    sync_days = recon_data.get("sync_days", 90)
+    if sync_days_env:
+        try:
+            sync_days = int(sync_days_env)
+        except ValueError:
+            pass  # Keep default
+
     reconciliation = ReconciliationConfig(
         date_tolerance_days=recon_data.get("date_tolerance_days", 7),
+        sync_days=sync_days,
         auto_match_threshold=recon_data.get("auto_match_threshold", 0.90),
         proposal_threshold=recon_data.get("proposal_threshold", 0.60),
     )

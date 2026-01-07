@@ -435,8 +435,14 @@ class TestFireflySyncService:
 
     @pytest.fixture
     def mock_config(self) -> MagicMock:
-        """Create mock config."""
-        return MagicMock()
+        """Create mock config with reconciliation settings."""
+        config = MagicMock()
+        # SSOT: reconciliation.sync_days defines the lookback window
+        config.reconciliation.sync_days = 90
+        config.reconciliation.date_tolerance_days = 7
+        config.reconciliation.auto_match_threshold = 0.90
+        config.reconciliation.proposal_threshold = 0.60
+        return config
 
     @pytest.fixture
     def service(
@@ -459,6 +465,50 @@ class TestFireflySyncService:
         assert result.transactions_synced == 0
         assert result.transactions_skipped == 0
         mock_firefly.get_unlinked_transactions.assert_called_once()
+
+    def test_sync_transactions_passes_date_range(
+        self,
+        service: FireflySyncService,
+        mock_firefly: MagicMock,
+        mock_config: MagicMock,
+    ) -> None:
+        """Test that sync computes date range from config.reconciliation.sync_days."""
+        from datetime import datetime, timedelta
+
+        # Set specific sync_days for this test
+        mock_config.reconciliation.sync_days = 30
+
+        result = service.sync_transactions()
+
+        assert result.success
+        # Verify dates were passed
+        call_args = mock_firefly.get_unlinked_transactions.call_args
+        assert call_args is not None
+        kwargs = call_args.kwargs
+        assert "start_date" in kwargs
+        assert "end_date" in kwargs
+        # end_date should be today
+        assert kwargs["end_date"] == datetime.now().strftime("%Y-%m-%d")
+        # start_date should be 30 days ago
+        expected_start = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+        assert kwargs["start_date"] == expected_start
+
+    def test_sync_transactions_uses_explicit_dates(
+        self,
+        service: FireflySyncService,
+        mock_firefly: MagicMock,
+    ) -> None:
+        """Test that explicitly passed dates override config defaults."""
+        result = service.sync_transactions(
+            start_date="2025-01-01",
+            end_date="2025-01-31",
+        )
+
+        assert result.success
+        call_args = mock_firefly.get_unlinked_transactions.call_args
+        kwargs = call_args.kwargs
+        assert kwargs["start_date"] == "2025-01-01"
+        assert kwargs["end_date"] == "2025-01-31"
 
     def test_sync_transactions_caches_unlinked(
         self,

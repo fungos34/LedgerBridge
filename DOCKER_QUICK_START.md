@@ -1,11 +1,21 @@
 # Docker Quick Start Guide
 
-## Initial Setup on Raspberry Pi
+Quick reference for running Spark (Paperless-Firefly Bridge) with Docker.
+
+## Prerequisites
+
+- Docker and Docker Compose installed
+- Paperless-ngx instance running and accessible
+- Firefly III instance running and accessible
+- API tokens for both services
+
+---
+
+## Initial Setup
 
 ### 1. Create `.env` file
 
 ```bash
-cd ~/Code/Paperless_FireflyIII_parser/LedgerBridge
 nano .env
 ```
 
@@ -22,6 +32,11 @@ FIREFLY_URL=http://192.168.1.XXX:8080
 FIREFLY_TOKEN=your-actual-firefly-token-here
 FIREFLY_DEFAULT_ACCOUNT=Checking Account
 
+# Spark Reconciliation Settings (Spark v1.0)
+SPARK_RECONCILIATION_SYNC_DAYS=90      # Lookback window for transaction sync
+SPARK_RECONCILIATION_AUTO_MATCH_THRESHOLD=0.90  # Auto-link confidence
+SPARK_RECONCILIATION_PROPOSAL_THRESHOLD=0.60    # Minimum for proposals
+
 # Optional Settings
 CONFIDENCE_AUTO_THRESHOLD=0.85
 CONFIDENCE_REVIEW_THRESHOLD=0.60
@@ -30,13 +45,32 @@ PF_PORT=8080
 
 **Save**: Press `Ctrl+X`, then `Y`, then `Enter`
 
-### 2. Start the Container
+### 2. Network Configuration (for Docker networks)
+
+If Paperless and Firefly are on separate Docker networks, create `docker-compose.override.yml`:
+
+```yaml
+networks:
+  paperless_default:
+    external: true
+  firefly_default:
+    external: true
+
+services:
+  paperless-firefly:
+    networks:
+      - default
+      - paperless_default
+      - firefly_default
+```
+
+### 3. Start the Container
 
 ```bash
 docker compose up -d
 ```
 
-### 3. Check if it's Running
+### 4. Check if it's Running
 
 ```bash
 docker ps
@@ -44,11 +78,78 @@ docker ps
 
 You should see a container named `paperless-firefly` with status `Up`.
 
-### 4. Access the Web Interface
+### 5. Access the Web Interface
 
 Open your browser and go to:
 ```
-http://YOUR_RASPBERRY_PI_IP:8080
+http://YOUR_HOST_IP:8080/review/
+```
+
+---
+
+## Running Commands (Spark v1.0)
+
+### Bank Reconciliation Pipeline
+
+```bash
+# Full reconciliation (sync + match)
+docker compose run --rm paperless-firefly reconcile
+
+# Sync Firefly transactions only (no matching)
+docker compose run --rm paperless-firefly reconcile --no-match
+
+# Run matching only (no sync)
+docker compose run --rm paperless-firefly reconcile --no-sync
+
+# Force full cache refresh
+docker compose run --rm paperless-firefly reconcile --full-sync
+
+# Dry run (show what would be done)
+docker compose run --rm paperless-firefly reconcile --dry-run
+```
+
+Expected output for successful reconcile:
+```
+🔄 Starting bank reconciliation (Spark v1.0)...
+  → Connecting to Firefly: http://firefly:8080
+  ✓ Firefly connection OK
+
+Configuration:
+  Sync transactions: yes
+  Full sync (clear cache): no
+  Run matching: yes
+  Auto-link threshold: 90%
+
+📊 Reconciliation Results
+========================================
+  Status:              completed
+  Transactions synced: 42
+  Transactions cached: 3
+  Proposals created:   5
+  Proposals existing:  2
+  Auto-linked:         3
+  Duration:            1250ms
+
+✓ Reconciliation completed successfully
+```
+
+### Document Processing
+
+```bash
+# Scan for documents with finance tag
+docker compose run --rm paperless-firefly scan --tag finance/inbox
+
+# Extract financial data from documents
+docker compose run --rm paperless-firefly extract --tag finance/inbox --limit 10
+
+# Import approved transactions to Firefly
+docker compose run --rm paperless-firefly import
+```
+
+### Check Status
+
+```bash
+docker compose run --rm paperless-firefly status
 ```
 
 ---
@@ -84,37 +185,17 @@ docker compose restart
 docker compose up -d --build
 ```
 
-### Check Container Status
-
-```bash
-# List all containers (running and stopped)
-docker ps -a
-
-# Check container resource usage
-docker stats paperless-firefly
-```
-
 ### Debug Inside Container
 
 ```bash
 # Open a shell inside the running container
 docker exec -it paperless-firefly /bin/bash
 
-# Run a one-off command inside the container
+# Run a one-off command
 docker exec paperless-firefly paperless-firefly --help
 
 # Check environment variables
-docker exec paperless-firefly env | grep PAPERLESS
-```
-
-### View Container Configuration
-
-```bash
-# Show detailed container info
-docker inspect paperless-firefly
-
-# Show port mappings
-docker port paperless-firefly
+docker exec paperless-firefly env | grep -E "(PAPERLESS|FIREFLY|SPARK)"
 ```
 
 ---
@@ -134,30 +215,19 @@ docker logs paperless-firefly
 # - Network connectivity issues
 ```
 
-### Port 8080 Already in Use
+### "Connection refused" or DNS errors
 
-If another service is using port 8080, change it in your `.env`:
-
-```bash
-PF_PORT=8081  # Or any other free port
-```
-
-Then restart:
-```bash
-docker compose down
-docker compose up -d
-```
-
-### Can't Connect to Paperless/Firefly
+1. Check that both Paperless and Firefly are running
+2. Verify network configuration in `docker-compose.override.yml`
+3. Use container names (e.g., `firefly`, `paperless`) not `localhost`
 
 **Option 1 - Use LAN IP Addresses:**
 ```bash
-# In .env, use actual IP addresses:
 PAPERLESS_URL=http://192.168.1.100:8000
 FIREFLY_URL=http://192.168.1.100:8080
 ```
 
-**Option 2 - Use Host Networking (if all services on same Pi):**
+**Option 2 - Use Host Networking (if all services on same host):**
 
 Create `docker-compose.override.yml`:
 ```yaml
@@ -166,11 +236,21 @@ services:
     network_mode: "host"
 ```
 
-Then update `.env`:
-```bash
-PAPERLESS_URL=http://localhost:8000
-FIREFLY_URL=http://localhost:8080
-```
+### No Transactions Synced
+
+1. Check the sync date range (default: last 90 days)
+2. Verify Firefly has unlinked transactions in that date range
+3. Run with `--full-sync` to force complete refresh
+4. Increase `SPARK_RECONCILIATION_SYNC_DAYS` if needed
+
+### Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0    | Success |
+| 1    | Failure (connection error, processing error, etc.) |
+
+The reconcile command **fails loudly** - it returns exit code 1 and an error message if anything goes wrong.
 
 ### Remove Everything and Start Fresh
 
@@ -187,35 +267,7 @@ docker compose up -d
 
 ---
 
-## Running Manual Commands
-
-### Extract Documents
-
-```bash
-docker compose run --rm paperless-firefly extract --tag finance/inbox --limit 10
-```
-
-### Check Status
-
-```bash
-docker compose run --rm paperless-firefly status
-```
-
-### Run Full Pipeline
-
-```bash
-docker compose run --rm paperless-firefly pipeline finance/inbox
-```
-
-### Import Approved Transactions
-
-```bash
-docker compose run --rm paperless-firefly import
-```
-
----
-
-## Updating the Application
+## Updating
 
 When you pull new code from GitHub:
 
@@ -223,36 +275,24 @@ When you pull new code from GitHub:
 # Pull latest code
 git pull
 
-# Rebuild and restart the container
+# Rebuild and restart
 docker compose up -d --build
 
-# Check logs to ensure it started correctly
+# Check logs
 docker logs -f paperless-firefly
 ```
 
 ---
 
-## Getting Help
+## Environment Variables Reference
 
-If something isn't working:
-
-1. **Check the logs first:**
-   ```bash
-   docker logs paperless-firefly
-   ```
-
-2. **Verify your `.env` file exists and has correct values:**
-   ```bash
-   cat .env
-   ```
-
-3. **Test connectivity to Paperless and Firefly:**
-   ```bash
-   curl http://YOUR_PAPERLESS_IP:8000/api/
-   curl http://YOUR_FIREFLY_IP:8080/api/v1/about
-   ```
-
-4. **Check if the port is actually listening:**
-   ```bash
-   sudo netstat -tlnp | grep 8080
-   ```
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PAPERLESS_URL` | - | Paperless-ngx base URL |
+| `PAPERLESS_TOKEN` | - | Paperless API token |
+| `FIREFLY_URL` | - | Firefly III base URL |
+| `FIREFLY_TOKEN` | - | Firefly API token |
+| `SPARK_STATE_DB_PATH` | `spark.db` | SQLite database path |
+| `SPARK_RECONCILIATION_SYNC_DAYS` | `90` | Transaction sync lookback (days) |
+| `SPARK_RECONCILIATION_AUTO_MATCH_THRESHOLD` | `0.90` | Auto-link confidence threshold |
+| `SPARK_RECONCILIATION_PROPOSAL_THRESHOLD` | `0.60` | Proposal creation threshold |
