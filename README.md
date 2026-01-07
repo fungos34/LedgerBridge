@@ -99,14 +99,45 @@ Four realities must be satisfied simultaneously:
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `PAPERLESS_URL` | ✅ | - | Paperless-ngx base URL |
+| `PAPERLESS_URL` | ✅ | - | Paperless-ngx base URL (internal, for API calls) |
 | `PAPERLESS_TOKEN` | ✅ | - | Paperless API token |
+| `PAPERLESS_EXTERNAL_URL` | ❌ | Same as `PAPERLESS_URL` | External URL for browser links |
 | `PAPERLESS_FILTER_TAG` | ❌ | `finance/inbox` | Tag to filter documents |
-| `FIREFLY_URL` | ✅ | - | Firefly III base URL |
+| `FIREFLY_URL` | ✅ | - | Firefly III base URL (internal, for API calls) |
 | `FIREFLY_TOKEN` | ✅ | - | Firefly III Personal Access Token |
+| `FIREFLY_EXTERNAL_URL` | ❌ | Same as `FIREFLY_URL` | External URL for browser links |
 | `FIREFLY_DEFAULT_ACCOUNT` | ❌ | `Checking Account` | Default asset account |
 | `CONFIDENCE_AUTO_THRESHOLD` | ❌ | `0.85` | Auto-import threshold (0-1) |
 | `CONFIDENCE_REVIEW_THRESHOLD` | ❌ | `0.60` | Review queue threshold (0-1) |
+
+### LLM Configuration (Spark AI)
+
+For AI-assisted categorization and split suggestions:
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `LLM_ENABLED` | ❌ | `false` | Enable LLM assistance |
+| `OLLAMA_URL` | ❌ | `http://localhost:11434` | Ollama server URL |
+| `LLM_MODEL_FAST` | ❌ | `qwen2.5:7b` | Fast model for quick suggestions |
+| `LLM_MODEL_FALLBACK` | ❌ | `qwen2.5:14b` | Fallback model for complex cases |
+| `LLM_AUTH_HEADER` | ❌ | - | Auth header for remote Ollama (e.g., `Bearer xxx`) |
+| `LLM_MAX_CONCURRENT` | ❌ | `2` | Max concurrent LLM requests |
+| `LLM_TIMEOUT_SECONDS` | ❌ | `30` | Request timeout |
+
+### Internal vs External URLs
+
+When running in Docker, the container needs to access Paperless and Firefly via internal URLs (e.g., container names or host IPs), but browser links in the UI should use external URLs:
+
+```yaml
+# docker-compose.yml
+environment:
+  # Internal URLs for API calls (from container)
+  - PAPERLESS_URL=http://paperless:8000
+  - FIREFLY_URL=http://firefly:8080
+  # External URLs for browser links (from your machine)
+  - PAPERLESS_EXTERNAL_URL=http://192.168.1.100:8000
+  - FIREFLY_EXTERNAL_URL=http://192.168.1.100:8080
+```
 
 ### Confidence Thresholds
 
@@ -193,10 +224,66 @@ src/paperless_firefly/
 │   └── ocr.py         # OCR-based extraction with confidence
 ├── schemas/           # Data contracts (SSOT)
 │   ├── extraction.py  # FinanceExtraction schema
-│   └── firefly.py     # FireflyPayload schema
+│   ├── firefly.py     # FireflyPayload schema
+│   ├── split_builder.py  # Multi-split transaction builder
+│   └── interpretation_trace.py  # Privacy-safe audit trail
+├── spark_ai/          # LLM-assisted categorization
+│   └── service.py     # Ollama integration with concurrency limiting
 ├── state/             # Persistence layer
 │   └── store.py       # SQLite-based state tracking
 ├── review/            # Human-in-the-loop interface
+│   └── web/           # Django web application
+```
+
+## 🎯 Spark Features
+
+### Multi-Split Transactions
+
+When a receipt contains multiple line items with different categories, Spark creates a transaction group with splits:
+
+```python
+# Automatic split detection
+# 2+ line items → Transaction group with multiple splits
+# Each split has: amount, description, category
+# Sum of splits validated against total
+```
+
+### Bank-First Matching
+
+By default, Spark assumes documents match existing bank transactions:
+
+1. Check if document is already linked to a Firefly transaction
+2. Search for potential matches by amount, date, vendor
+3. Only create new transaction if explicitly confirmed or no matches found
+
+This prevents accidental duplicate transactions.
+
+### AI-Assisted Categorization (Optional)
+
+When LLM is enabled:
+
+- Category suggestions based on vendor/description
+- Confidence-scored recommendations
+- Calibration period (first N suggestions reviewed)
+- Per-document opt-out support
+- Full audit trail of LLM decisions
+
+### Interpretation Trace
+
+Every interpretation decision is recorded with:
+
+- Source of each field (OCR, metadata, LLM, user)
+- Method used (RULE, HEURISTIC, LLM, USER_OVERRIDE)
+- Confidence scores
+- Privacy-safe summaries (no raw OCR text or sensitive data)
+
+### Amount Validation
+
+All amounts are validated at entry:
+
+- Must be positive (transaction type indicates direction)
+- Quantized to 2 decimal places
+- Invalid amounts raise clear errors
 │   └── web/           # Django web application
 │       ├── views.py   # Review, accept, reject handlers
 │       └── templates/ # HTML templates

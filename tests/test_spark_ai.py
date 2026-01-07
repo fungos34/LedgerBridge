@@ -142,6 +142,9 @@ class TestSparkAIService:
         config.llm.model_fallback = "qwen2.5:14b"
         config.llm.green_threshold = 0.90
         config.llm.calibration_count = 50
+        config.llm.timeout_seconds = 30
+        config.llm.max_concurrent = 2
+        config.llm.auth_header = None  # No auth for local Ollama
         return config
 
     @pytest.fixture
@@ -149,6 +152,10 @@ class TestSparkAIService:
         """Create mock config with LLM disabled."""
         config = MagicMock()
         config.llm.enabled = False
+        config.llm.ollama_url = "http://localhost:11434"
+        config.llm.timeout_seconds = 30
+        config.llm.max_concurrent = 2
+        config.llm.auth_header = None
         return config
 
     @pytest.fixture

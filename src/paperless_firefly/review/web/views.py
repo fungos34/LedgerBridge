@@ -527,9 +527,9 @@ def review_detail(request: HttpRequest, extraction_id: int) -> HttpResponse:
         categories_raw = client.list_categories() if firefly_accounts else []
         firefly_categories = categories_raw
         # Serialize to JSON for JavaScript use in split transactions
-        firefly_categories_json = json.dumps([
-            {"id": cat.id, "name": cat.name} for cat in categories_raw
-        ])
+        firefly_categories_json = json.dumps(
+            [{"id": cat.id, "name": cat.name} for cat in categories_raw]
+        )
     except Exception as e:
         logger.warning(f"Could not fetch Firefly categories: {e}")
 
@@ -564,15 +564,17 @@ def review_detail(request: HttpRequest, extraction_id: int) -> HttpResponse:
         for m in matches:
             cached_tx = store.get_firefly_cache_entry(m.firefly_id)
             if cached_tx:
-                matching_transactions.append({
-                    "firefly_id": m.firefly_id,
-                    "score": round(m.total_score * 100, 1),
-                    "amount": cached_tx.get("amount"),
-                    "date": cached_tx.get("date"),
-                    "description": cached_tx.get("description"),
-                    "destination": cached_tx.get("destination_account"),
-                    "reasons": m.reasons,
-                })
+                matching_transactions.append(
+                    {
+                        "firefly_id": m.firefly_id,
+                        "score": round(m.total_score * 100, 1),
+                        "amount": cached_tx.get("amount"),
+                        "date": cached_tx.get("date"),
+                        "description": cached_tx.get("description"),
+                        "destination": cached_tx.get("destination_account"),
+                        "reasons": m.reasons,
+                    }
+                )
     except Exception as e:
         logger.warning(f"Could not find matching transactions: {e}")
 
@@ -583,7 +585,8 @@ def review_detail(request: HttpRequest, extraction_id: int) -> HttpResponse:
             {
                 "index": idx,
                 "description": item.description,
-                "amount": item.total or (item.quantity * item.unit_price if item.quantity and item.unit_price else None),
+                "amount": item.total
+                or (item.quantity * item.unit_price if item.quantity and item.unit_price else None),
                 "quantity": item.quantity,
                 "unit_price": item.unit_price,
                 "category": getattr(item, "category", None),  # Can be set per line item
@@ -799,7 +802,7 @@ def save_extraction(request: HttpRequest, extraction_id: int) -> HttpResponse:
     if line_items_json:
         try:
             from ...schemas.finance_extraction import LineItem
-            
+
             line_items_data = json.loads(line_items_json)
             if line_items_data and isinstance(line_items_data, list):
                 # Convert to LineItem objects
@@ -814,11 +817,11 @@ def save_extraction(request: HttpRequest, extraction_id: int) -> HttpResponse:
                         category=item.get("category"),  # Category for split transaction
                     )
                     new_line_items.append(line_item)
-                
+
                 # Replace extraction line items
                 extraction.line_items = new_line_items
                 changes.append("line_items")
-                
+
                 # Validate: sum of line items should equal total amount
                 line_total = sum(item.total for item in new_line_items)
                 if abs(line_total - proposal.amount) > Decimal("0.01"):
@@ -862,7 +865,7 @@ def toggle_llm_opt_out(request: HttpRequest, extraction_id: int) -> HttpResponse
 
     Per SPARK_EVALUATION_REPORT.md 6.7.2: Per-document opt-out support.
     UI Toggle: "Use AI suggestions" checkbox.
-    
+
     Accepts JSON body with { "opt_out": true/false } and returns JSON response.
     """
     store = _get_store()
@@ -890,7 +893,7 @@ def toggle_llm_opt_out(request: HttpRequest, extraction_id: int) -> HttpResponse
     # If opt_out was provided in the body, use it; otherwise toggle
     if new_opt_out is None:
         new_opt_out = not current_opt_out
-    
+
     if store.update_extraction_llm_opt_out(extraction_id, new_opt_out):
         if new_opt_out:
             message = "AI suggestions disabled for this document"
@@ -898,7 +901,9 @@ def toggle_llm_opt_out(request: HttpRequest, extraction_id: int) -> HttpResponse
             message = "AI suggestions enabled for this document"
         return JsonResponse({"success": True, "opt_out": new_opt_out, "message": message})
     else:
-        return JsonResponse({"success": False, "error": "Failed to update LLM settings"}, status=500)
+        return JsonResponse(
+            {"success": False, "error": "Failed to update LLM settings"}, status=500
+        )
 
 
 @login_required
@@ -908,8 +913,17 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
 
     Per SPARK_EVALUATION_REPORT.md 6.8: Rescheduling / Re-Running Interpretation.
     Creates a new InterpretationRun record while preserving history.
+
+    Returns JSON response for AJAX calls (with X-Requested-With header or Accept: application/json).
     """
     store = _get_store()
+
+    # Detect if this is an AJAX request
+    is_ajax = (
+        request.headers.get("X-Requested-With") == "XMLHttpRequest"
+        or "application/json" in request.headers.get("Accept", "")
+        or request.content_type == "application/json"
+    )
 
     # Get extraction details
     conn = store._get_connection()
@@ -919,6 +933,8 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
             (extraction_id,),
         ).fetchone()
         if not row:
+            if is_ajax:
+                return JsonResponse({"success": False, "error": "Extraction not found"}, status=404)
             messages.error(request, "Extraction not found")
             return redirect("list")
 
@@ -927,8 +943,16 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
     finally:
         conn.close()
 
-    # Get the reason if provided
-    reason = request.POST.get("reason", "User requested")
+    # Get the reason if provided (from JSON body or form data)
+    reason = "User requested"
+    if request.content_type == "application/json" and request.body:
+        try:
+            body = json.loads(request.body)
+            reason = body.get("reason", reason)
+        except json.JSONDecodeError:
+            pass
+    else:
+        reason = request.POST.get("reason", reason)
 
     try:
         # Record re-run request in interpretation_runs (audit trail)
@@ -949,12 +973,22 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
         # Reset the extraction for re-processing
         store.reset_extraction_for_review(extraction_id)
 
+        if is_ajax:
+            return JsonResponse(
+                {
+                    "success": True,
+                    "message": f"Interpretation queued for re-run. Reason: {reason}",
+                }
+            )
+
         messages.success(
             request,
             f"Interpretation queued for re-run. Reason: {reason}",
         )
     except Exception as e:
         logger.error(f"Error scheduling rerun for extraction {extraction_id}: {e}")
+        if is_ajax:
+            return JsonResponse({"success": False, "error": str(e)}, status=500)
         messages.error(request, f"Failed to schedule re-run: {e}")
 
     return redirect("detail", extraction_id=extraction_id)
@@ -1825,47 +1859,47 @@ def manual_link(request: HttpRequest) -> HttpResponse:
 def link_document_to_transaction(request: HttpRequest) -> HttpResponse:
     """
     Link a document directly to an existing Firefly transaction.
-    
+
     This skips creating a new transaction and instead links the document
     to an existing one - useful when the matching engine finds potential matches.
     Supports both GET (confirmation) and POST (action).
     """
-    from ...services.reconciliation import ReconciliationService
     from ...config import load_config
-    
+    from ...services.reconciliation import ReconciliationService
+
     document_id = request.GET.get("document_id") or request.POST.get("document_id")
     firefly_id = request.GET.get("firefly_id") or request.POST.get("firefly_id")
-    
+
     if not document_id or not firefly_id:
         messages.error(request, "Both document_id and firefly_id are required")
         return redirect("list")
-    
+
     try:
         document_id_int = int(document_id)
         firefly_id_int = int(firefly_id)
     except ValueError:
         messages.error(request, "Invalid document_id or firefly_id")
         return redirect("list")
-    
+
     store = _get_store()
-    
+
     if request.method == "POST":
         # Perform the actual linking
         try:
             firefly_client = _get_firefly_client(request)
             config = load_config()
-            
+
             service = ReconciliationService(
                 config=config,
                 state_store=store,
                 firefly_client=firefly_client,
             )
-            
+
             success = service.manual_link(
                 document_id=document_id_int,
                 firefly_id=firefly_id_int,
             )
-            
+
             if success:
                 # Mark the extraction as LINKED (not ACCEPTED - different semantic)
                 record = store.get_extraction_by_document_id(document_id_int)
@@ -1875,7 +1909,7 @@ def link_document_to_transaction(request: HttpRequest) -> HttpResponse:
                         review_decision="LINKED",
                         review_state="LINKED",
                     )
-                
+
                 messages.success(
                     request,
                     f"Document {document_id_int} linked to Firefly transaction {firefly_id_int}",
@@ -1884,17 +1918,17 @@ def link_document_to_transaction(request: HttpRequest) -> HttpResponse:
             else:
                 messages.error(request, "Failed to link document to transaction")
                 return redirect("detail", extraction_id=document_id_int)
-                
+
         except Exception as e:
             logger.error(f"Error linking doc {document_id} to tx {firefly_id}: {e}")
             messages.error(request, f"Error creating link: {e}")
             return redirect("list")
-    
+
     # GET: Show confirmation page
     # Get document and transaction details for confirmation
     extraction_record = store.get_extraction_by_document_id(document_id_int)
     tx_cache = store.get_firefly_cache_entry(firefly_id_int)
-    
+
     context = {
         "document_id": document_id_int,
         "firefly_id": firefly_id_int,
@@ -1902,7 +1936,7 @@ def link_document_to_transaction(request: HttpRequest) -> HttpResponse:
         "transaction": tx_cache,
         **_get_external_urls(),
     }
-    
+
     return render(request, "review/link_confirmation.html", context)
 
 

@@ -129,7 +129,11 @@ SESSION_SAVE_EVERY_REQUEST = True  # Refresh session on every request
 SESSION_EXPIRE_AT_BROWSER_CLOSE = False  # Don't expire on browser close by default
 SESSION_COOKIE_SAMESITE = "Lax"  # Prevent CSRF but allow same-site navigation
 SESSION_COOKIE_HTTPONLY = True  # JavaScript cannot access session cookie
-SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE", "false").lower() in ("true", "1", "yes")  # Set True in production with HTTPS
+SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE", "false").lower() in (
+    "true",
+    "1",
+    "yes",
+)  # Set True in production with HTTPS
 
 # LedgerBridge specific settings
 # Debug mode: When True, shows detailed tracebacks in error messages

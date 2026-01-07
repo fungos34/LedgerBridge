@@ -114,6 +114,9 @@ class ReconciliationService:
         # Configuration
         self.auto_match_threshold = config.reconciliation.auto_match_threshold
         self.date_tolerance_days = config.reconciliation.date_tolerance_days
+        # Bank-first mode configuration (SSOT)
+        self.bank_first_mode = config.reconciliation.bank_first_mode
+        self.require_manual_confirmation = config.reconciliation.require_manual_confirmation_for_new
 
     def run_reconciliation(
         self,
@@ -128,6 +131,11 @@ class ReconciliationService:
         3. Creates proposals for potential matches
         4. Auto-links high-confidence matches
         5. Records all decisions in interpretation_runs
+
+        Bank-First Mode (default):
+        - Documents are matched against existing Firefly transactions first
+        - New transactions are only created with explicit user confirmation
+        - Prevents accidental duplicate transactions
 
         Args:
             full_sync: If True, clear cache and sync all transactions.
@@ -185,6 +193,12 @@ class ReconciliationService:
         For each unmatched cached Firefly transaction, finds matching
         Paperless extractions and creates proposals.
 
+        Bank-First Decision Order (SSOT):
+        1. If document already linked → update existing (never create new)
+        2. If match found → propose link / auto-link
+        3. If no match + bank_first_mode → require manual confirmation
+        4. Only create new if explicitly marked as manual transaction
+
         Args:
             result: ReconciliationResult to update.
             dry_run: If True, don't persist proposals.
@@ -195,6 +209,17 @@ class ReconciliationService:
 
         for extraction in extractions:
             document_id = extraction["document_id"]
+
+            # Step 1: Check if document is ALREADY linked (SSOT)
+            existing_link = self._get_existing_link(document_id)
+            if existing_link:
+                logger.debug(
+                    "Document %d already linked to Firefly tx %d, skipping match",
+                    document_id,
+                    existing_link,
+                )
+                result.proposals_existing += 1
+                continue
 
             # Skip if already has pending proposals
             if self._has_pending_proposals(document_id):
@@ -605,6 +630,51 @@ class ReconciliationService:
             ).fetchall()
             return [dict(row) for row in rows]
 
+    def _get_existing_link(self, document_id: int) -> int | None:
+        """Check if document is already linked to a Firefly transaction.
+
+        Checks multiple linkage sources (SSOT):
+        1. Local cache match_status
+        2. Firefly external_id lookup
+        3. Firefly internal_reference lookup
+
+        Args:
+            document_id: Paperless document ID
+
+        Returns:
+            Firefly transaction ID if linked, None otherwise
+        """
+        # Check local cache first
+        with self.store._transaction() as conn:
+            row = conn.execute(
+                """
+                SELECT firefly_id FROM firefly_cache
+                WHERE matched_document_id = ? AND match_status = 'MATCHED'
+                """,
+                (document_id,),
+            ).fetchone()
+            if row:
+                return row["firefly_id"]
+
+        # Check external_id lookup via Firefly API
+        external_id_pattern = f"paperless:{document_id}:"
+        try:
+            # Search in Firefly cache for matching external_id prefix
+            with self.store._transaction() as conn:
+                row = conn.execute(
+                    """
+                    SELECT firefly_id FROM firefly_cache
+                    WHERE external_id LIKE ?
+                    """,
+                    (external_id_pattern + "%",),
+                ).fetchone()
+                if row:
+                    return row["firefly_id"]
+        except Exception as e:
+            logger.debug("External ID lookup failed: %s", e)
+
+        return None
+
     def _has_pending_proposals(self, document_id: int) -> bool:
         """Check if document has pending proposals.
 
@@ -623,6 +693,154 @@ class ReconciliationService:
                 (document_id,),
             ).fetchone()
             return row["count"] > 0 if row else False
+
+    def can_create_new_transaction(
+        self, document_id: int, is_manual: bool = False
+    ) -> tuple[bool, str]:
+        """Check if a new Firefly transaction can be created for a document.
+
+        Bank-First Mode Rules (SSOT):
+        - If document already linked → False (update instead)
+        - If matches exist → False (link to existing)
+        - If bank_first_mode + require_confirmation → False unless is_manual
+        - Otherwise → True
+
+        Args:
+            document_id: Paperless document ID
+            is_manual: Whether this is explicitly marked as a manual transaction
+
+        Returns:
+            Tuple of (can_create, reason_if_not)
+        """
+        # Check if already linked
+        existing = self._get_existing_link(document_id)
+        if existing:
+            return False, f"Document already linked to Firefly transaction {existing}"
+
+        # Check if there are pending proposals
+        if self._has_pending_proposals(document_id):
+            return False, "Document has pending match proposals - review those first"
+
+        # If manual transaction, always allow
+        if is_manual:
+            return True, "Manual transaction confirmed"
+
+        # In bank-first mode, require explicit confirmation
+        if self.bank_first_mode and self.require_manual_confirmation:
+            return False, (
+                "Bank-first mode: No matching bank transaction found. "
+                "Please confirm this is a manual/cash transaction before creating."
+            )
+
+        return True, "No existing match, creating new transaction"
+
+    def create_manual_transaction(
+        self,
+        document_id: int,
+        is_cash: bool = False,
+        notes: str | None = None,
+    ) -> tuple[bool, str | int]:
+        """Create a new Firefly transaction for a document without a bank booking.
+
+        This is the explicit "manual/cash transaction" flow for:
+        - Cash purchases without bank record
+        - Manual entries that won't match any bank import
+
+        Args:
+            document_id: Paperless document ID
+            is_cash: Whether this is a cash transaction
+            notes: Optional notes explaining why this is manual
+
+        Returns:
+            Tuple of (success, firefly_id_or_error)
+        """
+        # Verify document exists and is approved
+        extraction = self.store.get_extraction_by_document(document_id)
+        if not extraction:
+            return False, "Document extraction not found"
+
+        # Double-check we're not duplicating
+        existing = self._get_existing_link(document_id)
+        if existing:
+            return False, f"Document already linked to transaction {existing}"
+
+        try:
+            # Build payload (with or without splits)
+            from paperless_firefly.schemas.firefly_payload import build_firefly_payload_with_splits
+
+            # Reconstruct FinanceExtraction from stored JSON
+            extraction_obj = self._load_extraction_object(document_id)
+            if not extraction_obj:
+                return False, "Failed to load extraction data"
+
+            # Add manual transaction marker to notes
+            manual_notes = f"MANUAL TRANSACTION - "
+            if is_cash:
+                manual_notes += "Cash payment without bank booking. "
+            else:
+                manual_notes += "No matching bank transaction. "
+            if notes:
+                manual_notes += notes
+
+            extraction_obj.proposal.notes = (
+                (extraction_obj.proposal.notes or "") + " " + manual_notes
+            )
+
+            # Build payload
+            paperless_external_url = self.config.paperless.get_external_url()
+            payload = build_firefly_payload_with_splits(
+                extraction=extraction_obj,
+                default_source_account=self.config.firefly.default_source_account,
+                paperless_external_url=paperless_external_url,
+            )
+
+            # Create transaction in Firefly
+            result = self.firefly.create_transaction(payload.to_dict())
+
+            if result and result.get("id"):
+                firefly_id = int(result["id"])
+
+                # Record interpretation run
+                self._record_interpretation_run(
+                    document_id=document_id,
+                    firefly_id=firefly_id,
+                    final_state="MANUAL_CREATED",
+                    decision_source=DecisionSource.USER,
+                    auto_applied=False,
+                    firefly_write_action="CREATE_MANUAL",
+                    firefly_target_id=firefly_id,
+                )
+
+                logger.info("Created manual transaction %d for doc %d", firefly_id, document_id)
+                return True, firefly_id
+
+            return False, "Failed to create transaction in Firefly"
+
+        except Exception as e:
+            logger.exception("Error creating manual transaction for doc %d: %s", document_id, e)
+            return False, str(e)
+
+    def _load_extraction_object(self, document_id: int):
+        """Load a FinanceExtraction object from stored JSON.
+
+        Args:
+            document_id: Paperless document ID
+
+        Returns:
+            FinanceExtraction object or None
+        """
+        from paperless_firefly.schemas.finance_extraction import FinanceExtraction
+
+        record = self.store.get_extraction_by_document(document_id)
+        if not record or not record.extraction_json:
+            return None
+
+        try:
+            data = json.loads(record.extraction_json)
+            return FinanceExtraction.from_dict(data)
+        except Exception as e:
+            logger.error("Failed to parse extraction JSON for doc %d: %s", document_id, e)
+            return None
 
     def _proposal_exists(self, firefly_id: int, document_id: int) -> bool:
         """Check if a proposal already exists for this tx/doc pair.

@@ -2,18 +2,26 @@
 
 This service implements the LLM integration specified in Spark v1.0 Phase 6/7.
 Features:
-- Ollama integration with configurable models
+- Ollama integration with configurable models (localhost, LAN, or remote)
 - Cascading model fallback (fast -> slow)
 - Response caching with taxonomy version tracking
 - Calibration period before auto-apply
 - Opt-out support for individual extractions
+- Concurrency limiting via semaphore
+
+Privacy Constraints (non-negotiable):
+- Never log prompts or raw document content at INFO level
+- Sensitive data must be redacted before logging
+- Remote Ollama: auth header support, no PII in logs
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
+import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -72,6 +80,46 @@ class SplitSuggestion:
         }
 
 
+class LLMConcurrencyLimiter:
+    """Semaphore-based concurrency limiter for LLM requests.
+
+    Prevents overwhelming the Ollama server with too many concurrent requests.
+    Thread-safe for synchronous usage.
+    """
+
+    def __init__(self, max_concurrent: int = 2) -> None:
+        self._semaphore = threading.Semaphore(max_concurrent)
+        self._active_count = 0
+        self._lock = threading.Lock()
+
+    def acquire(self, timeout: float | None = None) -> bool:
+        """Acquire a slot for an LLM request.
+
+        Args:
+            timeout: Maximum time to wait (None = blocking)
+
+        Returns:
+            True if acquired, False if timeout
+        """
+        acquired = self._semaphore.acquire(blocking=True, timeout=timeout)
+        if acquired:
+            with self._lock:
+                self._active_count += 1
+        return acquired
+
+    def release(self) -> None:
+        """Release a slot after request completes."""
+        with self._lock:
+            self._active_count -= 1
+        self._semaphore.release()
+
+    @property
+    def active_requests(self) -> int:
+        """Current number of active LLM requests."""
+        with self._lock:
+            return self._active_count
+
+
 class SparkAIService:
     """LLM-assisted categorization service.
 
@@ -81,6 +129,13 @@ class SparkAIService:
     - Cascading model fallback
     - Calibration period before auto-apply
     - Green threshold for high-confidence suggestions
+    - Concurrency limiting for remote/shared servers
+    - Optional auth header for proxied deployments
+
+    LLM opt-in control (SSOT - single enforcement point):
+    - Global: config.llm.enabled (master switch)
+    - Per-document: llm_opt_out column in extractions table
+    - This service is the ONLY place that checks these flags
     """
 
     def __init__(
@@ -102,9 +157,25 @@ class SparkAIService:
         self.categories = categories or []
         self._taxonomy_version = self._compute_taxonomy_version()
 
-        self._client = httpx.Client(timeout=60.0)
+        # Configure HTTP client with auth header support
+        headers = {}
+        if self.llm_config.auth_header:
+            # Support formats: "Bearer token" or "Custom-Header: value"
+            if ":" in self.llm_config.auth_header:
+                key, value = self.llm_config.auth_header.split(":", 1)
+                headers[key.strip()] = value.strip()
+            else:
+                headers["Authorization"] = self.llm_config.auth_header
+
+        self._client = httpx.Client(
+            timeout=float(self.llm_config.timeout_seconds),
+            headers=headers,
+        )
         self._category_prompt = CategoryPrompt()
         self._split_prompt = SplitPrompt()
+
+        # Concurrency limiter (SSOT for queue management)
+        self._limiter = LLMConcurrencyLimiter(max_concurrent=self.llm_config.max_concurrent)
 
     def _compute_taxonomy_version(self) -> str:
         """Compute a hash of the category taxonomy for cache invalidation."""
@@ -115,8 +186,25 @@ class SparkAIService:
 
     @property
     def is_enabled(self) -> bool:
-        """Check if LLM service is enabled."""
+        """Check if LLM service is enabled (SSOT)."""
         return self.llm_config.enabled
+
+    @property
+    def is_remote(self) -> bool:
+        """Check if Ollama is configured for remote access."""
+        return self.llm_config.is_remote()
+
+    @property
+    def endpoint_class(self) -> str:
+        """Get endpoint classification for trace logging."""
+        if not self.is_enabled:
+            return "disabled"
+        return "remote" if self.is_remote else "local"
+
+    @property
+    def active_requests(self) -> int:
+        """Current number of active LLM requests."""
+        return self._limiter.active_requests
 
     @property
     def is_calibrating(self) -> bool:
@@ -128,6 +216,29 @@ class SparkAIService:
             return False
         suggestion_count = self.store.get_llm_suggestion_count()
         return suggestion_count < self.llm_config.calibration_count
+
+    def check_opt_out(self, document_id: int) -> tuple[bool, str]:
+        """Check if LLM is opted-out for a specific document.
+
+        This is the SINGLE enforcement point for per-document opt-out.
+
+        Args:
+            document_id: Paperless document ID
+
+        Returns:
+            Tuple of (is_opted_out, reason)
+        """
+        if not self.is_enabled:
+            return True, "LLM globally disabled"
+
+        try:
+            extraction = self.store.get_extraction_by_document(document_id)
+            if extraction and getattr(extraction, "llm_opt_out", False):
+                return True, "Per-document opt-out"
+        except Exception as e:
+            logger.debug("Could not check opt-out for doc %d: %s", document_id, e)
+
+        return False, "LLM enabled"
 
     def set_categories(self, categories: list[str]) -> None:
         """Update available categories and recalculate taxonomy version.
@@ -144,6 +255,7 @@ class SparkAIService:
         date: str,
         vendor: str | None = None,
         description: str | None = None,
+        document_id: int | None = None,
         use_cache: bool = True,
     ) -> CategorySuggestion | None:
         """Suggest a category for a transaction.
@@ -153,6 +265,7 @@ class SparkAIService:
             date: Transaction date.
             vendor: Vendor or payee name.
             description: Transaction description.
+            document_id: Optional document ID for per-doc opt-out check.
             use_cache: Whether to use cached responses.
 
         Returns:
@@ -161,6 +274,13 @@ class SparkAIService:
         if not self.is_enabled:
             logger.debug("LLM service disabled, skipping suggestion")
             return None
+
+        # Per-document opt-out check
+        if document_id:
+            opted_out, reason = self.check_opt_out(document_id)
+            if opted_out:
+                logger.debug("LLM opted out for doc %d: %s", document_id, reason)
+                return None
 
         if not self.categories:
             logger.warning("No categories configured for LLM suggestions")
@@ -411,6 +531,8 @@ class SparkAIService:
 
         return {
             "enabled": self.is_enabled,
+            "endpoint_class": self.endpoint_class,
+            "active_requests": self.active_requests,
             "calibrating": self.is_calibrating,
             "suggestion_count": suggestion_count,
             "calibration_target": self.llm_config.calibration_count,
@@ -420,6 +542,25 @@ class SparkAIService:
                 else 1.0
             ),
             "feedback": feedback_stats,
+        }
+
+    def get_llm_status(self) -> dict:
+        """Get LLM service status for UI display.
+
+        Returns:
+            Dict with status information for the interpretation trace panel.
+        """
+        return {
+            "enabled": self.is_enabled,
+            "endpoint_class": self.endpoint_class,
+            "is_remote": self.is_remote,
+            "ollama_url": self.llm_config.ollama_url if self.is_enabled else None,
+            "model_fast": self.llm_config.model_fast if self.is_enabled else None,
+            "model_fallback": self.llm_config.model_fallback if self.is_enabled else None,
+            "active_requests": self.active_requests,
+            "max_concurrent": self.llm_config.max_concurrent,
+            "calibrating": self.is_calibrating,
+            "reason_disabled": None if self.is_enabled else "LLM globally disabled in config",
         }
 
     def _build_cache_key(self, prefix: str, *args: str | None) -> str:
@@ -447,7 +588,10 @@ class SparkAIService:
         system_prompt: str,
         user_message: str,
     ) -> dict | None:
-        """Call Ollama API for completion.
+        """Call Ollama API for completion with concurrency limiting.
+
+        Uses semaphore to limit concurrent requests to the Ollama server.
+        Never logs prompts or raw content at INFO level (privacy constraint).
 
         Args:
             model: Model name (e.g., "qwen2.5:7b").
@@ -457,6 +601,16 @@ class SparkAIService:
         Returns:
             Dict with "content" and "model" keys, or None on failure.
         """
+        # Acquire concurrency slot with timeout
+        wait_timeout = self.llm_config.timeout_seconds
+        if not self._limiter.acquire(timeout=wait_timeout):
+            logger.warning(
+                "LLM request timed out waiting for concurrency slot (max=%d, active=%d)",
+                self.llm_config.max_concurrent,
+                self._limiter.active_requests,
+            )
+            return None
+
         try:
             url = f"{self.llm_config.ollama_url}/api/chat"
             payload = {
@@ -469,14 +623,23 @@ class SparkAIService:
                 "format": "json",
             }
 
-            response = self._client.post(url, json=payload)
+            # Debug logging only (never at INFO)
+            logger.debug("Calling Ollama model %s at %s", model, self.llm_config.ollama_url)
+
+            response = self._client.post(
+                url, json=payload, timeout=float(self.llm_config.timeout_seconds)
+            )
             response.raise_for_status()
 
             data = response.json()
             content = data.get("message", {}).get("content", "")
 
+            logger.debug("Ollama %s returned %d chars", model, len(content))
             return {"content": content, "model": model}
 
+        except httpx.TimeoutException:
+            logger.warning("Ollama request timed out after %ds", self.llm_config.timeout_seconds)
+            return None
         except httpx.HTTPStatusError as e:
             logger.error("Ollama API error: %s", e.response.status_code)
             return None
@@ -486,6 +649,9 @@ class SparkAIService:
         except Exception as e:
             logger.exception("Unexpected error calling Ollama: %s", e)
             return None
+        finally:
+            # Always release the concurrency slot
+            self._limiter.release()
 
     def _parse_json_response(self, content: str) -> dict:
         """Parse JSON from LLM response, handling markdown code blocks.

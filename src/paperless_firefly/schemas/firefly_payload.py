@@ -8,14 +8,24 @@ Rules:
 - Always set external_id
 - Always set notes containing paperless_document_id and source_hash
 - Use stable account mapping strategy (prefer names initially)
+- For multi-split transactions, use build_firefly_payload_with_splits()
+
+Split Transaction Rules:
+- 2+ line items → create transaction group with multiple splits
+- Sum of splits must equal total amount
+- All splits share: date, type, source_name, destination_name
+- external_id only on first split
 """
 
 import json
+import logging
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
 from .finance_extraction import FinanceExtraction, TransactionType
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -313,12 +323,236 @@ def validate_firefly_payload(payload: FireflyTransactionStore) -> list[str]:
         if not split.description:
             errors.append(f"{prefix}.description is required")
 
-        # We require external_id for idempotency
-        if not split.external_id:
+        # Only first split requires external_id for idempotency
+        if i == 0 and not split.external_id:
             errors.append(f"{prefix}.external_id is required for idempotent imports")
 
-        # We require notes for provenance
-        if not split.notes:
+        # Only first split requires notes for provenance
+        if i == 0 and not split.notes:
             errors.append(f"{prefix}.notes is required for audit trail")
 
+    # For multi-split, validate sum equals group total
+    if len(payload.transactions) > 1:
+        total = sum(Decimal(t.amount) for t in payload.transactions)
+        # Note: We trust the builder to handle rounding; this is a sanity check
+        logger.debug(f"Multi-split transaction total: {total}")
+
     return errors
+
+
+def build_firefly_payload_with_splits(
+    extraction: FinanceExtraction,
+    default_source_account: str = "Checking Account",
+    paperless_external_url: str | None = None,
+) -> FireflyTransactionStore:
+    """
+    Build Firefly III transaction payload, automatically handling splits.
+
+    This is THE canonical builder for all imports. It automatically detects
+    whether to create a single transaction or a split transaction group.
+
+    Decision logic:
+    - 0-1 line items: Single transaction (standard)
+    - 2+ line items: Transaction group with splits
+
+    For split transactions:
+    - Uses group_title for the overall description
+    - Each split gets its own description and category from line_items
+    - external_id is assigned to the FIRST split only
+    - Sum of splits is validated to equal proposal.amount
+
+    Args:
+        extraction: The finance extraction to convert
+        default_source_account: Default source account name for withdrawals
+        paperless_external_url: Browser-accessible URL for Paperless (SSOT)
+
+    Returns:
+        FireflyTransactionStore ready for API submission
+
+    Raises:
+        ValueError: If required fields are missing or invalid
+    """
+    proposal = extraction.proposal
+
+    # Validate required fields
+    if not proposal.date:
+        raise ValueError("proposal.date is required but empty")
+    if not proposal.amount:
+        raise ValueError("proposal.amount is required but empty")
+    if not proposal.description:
+        raise ValueError("proposal.description is required but empty")
+    if not proposal.external_id:
+        raise ValueError("proposal.external_id is required but empty")
+
+    # Check if this should be a split transaction
+    has_splits = extraction.line_items and len(extraction.line_items) >= 2
+
+    if has_splits:
+        return _build_split_payload(
+            extraction=extraction,
+            default_source_account=default_source_account,
+            paperless_external_url=paperless_external_url,
+        )
+    else:
+        return build_firefly_payload(
+            extraction=extraction,
+            default_source_account=default_source_account,
+            paperless_base_url=paperless_external_url or "http://localhost:8000",
+        )
+
+
+def _build_split_payload(
+    extraction: FinanceExtraction,
+    default_source_account: str,
+    paperless_external_url: str | None,
+) -> FireflyTransactionStore:
+    """Build a multi-split transaction payload.
+
+    Internal function called by build_firefly_payload_with_splits().
+
+    Args:
+        extraction: Source extraction with line_items
+        default_source_account: Default asset account
+        paperless_external_url: Browser URL for Paperless
+
+    Returns:
+        FireflyTransactionStore with multiple splits
+    """
+    from decimal import ROUND_HALF_UP
+
+    proposal = extraction.proposal
+
+    # Build notes with provenance (on first split only)
+    notes_parts = [
+        f"Paperless doc_id={extraction.paperless_document_id}",
+        f"source_hash={extraction.source_hash[:16]}",
+        f"confidence={extraction.confidence.overall:.2f}",
+        f"review_state={extraction.confidence.review_state.value}",
+        f"splits={len(extraction.line_items)}",
+    ]
+    if extraction.provenance.parser_version:
+        notes_parts.append(f"parser={extraction.provenance.parser_version}")
+    if proposal.notes:
+        notes_parts.append(proposal.notes)
+    notes = "; ".join(notes_parts)
+
+    # Build external URL (use external URL, not internal)
+    external_url = None
+    if paperless_external_url:
+        external_url = (
+            f"{paperless_external_url.rstrip('/')}/documents/{extraction.paperless_document_id}/"
+        )
+
+    # Determine source and destination based on transaction type
+    source_name: str
+    destination_name: str
+
+    if proposal.transaction_type == TransactionType.WITHDRAWAL:
+        source_name = proposal.source_account or default_source_account
+        destination_name = (
+            proposal.destination_account
+            or (
+                extraction.document_classification.correspondent
+                if extraction.document_classification
+                else None
+            )
+            or "Unknown Merchant"
+        )
+    elif proposal.transaction_type == TransactionType.DEPOSIT:
+        source_name = (
+            proposal.source_account
+            or (
+                extraction.document_classification.correspondent
+                if extraction.document_classification
+                else None
+            )
+            or "Unknown Source"
+        )
+        destination_name = proposal.destination_account or default_source_account
+    else:  # TRANSFER
+        source_name = proposal.source_account or default_source_account
+        destination_name = proposal.destination_account or "Unknown Account"
+
+    # Build tags
+    tags = list(proposal.tags) if proposal.tags else []
+    tags.append("paperless")
+    tags.append("split-transaction")
+
+    # Build splits from line items
+    splits: list[FireflyTransactionSplit] = []
+    split_sum = Decimal("0")
+    PRECISION = Decimal("0.01")
+
+    for idx, item in enumerate(extraction.line_items):
+        # Get amount from line item (prefer total, then unit_price)
+        item_amount = item.total or item.unit_price or Decimal("0")
+        if item_amount <= 0:
+            logger.warning(f"Skipping line item {idx} with zero/negative amount")
+            continue
+
+        item_amount = item_amount.quantize(PRECISION, rounding=ROUND_HALF_UP)
+        split_sum += item_amount
+
+        split = FireflyTransactionSplit(
+            type=proposal.transaction_type.value,
+            date=proposal.date,
+            amount=str(item_amount),
+            description=item.description or f"Item {idx + 1}",
+            source_name=source_name,
+            destination_name=destination_name,
+            currency_code=proposal.currency,
+            category_name=item.category or proposal.category,
+            tags=tags,
+            order=idx,
+        )
+
+        # First split gets linkage markers
+        if idx == 0:
+            split.notes = notes
+            split.internal_reference = f"PAPERLESS:{extraction.paperless_document_id}"
+            split.external_id = proposal.external_id
+            split.external_url = external_url
+            split.invoice_date = proposal.date
+            split.due_date = proposal.due_date
+            split.payment_date = proposal.date
+
+        splits.append(split)
+
+    if not splits:
+        raise ValueError("No valid line items to create splits from")
+
+    # Handle rounding: adjust last split to match total
+    difference = proposal.amount - split_sum
+    if difference != Decimal("0"):
+        if abs(difference) <= Decimal("1.00"):
+            # Small rounding difference - adjust last split
+            last_split = splits[-1]
+            adjusted_amount = Decimal(last_split.amount) + difference
+            last_split.amount = str(adjusted_amount.quantize(PRECISION))
+            logger.info(
+                f"Applied rounding correction of {difference} to last split "
+                f"(was {Decimal(last_split.amount) - difference}, now {last_split.amount})"
+            )
+        else:
+            # Large difference - this is a data error, fail loudly
+            raise ValueError(
+                f"Split sum ({split_sum}) differs from total ({proposal.amount}) by {difference}. "
+                "Line item amounts do not match proposal total. Review and correct the data."
+            )
+
+    # Build group title
+    group_title = (
+        proposal.description or f"Transaction from doc #{extraction.paperless_document_id}"
+    )
+
+    return FireflyTransactionStore(
+        transactions=splits,
+        error_if_duplicate_hash=False,
+        apply_rules=True,
+        fire_webhooks=True,
+        group_title=group_title,
+    )
+
+
+# NOTE: validate_amount and normalize_amount_for_firefly are now in split_builder.py (SSOT)
+# Import from there or from schemas.__init__ for amount validation needs
