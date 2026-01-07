@@ -1,0 +1,53 @@
+# Docker Compose Override for Cross-Compose Networking
+#
+# This file enables Spark services to communicate with Paperless and Firefly III
+# containers running in separate Docker Compose stacks via external networks.
+#
+# IMPORTANT: Before using this, ensure the external networks exist:
+#   - Identify your Paperless network: docker network ls | grep paperless
+#   - Identify your Firefly network: docker network ls | grep firefly
+#   - Update the network names below to match your actual network names
+#
+# Common network name patterns:
+#   - Paperless: paperless_default, paperless-ngx_default
+#   - Firefly: firefly_default, firefly_firefly, fireflyiii_default
+#
+# Verify the container hostnames accessible on those networks:
+#   docker network inspect <network_name> --format '{{range .Containers}}{{.Name}} {{end}}'
+#
+# Then update your .env file with the correct internal hostnames:
+#   PAPERLESS_URL=http://<paperless-container-name>:8000
+#   FIREFLY_URL=http://<firefly-container-name>:8080
+
+services:
+  # Main web service - needs access to both Paperless and Firefly
+  paperless-firefly:
+    networks:
+      - paperless-firefly-net
+      - paperless_default
+      - firefly_firefly
+
+  # Worker service - needs access to both Paperless and Firefly  
+  paperless-firefly-worker:
+    networks:
+      - paperless-firefly-net
+      - paperless_default
+      - firefly_firefly
+
+  # Reconciliation worker - needs access to both Paperless and Firefly
+  paperless-firefly-reconcile:
+    networks:
+      - paperless-firefly-net
+      - paperless_default
+      - firefly_firefly
+
+# External networks from other Docker Compose stacks
+# Adjust names to match your actual network names
+networks:
+  # Paperless NGX network (check: docker network ls | grep paperless)
+  paperless_default:
+    external: true
+  
+  # Firefly III network (check: docker network ls | grep firefly)
+  firefly_firefly:
+    external: true

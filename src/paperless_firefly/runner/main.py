@@ -144,6 +144,48 @@ def create_cli() -> argparse.ArgumentParser:
     # status command
     subparsers.add_parser("status", help="Show pipeline status and statistics")
 
+    # reconcile command (Spark v1.0)
+    reconcile_parser = subparsers.add_parser(
+        "reconcile",
+        help="Run bank reconciliation (sync Firefly transactions, match documents)",
+    )
+    reconcile_parser.add_argument(
+        "--sync/--no-sync",
+        dest="sync",
+        action="store_true",
+        default=True,
+        help="Sync Firefly transactions to local cache (default: enabled)",
+    )
+    reconcile_parser.add_argument(
+        "--no-sync",
+        dest="sync",
+        action="store_false",
+        help="Skip syncing, use cached transactions only",
+    )
+    reconcile_parser.add_argument(
+        "--match/--no-match",
+        dest="match",
+        action="store_true",
+        default=True,
+        help="Run matching engine to find matches (default: enabled)",
+    )
+    reconcile_parser.add_argument(
+        "--no-match",
+        dest="match",
+        action="store_false",
+        help="Skip matching, only sync transactions",
+    )
+    reconcile_parser.add_argument(
+        "--full-sync",
+        action="store_true",
+        help="Clear cache and sync all transactions (not just recent)",
+    )
+    reconcile_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be done without making changes",
+    )
+
     return parser
 
 
@@ -454,6 +496,101 @@ def cmd_pipeline(config: Config, tag: str, auto_only: bool, limit: int) -> int:
     return result
 
 
+def cmd_reconcile(
+    config: Config,
+    sync: bool = True,
+    match: bool = True,
+    full_sync: bool = False,
+    dry_run: bool = False,
+) -> int:
+    """Run bank reconciliation pipeline (Spark v1.0).
+
+    Args:
+        config: Application configuration.
+        sync: If True, sync Firefly transactions to local cache.
+        match: If True, run matching engine.
+        full_sync: If True, clear cache and sync all transactions.
+        dry_run: If True, show what would be done without making changes.
+
+    Returns:
+        Exit code (0 for success, 1 for failure).
+    """
+    from ..firefly_client import FireflyClient
+    from ..services.reconciliation import ReconciliationService
+
+    print("🔄 Starting bank reconciliation (Spark v1.0)...")
+
+    if dry_run:
+        print("  ℹ️  DRY RUN mode - no changes will be made")
+
+    # Validate connectivity before starting
+    firefly = FireflyClient(
+        base_url=config.firefly.base_url,
+        token=config.firefly.token,
+    )
+
+    print(f"  → Connecting to Firefly: {config.firefly.base_url}")
+    if not firefly.test_connection():
+        print("❌ Failed to connect to Firefly III")
+        print("   Check FIREFLY_URL and FIREFLY_TOKEN")
+        return 1
+    print("  ✓ Firefly connection OK")
+
+    # Initialize state store
+    store = StateStore(config.state_db_path)
+
+    # Create reconciliation service
+    service = ReconciliationService(
+        firefly_client=firefly,
+        state_store=store,
+        config=config,
+    )
+
+    # Print what we're going to do
+    print()
+    print("Configuration:")
+    print(f"  Sync transactions: {'yes' if sync else 'no'}")
+    print(f"  Full sync (clear cache): {'yes' if full_sync else 'no'}")
+    print(f"  Run matching: {'yes' if match else 'no'}")
+    print(f"  Auto-link threshold: {config.reconciliation.auto_match_threshold:.0%}")
+    print()
+
+    # Run reconciliation
+    if sync or match:
+        result = service.run_reconciliation(
+            full_sync=full_sync,
+            dry_run=dry_run,
+        )
+
+        # Print results
+        print()
+        print("📊 Reconciliation Results")
+        print("=" * 40)
+        print(f"  Status:              {result.state.value}")
+        print(f"  Transactions synced: {result.transactions_synced}")
+        print(f"  Transactions cached: {result.transactions_skipped}")
+        print(f"  Proposals created:   {result.proposals_created}")
+        print(f"  Proposals existing:  {result.proposals_existing}")
+        print(f"  Auto-linked:         {result.auto_linked}")
+        print(f"  Duration:            {result.duration_ms}ms")
+        print()
+
+        if result.errors:
+            print("⚠️  Errors encountered:")
+            for error in result.errors:
+                print(f"   - {error}")
+
+        if result.success:
+            print("✓ Reconciliation completed successfully")
+            return 0
+        else:
+            print("❌ Reconciliation failed")
+            return 1
+    else:
+        print("⚠️  Nothing to do (both --no-sync and --no-match specified)")
+        return 0
+
+
 def cmd_status(config: Config) -> int:
     """Show pipeline status."""
     store = StateStore(config.state_db_path)
@@ -503,6 +640,14 @@ def main(args: list[str] | None = None) -> int:
         return cmd_pipeline(config, parsed.tag, parsed.auto_only, parsed.limit)
     elif parsed.command == "status":
         return cmd_status(config)
+    elif parsed.command == "reconcile":
+        return cmd_reconcile(
+            config,
+            sync=parsed.sync,
+            match=parsed.match,
+            full_sync=parsed.full_sync,
+            dry_run=parsed.dry_run,
+        )
     else:
         parser.print_help()
         return 1

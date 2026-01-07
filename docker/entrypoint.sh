@@ -119,6 +119,75 @@ else:
     fi
 }
 
+# Preflight connectivity check for worker/reconcile services
+preflight_check() {
+    local service_name="${1:-worker}"
+    log_info "Running preflight connectivity check for $service_name..."
+    
+    # Check Paperless connectivity
+    log_info "Checking Paperless at: $PAPERLESS_URL"
+    if ! python -c "
+import requests
+import sys
+try:
+    r = requests.get('${PAPERLESS_URL}/api/', timeout=10, headers={'Authorization': 'Token ${PAPERLESS_TOKEN}'})
+    if r.status_code < 500:
+        print('Paperless connection: OK')
+        sys.exit(0)
+    else:
+        print(f'Paperless returned HTTP {r.status_code}')
+        sys.exit(1)
+except requests.exceptions.ConnectionError as e:
+    print(f'ERROR: Cannot connect to Paperless at ${PAPERLESS_URL}')
+    print(f'  Error: {e}')
+    print('')
+    print('Troubleshooting:')
+    print('  1. Check PAPERLESS_URL is set correctly')
+    print('  2. Verify this container is on the same Docker network as Paperless')
+    print('  3. Run: docker network inspect <network> to see available hosts')
+    sys.exit(1)
+except Exception as e:
+    print(f'ERROR: Paperless check failed: {e}')
+    sys.exit(1)
+"; then
+        log_error "Paperless connectivity check failed!"
+        return 1
+    fi
+    
+    # Check Firefly connectivity
+    log_info "Checking Firefly at: $FIREFLY_URL"
+    if ! python -c "
+import requests
+import sys
+try:
+    r = requests.get('${FIREFLY_URL}/api/v1/about', timeout=10, headers={'Authorization': 'Bearer ${FIREFLY_TOKEN}'})
+    if r.status_code < 500:
+        print('Firefly connection: OK')
+        sys.exit(0)
+    else:
+        print(f'Firefly returned HTTP {r.status_code}')
+        sys.exit(1)
+except requests.exceptions.ConnectionError as e:
+    print(f'ERROR: Cannot connect to Firefly at ${FIREFLY_URL}')
+    print(f'  Error: {e}')
+    print('')
+    print('Troubleshooting:')
+    print('  1. Check FIREFLY_URL is set correctly')
+    print('  2. Verify this container is on the same Docker network as Firefly')
+    print('  3. Run: docker network inspect <network> to see available hosts')
+    sys.exit(1)
+except Exception as e:
+    print(f'ERROR: Firefly check failed: {e}')
+    sys.exit(1)
+"; then
+        log_error "Firefly connectivity check failed!"
+        return 1
+    fi
+    
+    log_info "Preflight checks passed!"
+    return 0
+}
+
 # Run the web server (review interface)
 run_server() {
     log_info "Starting review web interface..."
@@ -138,6 +207,8 @@ run_extract() {
     log_info "Running extraction..."
     log_info "  Tag: $tag"
     log_info "  Limit: $limit"
+    
+    preflight_check "extract" || exit 1
     
     exec paperless-firefly -c "$CONFIG_PATH" extract --tag "$tag" --limit "$limit"
 }
@@ -162,12 +233,66 @@ run_pipeline() {
     
     log_info "Running full pipeline..."
     
+    preflight_check "pipeline" || exit 1
+    
     exec paperless-firefly -c "$CONFIG_PATH" pipeline --tag "$tag" --limit "$limit" --auto-only
 }
 
 # Show status
 run_status() {
     exec paperless-firefly -c "$CONFIG_PATH" status
+}
+
+# Run reconciliation (Spark v1.0)
+run_reconcile() {
+    local sync="--sync"
+    local match="--match"
+    local full_sync=""
+    local dry_run=""
+    
+    # Parse arguments
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --sync)
+                sync="--sync"
+                shift
+                ;;
+            --no-sync)
+                sync="--no-sync"
+                shift
+                ;;
+            --match)
+                match="--match"
+                shift
+                ;;
+            --no-match)
+                match="--no-match"
+                shift
+                ;;
+            --full-sync)
+                full_sync="--full-sync"
+                shift
+                ;;
+            --dry-run)
+                dry_run="--dry-run"
+                shift
+                ;;
+            *)
+                log_warn "Unknown option for reconcile: $1"
+                shift
+                ;;
+        esac
+    done
+    
+    log_info "Running bank reconciliation (Spark v1.0)..."
+    log_info "  Sync: $sync"
+    log_info "  Match: $match"
+    [ -n "$full_sync" ] && log_info "  Full sync: yes"
+    [ -n "$dry_run" ] && log_info "  Dry run: yes"
+    
+    preflight_check "reconcile" || exit 1
+    
+    exec paperless-firefly -c "$CONFIG_PATH" reconcile $sync $match $full_sync $dry_run
 }
 
 # Main entrypoint logic
@@ -199,18 +324,22 @@ main() {
         status)
             run_status
             ;;
+        reconcile)
+            run_reconcile "$@"
+            ;;
         shell)
             exec /bin/bash
             ;;
         *)
             log_error "Unknown command: $command"
             echo "Available commands:"
-            echo "  server   - Start the review web interface (default)"
-            echo "  extract  - Run document extraction"
-            echo "  import   - Import approved transactions to Firefly"
-            echo "  pipeline - Run full automated pipeline"
-            echo "  status   - Show pipeline statistics"
-            echo "  shell    - Start a bash shell"
+            echo "  server    - Start the review web interface (default)"
+            echo "  extract   - Run document extraction"
+            echo "  import    - Import approved transactions to Firefly"
+            echo "  pipeline  - Run full automated pipeline"
+            echo "  status    - Show pipeline statistics"
+            echo "  reconcile - Run bank reconciliation (Spark v1.0)"
+            echo "  shell     - Start a bash shell"
             exit 1
             ;;
     esac
