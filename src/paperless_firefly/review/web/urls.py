@@ -76,6 +76,7 @@ urlpatterns = [
     ),
     path("reconciliation/manual-link/", views.manual_link, name="manual_link"),
     path("reconciliation/unlinked/", views.unlinked_transactions, name="unlinked_transactions"),
+    path("reconciliation/link-document/", views.link_document_to_transaction, name="link_document_to_transaction"),
     # ============================================================================
     # LLM Control Routes (Phase 6-7 - SPARK_EVALUATION_REPORT.md 6.7/6.8)
     # ============================================================================

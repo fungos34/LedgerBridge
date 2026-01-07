@@ -53,6 +53,7 @@ class LineItem:
     total: Decimal | None = None
     tax_rate: Decimal | None = None  # As percentage, e.g., 20 for 20%
     position: int | None = None
+    category: str | None = None  # Category for split transactions
 
 
 @dataclass
@@ -240,6 +241,7 @@ class FinanceExtraction:
                     "total": str(item.total) if item.total else None,
                     "tax_rate": str(item.tax_rate) if item.tax_rate else None,
                     "position": item.position,
+                    "category": item.category,
                 }
                 for item in self.line_items
             ],
@@ -344,6 +346,7 @@ class FinanceExtraction:
                     total=Decimal(item_data["total"]) if item_data.get("total") else None,
                     tax_rate=Decimal(item_data["tax_rate"]) if item_data.get("tax_rate") else None,
                     position=item_data.get("position"),
+                    category=item_data.get("category"),
                 )
             )
 

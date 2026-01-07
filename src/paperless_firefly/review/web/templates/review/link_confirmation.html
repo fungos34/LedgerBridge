@@ -1,0 +1,64 @@
+{% extends "review/base.html" %}
+
+{% block title %}Confirm Link{% endblock %}
+{% block pending_count %}{% endblock %}
+
+{% block content %}
+<div class="container" style="max-width: 600px; margin: 2rem auto;">
+    <div class="card">
+        <div class="card-header">
+            <h2>🔗 Confirm Document Link</h2>
+        </div>
+        <div class="card-body">
+            <p>You are about to link this document to an existing Firefly III transaction.</p>
+            <p>This will <strong>skip creating a new transaction</strong> and mark the document as linked.</p>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.5rem 0;">
+                <!-- Document Info -->
+                <div style="padding: 1rem; background: var(--gray-50); border-radius: 0.375rem;">
+                    <h4 style="margin-bottom: 0.5rem; color: var(--gray-700);">📄 Document</h4>
+                    {% if extraction %}
+                    <p style="margin: 0; font-weight: 500;">{{ extraction.paperless_title|default:"Unknown Document" }}</p>
+                    <p style="margin: 0.25rem 0 0 0; font-size: 0.875rem; color: var(--gray-500);">
+                        ID: {{ document_id }}
+                    </p>
+                    {% else %}
+                    <p style="margin: 0; color: var(--gray-500);">Document ID: {{ document_id }}</p>
+                    {% endif %}
+                </div>
+                
+                <!-- Transaction Info -->
+                <div style="padding: 1rem; background: var(--gray-50); border-radius: 0.375rem;">
+                    <h4 style="margin-bottom: 0.5rem; color: var(--gray-700);">💳 Transaction</h4>
+                    {% if transaction %}
+                    <p style="margin: 0; font-weight: 500;">{{ transaction.description|default:"(No description)" }}</p>
+                    <p style="margin: 0.25rem 0 0 0; font-size: 0.875rem; color: var(--gray-500);">
+                        {{ transaction.amount }} • {{ transaction.date }}
+                    </p>
+                    {% if transaction.destination_account %}
+                    <p style="margin: 0.25rem 0 0 0; font-size: 0.75rem; color: var(--gray-400);">
+                        → {{ transaction.destination_account }}
+                    </p>
+                    {% endif %}
+                    {% else %}
+                    <p style="margin: 0; color: var(--gray-500);">Transaction ID: {{ firefly_id }}</p>
+                    {% endif %}
+                </div>
+            </div>
+            
+            <div class="alert" style="background: #fef3c7; border: 1px solid #fcd34d; color: #92400e; padding: 0.75rem; border-radius: 0.375rem; margin-bottom: 1rem;">
+                <strong>⚠️ Note:</strong> Linking will mark this extraction as "LINKED" and associate the document with the existing transaction. You can undo this from the reconciliation view if needed.
+            </div>
+            
+            <form method="post" style="display: flex; gap: 1rem; justify-content: flex-end;">
+                {% csrf_token %}
+                <input type="hidden" name="document_id" value="{{ document_id }}">
+                <input type="hidden" name="firefly_id" value="{{ firefly_id }}">
+                
+                <a href="{% url 'list' %}" class="btn btn-outline">Cancel</a>
+                <button type="submit" class="btn btn-primary">🔗 Confirm Link</button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

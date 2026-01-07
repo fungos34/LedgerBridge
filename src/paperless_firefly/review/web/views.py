@@ -520,6 +520,76 @@ def review_detail(request: HttpRequest, extraction_id: int) -> HttpResponse:
     llm_suggestion = _get_llm_suggestion_for_document(store, extraction.paperless_document_id)
     llm_globally_enabled = _is_llm_globally_enabled()
 
+    # Get Firefly categories for dropdown
+    firefly_categories = []
+    firefly_categories_json = "[]"  # JSON serialized for JavaScript
+    try:
+        categories_raw = client.list_categories() if firefly_accounts else []
+        firefly_categories = categories_raw
+        # Serialize to JSON for JavaScript use in split transactions
+        firefly_categories_json = json.dumps([
+            {"id": cat.id, "name": cat.name} for cat in categories_raw
+        ])
+    except Exception as e:
+        logger.warning(f"Could not fetch Firefly categories: {e}")
+
+    # Find potential matching Firefly transactions for this document
+    # Per SPARK_EVALUATION_REPORT.md - attempt to match reviewed document to existing Firefly entries
+    matching_transactions = []
+    try:
+        from ...config import Config
+        from ...matching.engine import MatchingEngine
+
+        # Build extraction dict from FinanceExtraction for the matching engine
+        extraction_dict = {
+            "amount": extraction.proposal.amount,
+            "date": extraction.proposal.date.isoformat() if extraction.proposal.date else None,
+            "vendor": extraction.proposal.vendor,
+            "description": extraction.proposal.description,
+            "correspondent": getattr(extraction.proposal, "correspondent", None),
+        }
+
+        # Get config for matching engine
+        config = Config.load(settings.CONFIG_PATH if hasattr(settings, "CONFIG_PATH") else None)
+        engine = MatchingEngine(store, config)
+
+        # Find matches using the matching engine
+        matches = engine.find_matches(
+            document_id=extraction.paperless_document_id,
+            extraction=extraction_dict,
+            max_results=5,
+        )
+
+        # Enrich matches with transaction details from cache
+        for m in matches:
+            cached_tx = store.get_firefly_cache_entry(m.firefly_id)
+            if cached_tx:
+                matching_transactions.append({
+                    "firefly_id": m.firefly_id,
+                    "score": round(m.total_score * 100, 1),
+                    "amount": cached_tx.get("amount"),
+                    "date": cached_tx.get("date"),
+                    "description": cached_tx.get("description"),
+                    "destination": cached_tx.get("destination_account"),
+                    "reasons": m.reasons,
+                })
+    except Exception as e:
+        logger.warning(f"Could not find matching transactions: {e}")
+
+    # Prepare line items for display (split transactions support)
+    line_items_data = []
+    for idx, item in enumerate(extraction.line_items):
+        line_items_data.append(
+            {
+                "index": idx,
+                "description": item.description,
+                "amount": item.total or (item.quantity * item.unit_price if item.quantity and item.unit_price else None),
+                "quantity": item.quantity,
+                "unit_price": item.unit_price,
+                "category": getattr(item, "category", None),  # Can be set per line item
+            }
+        )
+
     context = {
         "record": record,
         "extraction": extraction,
@@ -533,6 +603,14 @@ def review_detail(request: HttpRequest, extraction_id: int) -> HttpResponse:
         "current_position": current_idx + 1 if current_idx >= 0 else 0,
         "already_reviewed": record.review_decision is not None,
         "firefly_accounts": firefly_accounts,
+        "firefly_categories": firefly_categories,
+        "firefly_categories_json": firefly_categories_json,  # JSON for JS
+        # Line items for split transactions
+        "line_items": line_items_data,
+        "has_line_items": len(line_items_data) > 0,
+        # Matching transactions
+        "matching_transactions": matching_transactions,
+        "has_matches": len(matching_transactions) > 0,
         # LLM context
         "llm_suggestion": llm_suggestion,
         "llm_globally_enabled": llm_globally_enabled,
@@ -716,6 +794,41 @@ def save_extraction(request: HttpRequest, extraction_id: int) -> HttpResponse:
         except ValueError:
             pass
 
+    # Handle split transactions (line items)
+    line_items_json = request.POST.get("line_items_json")
+    if line_items_json:
+        try:
+            from ...schemas.finance_extraction import LineItem
+            
+            line_items_data = json.loads(line_items_json)
+            if line_items_data and isinstance(line_items_data, list):
+                # Convert to LineItem objects
+                new_line_items = []
+                for idx, item in enumerate(line_items_data):
+                    line_item = LineItem(
+                        description=item.get("description", ""),
+                        quantity=Decimal("1"),  # Default for split bookings
+                        unit_price=Decimal(str(item.get("amount", 0))),
+                        total=Decimal(str(item.get("amount", 0))),
+                        position=idx + 1,
+                        category=item.get("category"),  # Category for split transaction
+                    )
+                    new_line_items.append(line_item)
+                
+                # Replace extraction line items
+                extraction.line_items = new_line_items
+                changes.append("line_items")
+                
+                # Validate: sum of line items should equal total amount
+                line_total = sum(item.total for item in new_line_items)
+                if abs(line_total - proposal.amount) > Decimal("0.01"):
+                    logger.warning(
+                        f"Split transaction total ({line_total}) differs from "
+                        f"main amount ({proposal.amount}) by {abs(line_total - proposal.amount)}"
+                    )
+        except (json.JSONDecodeError, TypeError, ValueError) as e:
+            logger.warning(f"Failed to parse line_items_json: {e}")
+
     # Regenerate external_id if critical fields changed
     if "amount" in changes or "date" in changes:
         proposal.external_id = generate_external_id(
@@ -749,8 +862,17 @@ def toggle_llm_opt_out(request: HttpRequest, extraction_id: int) -> HttpResponse
 
     Per SPARK_EVALUATION_REPORT.md 6.7.2: Per-document opt-out support.
     UI Toggle: "Use AI suggestions" checkbox.
+    
+    Accepts JSON body with { "opt_out": true/false } and returns JSON response.
     """
     store = _get_store()
+
+    # Parse the JSON body to get the opt_out value
+    try:
+        body = json.loads(request.body) if request.body else {}
+        new_opt_out = body.get("opt_out", None)
+    except json.JSONDecodeError:
+        new_opt_out = None
 
     # Get current state
     conn = store._get_connection()
@@ -759,24 +881,24 @@ def toggle_llm_opt_out(request: HttpRequest, extraction_id: int) -> HttpResponse
             "SELECT llm_opt_out FROM extractions WHERE id = ?", (extraction_id,)
         ).fetchone()
         if not row:
-            messages.error(request, "Extraction not found")
-            return redirect("list")
+            return JsonResponse({"success": False, "error": "Extraction not found"}, status=404)
 
         current_opt_out = bool(row["llm_opt_out"])
     finally:
         conn.close()
 
-    # Toggle the state
-    new_opt_out = not current_opt_out
+    # If opt_out was provided in the body, use it; otherwise toggle
+    if new_opt_out is None:
+        new_opt_out = not current_opt_out
+    
     if store.update_extraction_llm_opt_out(extraction_id, new_opt_out):
         if new_opt_out:
-            messages.info(request, "AI suggestions disabled for this document")
+            message = "AI suggestions disabled for this document"
         else:
-            messages.info(request, "AI suggestions enabled for this document")
+            message = "AI suggestions enabled for this document"
+        return JsonResponse({"success": True, "opt_out": new_opt_out, "message": message})
     else:
-        messages.error(request, "Failed to update LLM settings")
-
-    return redirect("detail", extraction_id=extraction_id)
+        return JsonResponse({"success": False, "error": "Failed to update LLM settings"}, status=500)
 
 
 @login_required
@@ -1697,6 +1819,91 @@ def manual_link(request: HttpRequest) -> HttpResponse:
         messages.error(request, f"Error creating manual link: {e}")
 
     return redirect("reconciliation_list")
+
+
+@login_required
+def link_document_to_transaction(request: HttpRequest) -> HttpResponse:
+    """
+    Link a document directly to an existing Firefly transaction.
+    
+    This skips creating a new transaction and instead links the document
+    to an existing one - useful when the matching engine finds potential matches.
+    Supports both GET (confirmation) and POST (action).
+    """
+    from ...services.reconciliation import ReconciliationService
+    from ...config import load_config
+    
+    document_id = request.GET.get("document_id") or request.POST.get("document_id")
+    firefly_id = request.GET.get("firefly_id") or request.POST.get("firefly_id")
+    
+    if not document_id or not firefly_id:
+        messages.error(request, "Both document_id and firefly_id are required")
+        return redirect("list")
+    
+    try:
+        document_id_int = int(document_id)
+        firefly_id_int = int(firefly_id)
+    except ValueError:
+        messages.error(request, "Invalid document_id or firefly_id")
+        return redirect("list")
+    
+    store = _get_store()
+    
+    if request.method == "POST":
+        # Perform the actual linking
+        try:
+            firefly_client = _get_firefly_client(request)
+            config = load_config()
+            
+            service = ReconciliationService(
+                config=config,
+                state_store=store,
+                firefly_client=firefly_client,
+            )
+            
+            success = service.manual_link(
+                document_id=document_id_int,
+                firefly_id=firefly_id_int,
+            )
+            
+            if success:
+                # Mark the extraction as LINKED (not ACCEPTED - different semantic)
+                record = store.get_extraction_by_document_id(document_id_int)
+                if record:
+                    store.update_extraction_status(
+                        record.id,
+                        review_decision="LINKED",
+                        review_state="LINKED",
+                    )
+                
+                messages.success(
+                    request,
+                    f"Document {document_id_int} linked to Firefly transaction {firefly_id_int}",
+                )
+                return redirect("list")
+            else:
+                messages.error(request, "Failed to link document to transaction")
+                return redirect("detail", extraction_id=document_id_int)
+                
+        except Exception as e:
+            logger.error(f"Error linking doc {document_id} to tx {firefly_id}: {e}")
+            messages.error(request, f"Error creating link: {e}")
+            return redirect("list")
+    
+    # GET: Show confirmation page
+    # Get document and transaction details for confirmation
+    extraction_record = store.get_extraction_by_document_id(document_id_int)
+    tx_cache = store.get_firefly_cache_entry(firefly_id_int)
+    
+    context = {
+        "document_id": document_id_int,
+        "firefly_id": firefly_id_int,
+        "extraction": extraction_record,
+        "transaction": tx_cache,
+        **_get_external_urls(),
+    }
+    
+    return render(request, "review/link_confirmation.html", context)
 
 
 @login_required
