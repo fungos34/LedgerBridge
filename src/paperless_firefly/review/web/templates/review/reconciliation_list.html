@@ -96,6 +96,28 @@
 {% endblock %}
 
 {% block content %}
+{% if match_document %}
+<div class="card mb-4" style="background: #dbeafe; border: 1px solid #93c5fd;">
+    <div class="card-body">
+        <div style="display: flex; align-items: center; gap: 1rem;">
+            <span style="font-size: 1.5rem;">🔗</span>
+            <div style="flex: 1;">
+                <strong>Linking Document to Bank Transaction</strong>
+                <div style="font-size: 0.875rem; color: var(--gray-700); margin-top: 0.25rem;">
+                    {{ match_document.title }} • {{ match_document.amount }} {{ match_document.currency }} • {{ match_document.date }}
+                </div>
+            </div>
+            <a href="{% url 'detail' match_document.document_id %}" class="btn btn-outline">
+                ← Back to Review
+            </a>
+        </div>
+        <div style="font-size: 0.75rem; color: var(--gray-600); margin-top: 0.5rem;">
+            Select a transaction below to link this document to it, or view unlinked transactions to find a match.
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <div class="stats-grid">
     <div class="stat-card pending">
         <div class="value">{{ stats.pending }}</div>

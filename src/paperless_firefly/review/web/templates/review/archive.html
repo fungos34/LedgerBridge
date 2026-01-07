@@ -1,0 +1,191 @@
+{% extends "review/base.html" %}
+
+{% block title %}Archive{% endblock %}
+
+{% block extra_css %}
+<style>
+    .archive-actions {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+    }
+    
+    .status-imported {
+        background: #dcfce7;
+        color: #166534;
+    }
+    
+    .status-rejected {
+        background: #fef3c7;
+        color: #92400e;
+    }
+    
+    .status-failed {
+        background: #fee2e2;
+        color: #991b1b;
+    }
+    
+    .status-pending {
+        background: #dbeafe;
+        color: #1e40af;
+    }
+    
+    .filter-row {
+        display: flex;
+        gap: 1rem;
+        margin-bottom: 1rem;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+    
+    .filter-row .form-input {
+        width: auto;
+    }
+    
+    .archive-item-details {
+        font-size: 0.75rem;
+        color: var(--gray-500);
+        margin-top: 0.25rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <h2>Archive ({{ items|length }} items)</h2>
+        <div class="archive-actions">
+            <a href="{% url 'list' %}" class="btn btn-outline">
+                ← Back to Queue
+            </a>
+        </div>
+    </div>
+    
+    {% if items %}
+    <div class="card-body">
+        <div class="filter-row">
+            <label>Filter by status:</label>
+            <select id="status-filter" class="form-input" onchange="filterTable()">
+                <option value="">All</option>
+                <option value="Imported">Imported</option>
+                <option value="Rejected">Rejected</option>
+                <option value="Failed">Failed</option>
+                <option value="Approved">Approved (pending import)</option>
+            </select>
+            <input type="text" id="search-filter" class="form-input" placeholder="Search..." oninput="filterTable()">
+        </div>
+    </div>
+    
+    <table id="archive-table">
+        <thead>
+            <tr>
+                <th>Document</th>
+                <th>Amount</th>
+                <th>Date</th>
+                <th>Vendor</th>
+                <th>Status</th>
+                <th>Processed</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in items %}
+            <tr data-status="{{ item.status }}" data-title="{{ item.title|lower }}" data-vendor="{{ item.vendor|default:''|lower }}">
+                <td>
+                    <div class="mb-1">
+                        <strong>{{ item.title|truncatechars:50 }}</strong>
+                    </div>
+                    <div class="archive-item-details">
+                        Doc #{{ item.document_id }}
+                        {% if item.external_id %}| External: {{ item.external_id|truncatechars:20 }}{% endif %}
+                    </div>
+                </td>
+                <td class="text-mono">
+                    {{ item.amount }} {{ item.currency }}
+                </td>
+                <td>{{ item.date }}</td>
+                <td>{{ item.vendor|default:"-"|truncatechars:30 }}</td>
+                <td>
+                    <span class="badge status-{{ item.status_class }}">
+                        {{ item.status }}
+                    </span>
+                    {% if item.firefly_id %}
+                    <div class="archive-item-details mt-1">
+                        Firefly #{{ item.firefly_id }}
+                    </div>
+                    {% endif %}
+                    {% if item.import_error %}
+                    <div class="archive-item-details mt-1" style="color: #dc2626;">
+                        {{ item.import_error|truncatechars:50 }}
+                    </div>
+                    {% endif %}
+                </td>
+                <td>
+                    <div>{{ item.reviewed_at|default:item.created_at }}</div>
+                </td>
+                <td class="text-right">
+                    <div class="archive-actions">
+                        {% if item.status == 'Imported' and item.firefly_id %}
+                        <a href="{{ firefly_url }}/transactions/show/{{ item.firefly_id }}" 
+                           target="_blank" 
+                           class="btn btn-sm btn-outline"
+                           title="View in Firefly III">
+                            🔗 Firefly
+                        </a>
+                        {% endif %}
+                        <a href="{{ paperless_url }}/documents/{{ item.document_id }}/" 
+                           target="_blank" 
+                           class="btn btn-sm btn-outline"
+                           title="View in Paperless-ngx">
+                            📄 Paperless
+                        </a>
+                        {% if item.status != 'Imported' %}
+                        <form method="post" action="{% url 'reset_extraction' item.id %}" style="display: inline;">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-sm btn-secondary" 
+                                    onclick="return confirm('Reset this extraction for re-review?');"
+                                    title="Reset to pending review">
+                                🔄 Reset
+                            </button>
+                        </form>
+                        {% endif %}
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <h3>📦 Archive is empty</h3>
+        <p>No processed extractions yet.</p>
+        <p class="mt-4">
+            <a href="{% url 'list' %}" class="btn btn-primary">
+                Go to Review Queue
+            </a>
+        </p>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+function filterTable() {
+    const statusFilter = document.getElementById('status-filter').value.toLowerCase();
+    const searchFilter = document.getElementById('search-filter').value.toLowerCase();
+    const rows = document.querySelectorAll('#archive-table tbody tr');
+    
+    rows.forEach(row => {
+        const status = row.getAttribute('data-status').toLowerCase();
+        const title = row.getAttribute('data-title');
+        const vendor = row.getAttribute('data-vendor');
+        
+        const statusMatch = !statusFilter || status.includes(statusFilter);
+        const searchMatch = !searchFilter || 
+            title.includes(searchFilter) || 
+            vendor.includes(searchFilter);
+        
+        row.style.display = (statusMatch && searchMatch) ? '' : 'none';
+    });
+}
+</script>
+{% endblock %}

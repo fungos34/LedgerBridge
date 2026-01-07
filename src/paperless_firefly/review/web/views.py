@@ -407,14 +407,40 @@ def _get_llm_suggestion_for_document(store: StateStore, document_id: int) -> dic
 
 
 def _is_llm_globally_enabled() -> bool:
-    """Check if LLM is globally enabled via config."""
-    from ..config import load_config
+    """Check if LLM is globally enabled via config or environment.
 
+    Per SPARK_EVALUATION_REPORT.md 6.7.1: Global opt-out via config.llm.enabled.
+    Environment variable SPARK_LLM_ENABLED takes precedence.
+    """
+    import os
+    from pathlib import Path
+
+    from django.conf import settings
+
+    # Check environment variable first (takes precedence)
+    env_value = os.environ.get("SPARK_LLM_ENABLED", "").lower()
+    if env_value == "true":
+        return True
+    elif env_value == "false":
+        return False
+
+    # Fall back to config file
     try:
-        config = load_config()
-        return getattr(config, "llm_enabled", True)
+        from ...config import load_config
+
+        config_path = (
+            Path(getattr(settings, "STATE_DB_PATH", "/app/data/state.db")).parent / "config.yaml"
+        )
+        if not config_path.exists():
+            config_path = Path("/app/config/config.yaml")
+
+        if config_path.exists():
+            config = load_config(config_path)
+            return config.llm.enabled
     except Exception:
-        return True  # Default to enabled if config unavailable
+        pass
+
+    return False  # Default to disabled if config unavailable
 
 
 @login_required
@@ -1383,8 +1409,34 @@ def reconciliation_list(request: HttpRequest) -> HttpResponse:
 
     Displays proposals sorted by confidence score, with transaction and
     document details for review.
+
+    Query parameters:
+        match_document: Optional document ID to pre-select for matching
+                       (from "Link to Bank Transaction" flow per SPARK_EVALUATION_REPORT.md 3.3)
     """
     store = _get_store()
+
+    # Check if we're coming from "Link to Bank Transaction" flow
+    match_document_id = request.GET.get("match_document")
+    match_document_info = None
+    if match_document_id:
+        try:
+            doc_id = int(match_document_id)
+            extraction = store.get_extraction_by_document(doc_id)
+            if extraction:
+                try:
+                    extraction_data = json.loads(extraction.extraction_json)
+                    match_document_info = {
+                        "document_id": doc_id,
+                        "title": extraction_data.get("paperless_title", f"Document #{doc_id}"),
+                        "amount": extraction_data.get("proposal", {}).get("amount"),
+                        "date": extraction_data.get("proposal", {}).get("date"),
+                        "currency": extraction_data.get("proposal", {}).get("currency", "EUR"),
+                    }
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        except (ValueError, TypeError):
+            pass
 
     # Get pending proposals from state store
     proposals = store.get_pending_proposals()
@@ -1408,6 +1460,7 @@ def reconciliation_list(request: HttpRequest) -> HttpResponse:
     context = {
         "proposals": proposals,
         "stats": stats,
+        "match_document": match_document_info,
         "debug_mode": _is_debug_mode(),
         **_get_external_urls(),
     }

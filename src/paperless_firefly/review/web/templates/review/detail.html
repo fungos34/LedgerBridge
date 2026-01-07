@@ -466,6 +466,13 @@
                             Skip →
                         </button>
                     </div>
+                    <div class="action-buttons mt-3">
+                        <a href="{% url 'reconciliation_list' %}?match_document={{ document_id }}" 
+                           class="btn btn-lg btn-outline"
+                           title="Link this document to an existing bank transaction instead of creating a new one">
+                            🔗 Link to Bank Transaction
+                        </a>
+                    </div>
                 </div>
             </div>
         </form>
