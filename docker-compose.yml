@@ -27,6 +27,7 @@ services:
 
     env_file:
       - /srv/stack.env
+      - /srv/stack.tunnel.env
 
     ports:
       - "${SPARKLINK_BIND_IP}:${SPARKLINK_PORT}:8080"
@@ -52,8 +53,8 @@ services:
       - FIREFLY_DEFAULT_ACCOUNT=${FIREFLY_DEFAULT_ACCOUNT:?FIREFLY_DEFAULT_ACCOUNT is required}
 
       # --- Optional landing-page links (explicitly optional) ---
-      - SYNCTHING_URL=${SYNCTHING_URL-}
-      - FIREFLY_IMPORTER_URL=${FIREFLY_IMPORTER_URL-}
+      - SYNCTHING_URL=${SYNCTHING_EXTERNAL_URL-}
+      - FIREFLY_IMPORTER_URL=${FIREFLY_IMPORTER_EXTERNAL_URL-}
 
       # --- Thresholds (explicit: set them or it fails) ---
       - CONFIDENCE_AUTO_THRESHOLD=${CONFIDENCE_AUTO_THRESHOLD:?CONFIDENCE_AUTO_THRESHOLD is required}
@@ -75,6 +76,8 @@ services:
       # Server bind inside container (safe constants)
       - HOST=0.0.0.0
       - PORT=8080
+
+      - PYTHONPATH=/app/src
 
     volumes:
       - sparklink-data:/app/data
@@ -103,6 +106,7 @@ services:
 
     env_file:
       - /srv/stack.env
+      - /stv/stack.tunnel.env
 
     # Make these explicit in env (no hidden defaults)
     command: ["pipeline", "${PAPERLESS_FILTER_TAG:?PAPERLESS_FILTER_TAG is required}", "${WORKER_BATCH_SIZE:?WORKER_BATCH_SIZE is required}"]
@@ -141,6 +145,7 @@ services:
 
     env_file:
       - /srv/stack.env
+      - /srv/stack.tunnel.env
 
     command: ["reconcile", "--sync", "--match"]
 
