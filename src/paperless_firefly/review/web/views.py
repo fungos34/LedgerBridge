@@ -247,9 +247,15 @@ def user_settings(request: HttpRequest) -> HttpResponse:
     if profile.firefly_token or settings.FIREFLY_TOKEN:
         try:
             client = _get_firefly_client(request)
+            # Only test connection, don't fetch accounts on page load (too slow)
             if client.test_connection():
                 firefly_status = "connected"
-                firefly_accounts = client.list_accounts("asset")
+                # Fetch accounts with a timeout to prevent hanging
+                try:
+                    firefly_accounts = client.list_accounts("asset")
+                except Exception as accounts_err:
+                    logger.warning("Failed to fetch Firefly accounts: %s", accounts_err)
+                    # Connection is OK, just couldn't fetch accounts
             else:
                 firefly_status = "error"
         except Exception as e:

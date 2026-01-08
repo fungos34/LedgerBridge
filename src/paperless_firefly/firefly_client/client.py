@@ -441,12 +441,16 @@ class FireflyClient:
 
         return None
 
-    def list_accounts(self, account_type: str = "asset") -> list[dict]:
+    def list_accounts(self, account_type: str = "asset", max_pages: int = 10) -> list[dict]:
         """
         List accounts of a specific type.
 
         Args:
             account_type: asset, expense, revenue, liability, cash
+            max_pages: Maximum number of pages to fetch (prevents hanging on large datasets)
+
+        Returns:
+            List of account dictionaries with id, name, type, and currency_code
         """
         accounts = []
         page = 1
@@ -472,7 +476,15 @@ class FireflyClient:
 
             # Check for more pages
             meta = data.get("meta", {}).get("pagination", {})
-            if page >= meta.get("total_pages", 1):
+            total_pages = meta.get("total_pages", 1)
+            
+            if page >= total_pages or page >= max_pages:
+                if page >= max_pages and total_pages > max_pages:
+                    logger.warning(
+                        "Reached max_pages limit (%d) while fetching %s accounts. "
+                        "Total pages: %d. Some accounts may not be listed.",
+                        max_pages, account_type, total_pages
+                    )
                 break
             page += 1
 
