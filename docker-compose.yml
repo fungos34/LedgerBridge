@@ -1,85 +1,83 @@
-# Paperless → Firefly III Finance Pipeline (Spark v1.0)
-# Docker Compose configuration for local development and production
+# Paperless → Firefly III Finance Pipeline (Sparklink) — PRODUCTION-LEANING
 #
-# Services:
-# - paperless-firefly: Main web UI and review interface
-# - paperless-firefly-worker: Scheduled extraction worker (optional, profile: worker)
-# - paperless-firefly-reconcile: Reconciliation sync worker (optional, profile: reconcile)
+# Philosophy:
+# - NO silent defaults for critical values. Missing env vars must hard-fail.
+# - Optional features (workers, llm) are enabled via profiles; if enabled, their required vars must exist.
+# - Single source of truth: /srv/stack.env (symlinked as /srv/sparklink/.env is also fine).
 #
 # Profiles:
-# - worker: Enable extraction worker service
-# - reconcile: Enable reconciliation worker service
-# - llm: Enable Ollama LLM integration
+#   worker     - extraction worker
+#   reconcile  - reconcile/matching worker
+#   llm        - local Ollama service
 #
 # Usage:
-# - Basic: docker compose up -d
-# - With workers: docker compose --profile worker --profile reconcile up -d
-# - With LLM: docker compose --profile llm up -d
-#
-# See .env.example for configuration options.
+#   docker compose up -d
+#   docker compose --profile worker --profile reconcile up -d
+#   docker compose --profile llm up -d
+#   docker compose --profile worker --profile reconcile --profile llm up -d
 
 services:
-  # Main application service
-  paperless-firefly:
+  sparklink:
     build:
       context: .
       dockerfile: Dockerfile
-    image: paperless-firefly:latest
-    container_name: paperless-firefly
+    image: sparklink:latest
+    container_name: sparklink
     restart: unless-stopped
 
+    env_file:
+      - /srv/stack.env
+
     ports:
-      - "${PF_PORT:-8080}:8080"
+      - "${SPARKLINK_BIND_IP}:${SPARKLINK_PORT}:8080"
 
     environment:
-      # Paperless connection (internal Docker URLs)
+      # --- Required core integrations ---
       - PAPERLESS_URL=${PAPERLESS_URL:?PAPERLESS_URL is required}
       - PAPERLESS_TOKEN=${PAPERLESS_TOKEN:?PAPERLESS_TOKEN is required}
-      - PAPERLESS_FILTER_TAG=${PAPERLESS_FILTER_TAG:-finance/inbox}
-
-      # External URLs for browser links (what users actually access)
-      - PAPERLESS_EXTERNAL_URL=${PAPERLESS_EXTERNAL_URL:-${PAPERLESS_URL}}
-      - FIREFLY_EXTERNAL_URL=${FIREFLY_EXTERNAL_URL:-${FIREFLY_URL}}
-
-      # Firefly III connection (internal Docker URLs)
       - FIREFLY_URL=${FIREFLY_URL:?FIREFLY_URL is required}
       - FIREFLY_TOKEN=${FIREFLY_TOKEN:?FIREFLY_TOKEN is required}
-      - FIREFLY_DEFAULT_ACCOUNT=${FIREFLY_DEFAULT_ACCOUNT:-Checking Account}
 
-      # Optional service links for landing page
-      - SYNCTHING_URL=${SYNCTHING_URL:-}
-      - FIREFLY_IMPORTER_URL=${FIREFLY_IMPORTER_URL:-}
+      # --- Required UX/link correctness (no “mysterious internal URLs”) ---
+      - PAPERLESS_EXTERNAL_URL=${PAPERLESS_EXTERNAL_URL:?PAPERLESS_EXTERNAL_URL is required}
+      - FIREFLY_EXTERNAL_URL=${FIREFLY_EXTERNAL_URL:?FIREFLY_EXTERNAL_URL is required}
 
-      # Authentication - default admin user
-      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
-      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:-change-me-in-production}
+      # --- Required security (production) ---
+      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY is required}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:?ADMIN_USERNAME is required}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:?ADMIN_PASSWORD is required}
 
-      # Confidence thresholds
-      - CONFIDENCE_AUTO_THRESHOLD=${CONFIDENCE_AUTO_THRESHOLD:-0.85}
-      - CONFIDENCE_REVIEW_THRESHOLD=${CONFIDENCE_REVIEW_THRESHOLD:-0.60}
+      # --- Required, but you choose the values explicitly (no hidden defaults) ---
+      - PAPERLESS_FILTER_TAG=${PAPERLESS_FILTER_TAG:?PAPERLESS_FILTER_TAG is required}
+      - FIREFLY_DEFAULT_ACCOUNT=${FIREFLY_DEFAULT_ACCOUNT:?FIREFLY_DEFAULT_ACCOUNT is required}
 
-      # LLM Configuration (optional, Spark v1.0)
-      - OLLAMA_URL=${OLLAMA_URL:-}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2:3b}
-      - SPARK_LLM_ENABLED=${SPARK_LLM_ENABLED:-false}
-      - SPARK_LLM_OPT_OUT=${SPARK_LLM_OPT_OUT:-false}
-      - SPARK_LLM_CACHE_TTL_DAYS=${SPARK_LLM_CACHE_TTL_DAYS:-30}
+      # --- Optional landing-page links (explicitly optional) ---
+      - SYNCTHING_URL=${SYNCTHING_URL-}
+      - FIREFLY_IMPORTER_URL=${FIREFLY_IMPORTER_URL-}
 
-      # Reconciliation settings (Spark v1.0)
-      - SPARK_RECONCILIATION_AUTO_THRESHOLD=${SPARK_RECONCILIATION_AUTO_THRESHOLD:-0.92}
-      - SPARK_RECONCILIATION_REVIEW_THRESHOLD=${SPARK_RECONCILIATION_REVIEW_THRESHOLD:-0.70}
-      - SPARK_CACHE_TTL_HOURS=${SPARK_CACHE_TTL_HOURS:-24}
+      # --- Thresholds (explicit: set them or it fails) ---
+      - CONFIDENCE_AUTO_THRESHOLD=${CONFIDENCE_AUTO_THRESHOLD:?CONFIDENCE_AUTO_THRESHOLD is required}
+      - CONFIDENCE_REVIEW_THRESHOLD=${CONFIDENCE_REVIEW_THRESHOLD:?CONFIDENCE_REVIEW_THRESHOLD is required}
+      - SPARK_RECONCILIATION_AUTO_THRESHOLD=${SPARK_RECONCILIATION_AUTO_THRESHOLD:?SPARK_RECONCILIATION_AUTO_THRESHOLD is required}
+      - SPARK_RECONCILIATION_REVIEW_THRESHOLD=${SPARK_RECONCILIATION_REVIEW_THRESHOLD:?SPARK_RECONCILIATION_REVIEW_THRESHOLD is required}
+      - SPARK_CACHE_TTL_HOURS=${SPARK_CACHE_TTL_HOURS:?SPARK_CACHE_TTL_HOURS is required}
 
-      # Server settings
+      # --- LLM config (hard rules) ---
+      # If you enable LLM, you MUST provide OLLAMA_URL + OLLAMA_MODEL and set SPARK_LLM_ENABLED=true.
+      # If LLM is disabled, set SPARK_LLM_ENABLED=false and leave OLLAMA_URL/OLLAMA_MODEL empty or unset.
+      - SPARK_LLM_ENABLED=${SPARK_LLM_ENABLED:?SPARK_LLM_ENABLED is required (true/false)}
+      - OLLAMA_URL=${OLLAMA_URL-}
+      - OLLAMA_MODEL=${OLLAMA_MODEL-}
+      - FALLBACK_OLLAMA_MODEL=${FALLBACK_OLLAMA_MODEL-}
+      - SPARK_LLM_OPT_OUT=${SPARK_LLM_OPT_OUT:?SPARK_LLM_OPT_OUT is required (true/false)}
+      - SPARK_LLM_CACHE_TTL_DAYS=${SPARK_LLM_CACHE_TTL_DAYS:?SPARK_LLM_CACHE_TTL_DAYS is required}
+
+      # Server bind inside container (safe constants)
       - HOST=0.0.0.0
       - PORT=8080
 
     volumes:
-      # Persistent state database
-      - paperless-firefly-data:/app/data
-      # Optional: mount custom config
-      # - ./config.yaml:/app/config/config.yaml:ro
+      - sparklink-data:/app/data
 
     healthcheck:
       test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8080/', timeout=5)"]
@@ -89,112 +87,112 @@ services:
       start_period: 10s
 
     networks:
-      - paperless-firefly-net
+      - sparklink-net
 
-    # For LAN access to Paperless and Firefly
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
-  # Scheduled extraction worker (optional)
-  paperless-firefly-worker:
+  sparklink-worker:
     build:
       context: .
       dockerfile: Dockerfile
-    image: paperless-firefly:latest
-    container_name: paperless-firefly-worker
+    image: sparklink:latest
+    container_name: sparklink-worker
     restart: "no"
-    profiles:
-      - worker
+    profiles: ["worker"]
 
-    command: ["pipeline", "finance/inbox", "50"]
+    env_file:
+      - /srv/stack.env
+
+    # Make these explicit in env (no hidden defaults)
+    command: ["pipeline", "${PAPERLESS_FILTER_TAG:?PAPERLESS_FILTER_TAG is required}", "${WORKER_BATCH_SIZE:?WORKER_BATCH_SIZE is required}"]
 
     environment:
-      - PAPERLESS_URL=${PAPERLESS_URL}
-      - PAPERLESS_TOKEN=${PAPERLESS_TOKEN}
-      - FIREFLY_URL=${FIREFLY_URL}
-      - FIREFLY_TOKEN=${FIREFLY_TOKEN}
-      - FIREFLY_DEFAULT_ACCOUNT=${FIREFLY_DEFAULT_ACCOUNT:-Checking Account}
+      - PAPERLESS_URL=${PAPERLESS_URL:?PAPERLESS_URL is required}
+      - PAPERLESS_TOKEN=${PAPERLESS_TOKEN:?PAPERLESS_TOKEN is required}
+      - FIREFLY_URL=${FIREFLY_URL:?FIREFLY_URL is required}
+      - FIREFLY_TOKEN=${FIREFLY_TOKEN:?FIREFLY_TOKEN is required}
+      - FIREFLY_DEFAULT_ACCOUNT=${FIREFLY_DEFAULT_ACCOUNT:?FIREFLY_DEFAULT_ACCOUNT is required}
+
+      - SPARK_LLM_ENABLED=${SPARK_LLM_ENABLED:?SPARK_LLM_ENABLED is required (true/false)}
+      - OLLAMA_URL=${OLLAMA_URL-}
+      - OLLAMA_MODEL=${OLLAMA_MODEL-}
+
+      - SPARK_CACHE_TTL_HOURS=${SPARK_CACHE_TTL_HOURS:?SPARK_CACHE_TTL_HOURS is required}
 
     volumes:
-      - paperless-firefly-data:/app/data
+      - sparklink-data:/app/data
 
     networks:
-      - paperless-firefly-net
+      - sparklink-net
 
     depends_on:
-      paperless-firefly:
+      sparklink:
         condition: service_healthy
 
-  # Reconciliation sync worker (optional, Spark v1.0)
-  # Syncs Firefly transactions and runs matching engine
-  paperless-firefly-reconcile:
+  sparklink-reconcile:
     build:
       context: .
       dockerfile: Dockerfile
-    image: paperless-firefly:latest
-    container_name: paperless-firefly-reconcile
+    image: sparklink:latest
+    container_name: sparklink-reconcile
     restart: "no"
-    profiles:
-      - reconcile
+    profiles: ["reconcile"]
+
+    env_file:
+      - /srv/stack.env
 
     command: ["reconcile", "--sync", "--match"]
 
     environment:
-      - PAPERLESS_URL=${PAPERLESS_URL}
-      - PAPERLESS_TOKEN=${PAPERLESS_TOKEN}
-      - FIREFLY_URL=${FIREFLY_URL}
-      - FIREFLY_TOKEN=${FIREFLY_TOKEN}
-      - FIREFLY_DEFAULT_ACCOUNT=${FIREFLY_DEFAULT_ACCOUNT:-Checking Account}
-      - SPARK_RECONCILIATION_AUTO_THRESHOLD=${SPARK_RECONCILIATION_AUTO_THRESHOLD:-0.92}
-      - SPARK_RECONCILIATION_REVIEW_THRESHOLD=${SPARK_RECONCILIATION_REVIEW_THRESHOLD:-0.70}
-      # LLM for reconciliation categorization (optional)
-      - OLLAMA_URL=${OLLAMA_URL:-}
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2:3b}
-      - SPARK_LLM_ENABLED=${SPARK_LLM_ENABLED:-false}
+      - PAPERLESS_URL=${PAPERLESS_URL:?PAPERLESS_URL is required}
+      - PAPERLESS_TOKEN=${PAPERLESS_TOKEN:?PAPERLESS_TOKEN is required}
+      - FIREFLY_URL=${FIREFLY_URL:?FIREFLY_URL is required}
+      - FIREFLY_TOKEN=${FIREFLY_TOKEN:?FIREFLY_TOKEN is required}
+      - FIREFLY_DEFAULT_ACCOUNT=${FIREFLY_DEFAULT_ACCOUNT:?FIREFLY_DEFAULT_ACCOUNT is required}
+
+      - SPARK_RECONCILIATION_AUTO_THRESHOLD=${SPARK_RECONCILIATION_AUTO_THRESHOLD:?SPARK_RECONCILIATION_AUTO_THRESHOLD is required}
+      - SPARK_RECONCILIATION_REVIEW_THRESHOLD=${SPARK_RECONCILIATION_REVIEW_THRESHOLD:?SPARK_RECONCILIATION_REVIEW_THRESHOLD is required}
+      - SPARK_CACHE_TTL_HOURS=${SPARK_CACHE_TTL_HOURS:?SPARK_CACHE_TTL_HOURS is required}
+
+      - SPARK_LLM_ENABLED=${SPARK_LLM_ENABLED:?SPARK_LLM_ENABLED is required (true/false)}
+      - OLLAMA_URL=${OLLAMA_URL-}
+      - OLLAMA_MODEL=${FALLBACK_OLLAMA_MODEL-}
 
     volumes:
-      - paperless-firefly-data:/app/data
+      - sparklink-data:/app/data
 
     networks:
-      - paperless-firefly-net
+      - sparklink-net
 
     depends_on:
-      paperless-firefly:
+      sparklink:
         condition: service_healthy
 
-  # Ollama LLM service (optional, Spark v1.0)
-  # Local LLM for category suggestion assistance
+  # Optional local Ollama
+  # Recommended: bind only to localhost (host) and let Sparklink reach it via docker network name "ollama".
   ollama:
     image: ollama/ollama:latest
     container_name: ollama
     restart: unless-stopped
-    profiles:
-      - llm
+    profiles: ["llm"]
 
+    # Hard-fail if you enable the llm profile but forgot the port and bind ip
     ports:
-      - "${OLLAMA_PORT:-11434}:11434"
+      - "${OLLAMA_BIND_IP:?OLLAMA_BIND_IP is required (recommend 127.0.0.1)}:${OLLAMA_PORT:?OLLAMA_PORT is required}:11434"
 
     volumes:
       - ollama-data:/root/.ollama
 
     networks:
-      - paperless-firefly-net
-
-    # GPU support (uncomment for NVIDIA GPU)
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
+      - sparklink-net
 
 volumes:
-  paperless-firefly-data:
+  sparklink-data:
     driver: local
   ollama-data:
     driver: local
 
 networks:
-  paperless-firefly-net:
+  sparklink-net:
     driver: bridge
