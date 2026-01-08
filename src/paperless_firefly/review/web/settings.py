@@ -14,6 +14,24 @@ DEBUG = os.environ.get("DJANGO_DEBUG", "True").lower() == "true"
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,*").split(",")
 # Allow all hosts by default for Docker deployment
 
+
+# --- Reverse proxy / Cloudflare Tunnel support (CSRF, HTTPS termination) ---
+# When TLS terminates at Cloudflare, Django sees HTTP at the origin unless we trust
+# X-Forwarded-Proto. Without this, CSRF Origin checks can fail for external access.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+USE_X_FORWARDED_HOST = True
+
+# External domain(s) allowed to POST forms (CSRF origin check)
+CSRF_TRUSTED_ORIGINS = [
+    o.strip() for o in os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "").split(",") if o.strip()
+]
+
+# Make cookies compatible with HTTPS (browser will drop "secure" cookies otherwise)
+CSRF_COOKIE_SECURE = os.environ.get("DJANGO_CSRF_COOKIE_SECURE", "true").lower() in ("1", "true", "yes", "on")
+SESSION_COOKIE_SECURE = os.environ.get("DJANGO_SESSION_COOKIE_SECURE", "true").lower() in ("1", "true", "yes", "on")
+
+
+
 # Application definition
 INSTALLED_APPS = [
     "django.contrib.admin",
