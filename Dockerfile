@@ -40,6 +40,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 # Copy application code
 COPY src/ ./src/
+COPY manage.py ./
 COPY docker/entrypoint.sh /entrypoint.sh
 
 # Create directories for data persistence
