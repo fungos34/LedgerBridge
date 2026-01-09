@@ -90,7 +90,7 @@ services:
       start_period: 10s
 
     networks:
-      - sparklink-net
+      - orion_net
 
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -128,7 +128,7 @@ services:
       - sparklink-data:/app/data
 
     networks:
-      - sparklink-net
+      - orion_net
 
     depends_on:
       sparklink:
@@ -168,7 +168,7 @@ services:
       - sparklink-data:/app/data
 
     networks:
-      - sparklink-net
+      - orion_net
 
     depends_on:
       sparklink:
@@ -190,7 +190,7 @@ services:
       - ollama-data:/root/.ollama
 
     networks:
-      - sparklink-net
+      - orion_net
 
 volumes:
   sparklink-data:
@@ -199,5 +199,5 @@ volumes:
     driver: local
 
 networks:
-  sparklink-net:
-    driver: bridge
+  orion_net:
+    external: true
