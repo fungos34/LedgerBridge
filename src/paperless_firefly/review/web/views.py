@@ -275,6 +275,7 @@ def user_settings(request: HttpRequest) -> HttpResponse:
         # Update profile
         profile.paperless_token = request.POST.get("paperless_token", "")
         profile.paperless_url = request.POST.get("paperless_url", "")
+        profile.paperless_filter_tags = request.POST.get("paperless_filter_tags", "finance/inbox")
         profile.firefly_token = request.POST.get("firefly_token", "")
         profile.firefly_url = request.POST.get("firefly_url", "")
         profile.default_source_account = request.POST.get(

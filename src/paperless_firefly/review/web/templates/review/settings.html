@@ -185,6 +185,21 @@
                        placeholder="Leave empty to use default">
                 <div class="form-help">Only set if using different Paperless instance</div>
             </div>
+            
+            <div class="form-group">
+                <label class="form-label" for="paperless_filter_tags">Document Filter Tags</label>
+                <input type="text" 
+                       name="paperless_filter_tags" 
+                       id="paperless_filter_tags"
+                       class="form-input"
+                       value="{{ profile.paperless_filter_tags|default:'finance/inbox' }}"
+                       placeholder="e.g., finance/inbox, receipts">
+                <div class="form-help">
+                    Comma-separated list of tags to filter documents during extraction. 
+                    Only documents with these tags will be processed. 
+                    Default: <code>finance/inbox</code>
+                </div>
+            </div>
         </div>
         
         <!-- Firefly Settings -->

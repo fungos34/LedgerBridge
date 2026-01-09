@@ -22,6 +22,14 @@ class UserProfile(models.Model):
         blank=True, default="", help_text="Override default Paperless URL"
     )
 
+    # Paperless filter settings
+    paperless_filter_tags = models.CharField(
+        max_length=500,
+        blank=True,
+        default="finance/inbox",
+        help_text="Comma-separated tags to filter documents during extraction (e.g., 'finance/inbox,receipts')",
+    )
+
     # Firefly III connection
     firefly_token = models.CharField(max_length=255, blank=True, default="")
     firefly_url = models.URLField(blank=True, default="", help_text="Override default Firefly URL")
