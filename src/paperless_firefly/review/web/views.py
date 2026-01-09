@@ -779,6 +779,78 @@ def reset_extraction(request: HttpRequest, extraction_id: int) -> HttpResponse:
 
 @login_required
 @require_http_methods(["POST"])
+def delete_extraction(request: HttpRequest, extraction_id: int) -> HttpResponse:
+    """
+    Permanently delete an extraction from the database.
+
+    Only allowed for rejected extractions that haven't been imported to Firefly.
+    The document in Paperless is not affected.
+    After deletion, the document can be re-extracted to create a new extraction.
+    """
+    store = _get_store()
+
+    conn = store._get_connection()
+    try:
+        # Get extraction details
+        row = conn.execute(
+            """
+            SELECT e.id, e.external_id, e.review_decision, e.document_id,
+                   i.firefly_id
+            FROM extractions e
+            LEFT JOIN imports i ON e.external_id = i.external_id
+            WHERE e.id = ?
+            """,
+            (extraction_id,),
+        ).fetchone()
+
+        if not row:
+            messages.error(request, "Extraction not found.")
+            return redirect("archive")
+
+        # Safety check: only delete rejected extractions that aren't imported
+        if row["review_decision"] != "REJECTED":
+            messages.error(
+                request,
+                "Only rejected extractions can be deleted. Reset the extraction first if needed.",
+            )
+            return redirect("archive")
+
+        if row["firefly_id"]:
+            messages.error(
+                request,
+                "Cannot delete: This extraction has already been imported to Firefly. "
+                "Delete the transaction in Firefly first if needed.",
+            )
+            return redirect("archive")
+
+        # Delete the extraction
+        external_id = row["external_id"]
+        document_id = row["document_id"]
+
+        conn.execute("DELETE FROM extractions WHERE id = ?", (extraction_id,))
+
+        # Also delete any import record (should not exist for rejected items, but just in case)
+        if external_id:
+            conn.execute("DELETE FROM imports WHERE external_id = ?", (external_id,))
+
+        conn.commit()
+
+        messages.success(
+            request,
+            f"Extraction deleted. Document #{document_id} can now be re-extracted.",
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to delete extraction {extraction_id}: {e}")
+        messages.error(request, f"Failed to delete extraction: {e}")
+    finally:
+        conn.close()
+
+    return redirect("archive")
+
+
+@login_required
+@require_http_methods(["POST"])
 def skip_extraction(request: HttpRequest, extraction_id: int) -> HttpResponse:
     """Skip extraction for now."""
     store = _get_store()
@@ -997,13 +1069,18 @@ def toggle_llm_opt_out(request: HttpRequest, extraction_id: int) -> HttpResponse
 @login_required
 @require_http_methods(["POST"])
 def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpResponse:
-    """Re-run interpretation for a document.
+    """Re-run interpretation for a document with SparkAI.
 
     Per SPARK_EVALUATION_REPORT.md 6.8: Rescheduling / Re-Running Interpretation.
-    Creates a new InterpretationRun record while preserving history.
+    - Actually invokes SparkAI service to get new category suggestion
+    - Creates a new InterpretationRun record with the LLM result
+    - Preserves history of all runs
 
     Returns JSON response for AJAX calls (with X-Requested-With header or Accept: application/json).
     """
+    import time
+    from pathlib import Path
+
     store = _get_store()
 
     # Detect if this is an AJAX request
@@ -1013,11 +1090,11 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
         or request.content_type == "application/json"
     )
 
-    # Get extraction details
+    # Get extraction details (including the full extraction JSON)
     conn = store._get_connection()
     try:
         row = conn.execute(
-            "SELECT document_id, external_id FROM extractions WHERE id = ?",
+            "SELECT id, document_id, external_id, extraction_json FROM extractions WHERE id = ?",
             (extraction_id,),
         ).fetchone()
         if not row:
@@ -1028,6 +1105,7 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
 
         document_id = row["document_id"]
         external_id = row["external_id"]
+        extraction_json = row["extraction_json"]
     finally:
         conn.close()
 
@@ -1042,8 +1120,84 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
     else:
         reason = request.POST.get("reason", reason)
 
+    start_time = time.time()
+    llm_result = None
+    suggested_category = None
+    final_state = "COMPLETED"
+    error_message = None
+
     try:
-        # Record re-run request in interpretation_runs (audit trail)
+        # Check if LLM is enabled
+        if not _is_llm_globally_enabled():
+            final_state = "SKIPPED"
+            error_message = "LLM is not enabled. Enable it in config or set SPARK_LLM_ENABLED=true"
+        else:
+            # Load config and create SparkAI service
+            from ...config import load_config
+            from ...spark_ai import SparkAIService
+
+            config_path = (
+                Path(getattr(settings, "STATE_DB_PATH", "/app/data/state.db")).parent
+                / "config.yaml"
+            )
+            if not config_path.exists():
+                config_path = Path("/app/config/config.yaml")
+
+            if not config_path.exists():
+                final_state = "ERROR"
+                error_message = "Configuration file not found"
+            else:
+                config = load_config(config_path)
+
+                # Get categories from Firefly
+                firefly_client = _get_firefly_client()
+                categories = []
+                if firefly_client:
+                    try:
+                        cats = firefly_client.list_categories()
+                        categories = [c.name for c in cats]
+                    except Exception as e:
+                        logger.warning(f"Could not fetch categories: {e}")
+
+                if not categories:
+                    final_state = "ERROR"
+                    error_message = "No categories available from Firefly"
+                else:
+                    # Parse the extraction to get transaction details
+                    extraction_data = json.loads(extraction_json) if extraction_json else {}
+                    proposal = extraction_data.get("proposal", {})
+
+                    amount = str(proposal.get("amount", "0"))
+                    date = proposal.get("date", "")
+                    vendor = proposal.get("vendor", "")
+                    description = proposal.get("description", "")
+
+                    # Create and call SparkAI service
+                    ai_service = SparkAIService(store, config, categories)
+
+                    suggestion = ai_service.suggest_category(
+                        amount=amount,
+                        date=date,
+                        vendor=vendor,
+                        description=description,
+                        document_id=document_id,
+                        use_cache=False,  # Force fresh call
+                    )
+
+                    if suggestion:
+                        llm_result = suggestion.to_dict()
+                        suggested_category = suggestion.category
+                        final_state = "COMPLETED"
+                    else:
+                        final_state = "NO_SUGGESTION"
+                        error_message = (
+                            "LLM did not return a suggestion (may be opted out or unavailable)"
+                        )
+
+        # Calculate duration
+        duration_ms = int((time.time() - start_time) * 1000)
+
+        # Record the interpretation run (audit trail)
         store.create_interpretation_run(
             document_id=document_id,
             external_id=external_id,
@@ -1054,30 +1208,58 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
                 "reason": reason,
                 "triggered_by": "user",
             },
-            final_state="PENDING_RERUN",
-            decision_source="USER",
+            final_state=final_state,
+            duration_ms=duration_ms,
+            llm_result=llm_result,
+            suggested_category=suggested_category,
+            decision_source="USER_RERUN",
         )
-
-        # Reset the extraction for re-processing
-        store.reset_extraction_for_review(extraction_id)
 
         if is_ajax:
-            return JsonResponse(
-                {
-                    "success": True,
-                    "message": f"Interpretation queued for re-run. Reason: {reason}",
+            response_data = {
+                "success": final_state in ["COMPLETED", "NO_SUGGESTION"],
+                "state": final_state,
+                "message": f"AI interpretation completed. {f'Suggested: {suggested_category}' if suggested_category else error_message or 'No suggestion returned.'}",
+            }
+            if suggested_category:
+                response_data["suggestion"] = {
+                    "category": suggested_category,
+                    "confidence": llm_result.get("confidence", 0) if llm_result else 0,
                 }
-            )
+            return JsonResponse(response_data)
 
-        messages.success(
-            request,
-            f"Interpretation queued for re-run. Reason: {reason}",
-        )
+        if suggested_category:
+            messages.success(
+                request,
+                f"AI suggested category: {suggested_category}",
+            )
+        else:
+            messages.warning(request, error_message or "AI did not return a suggestion")
+
     except Exception as e:
-        logger.error(f"Error scheduling rerun for extraction {extraction_id}: {e}")
+        logger.error(f"Error running AI interpretation for extraction {extraction_id}: {e}")
+        duration_ms = int((time.time() - start_time) * 1000)
+
+        # Record the failed run
+        store.create_interpretation_run(
+            document_id=document_id,
+            external_id=external_id,
+            pipeline_version="1.0.0",
+            inputs_summary={
+                "action": "rerun_interpretation",
+                "extraction_id": extraction_id,
+                "reason": reason,
+                "triggered_by": "user",
+                "error": str(e),
+            },
+            final_state="ERROR",
+            duration_ms=duration_ms,
+            decision_source="USER_RERUN",
+        )
+
         if is_ajax:
             return JsonResponse({"success": False, "error": str(e)}, status=500)
-        messages.error(request, f"Failed to schedule re-run: {e}")
+        messages.error(request, f"AI interpretation failed: {e}")
 
     return redirect("detail", extraction_id=extraction_id)
 
@@ -2251,6 +2433,133 @@ def unlinked_transactions(request: HttpRequest) -> HttpResponse:
         **_get_external_urls(request.user if hasattr(request, "user") else None),
     }
     return render(request, "review/unlinked_transactions.html", context)
+
+
+# Global state for Firefly sync background job
+_firefly_sync_status = {
+    "running": False,
+    "progress": "",
+    "result": None,
+    "error": None,
+    "synced_count": 0,
+}
+
+
+@login_required
+@require_http_methods(["POST"])
+def sync_firefly_transactions(request: HttpRequest) -> HttpResponse:
+    """
+    Sync transactions from Firefly III into local cache.
+
+    This fetches recent transactions from Firefly and stores them in the
+    local cache for matching with Paperless documents.
+    """
+    global _firefly_sync_status
+    from datetime import timedelta
+    from pathlib import Path
+
+    if _firefly_sync_status["running"]:
+        messages.warning(request, "Firefly sync is already running!")
+        return redirect("reconciliation_list")
+
+    # Get sync parameters from form
+    days = int(request.POST.get("days", 90))
+    type_filter = request.POST.get("type_filter", "")  # Empty = all types
+
+    def do_sync():
+        global _firefly_sync_status
+        _firefly_sync_status = {
+            "running": True,
+            "progress": "Connecting to Firefly...",
+            "result": None,
+            "error": None,
+            "synced_count": 0,
+        }
+
+        try:
+            from datetime import date
+
+            from ...config import load_config
+
+            config_path = (
+                Path(getattr(settings, "STATE_DB_PATH", "/app/data/state.db")).parent
+                / "config.yaml"
+            )
+            if not config_path.exists():
+                config_path = Path("/app/config/config.yaml")
+
+            config = load_config(config_path)
+
+            firefly = FireflyClient(
+                base_url=config.firefly.base_url,
+                token=config.firefly.token,
+            )
+
+            store = _get_store()
+
+            # Calculate date range
+            end_date = date.today()
+            start_date = end_date - timedelta(days=days)
+
+            _firefly_sync_status["progress"] = (
+                f"Fetching transactions from {start_date} to {end_date}..."
+            )
+
+            # Fetch transactions from Firefly
+            transactions = firefly.list_transactions(
+                start_date=start_date.isoformat(),
+                end_date=end_date.isoformat(),
+                type_filter=type_filter if type_filter else None,
+            )
+
+            _firefly_sync_status["progress"] = f"Caching {len(transactions)} transactions..."
+
+            # Store in cache
+            synced = 0
+            for tx in transactions:
+                store.upsert_firefly_cache(
+                    firefly_id=tx.id,
+                    type_=tx.type,
+                    date=tx.date,
+                    amount=tx.amount,
+                    description=tx.description,
+                    external_id=tx.external_id,
+                    internal_reference=tx.internal_reference,
+                    source_account=tx.source_name,
+                    destination_account=tx.destination_name,
+                    notes=tx.notes,
+                    category_name=tx.category_name,
+                    tags=tx.tags,
+                )
+                synced += 1
+
+            _firefly_sync_status["synced_count"] = synced
+            _firefly_sync_status["result"] = f"Successfully synced {synced} transactions"
+            _firefly_sync_status["progress"] = "Done"
+
+        except Exception as e:
+            _firefly_sync_status["error"] = str(e)
+            logger.exception("Firefly sync failed")
+        finally:
+            _firefly_sync_status["running"] = False
+
+    # Run in background thread
+    thread = threading.Thread(target=do_sync)
+    thread.start()
+
+    messages.info(request, "Firefly sync started in background. Refresh to see progress.")
+    return redirect("reconciliation_list")
+
+
+@login_required
+def api_sync_firefly_status(request: HttpRequest) -> JsonResponse:
+    """
+    API endpoint to check Firefly sync status.
+
+    Returns JSON with current sync state for AJAX polling.
+    """
+    global _firefly_sync_status
+    return JsonResponse(_firefly_sync_status)
 
 
 def _get_reconciliation_stats(store: StateStore) -> dict:

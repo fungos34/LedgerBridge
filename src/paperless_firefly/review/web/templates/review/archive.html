@@ -149,6 +149,16 @@
                             </button>
                         </form>
                         {% endif %}
+                        {% if item.status == 'Rejected' and not item.firefly_id %}
+                        <form method="post" action="{% url 'delete_extraction' item.id %}" style="display: inline;">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-sm btn-danger" 
+                                    onclick="return confirm('Permanently delete this extraction? The document in Paperless will not be affected.');"
+                                    title="Delete this extraction permanently">
+                                🗑️ Delete
+                            </button>
+                        </form>
+                        {% endif %}
                     </div>
                 </td>
             </tr>

@@ -141,6 +141,44 @@
     </div>
 </div>
 
+<!-- Firefly Sync Panel -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h2>🔄 Sync Firefly Transactions</h2>
+    </div>
+    <div class="card-body">
+        <form method="post" action="{% url 'sync_firefly_transactions' %}" class="flex gap-2 items-end flex-wrap">
+            {% csrf_token %}
+            <div class="form-group" style="flex: 0 0 auto;">
+                <label for="days">Days to fetch</label>
+                <select id="days" name="days" class="form-input" style="width: 120px;">
+                    <option value="30">Last 30 days</option>
+                    <option value="90" selected>Last 90 days</option>
+                    <option value="180">Last 180 days</option>
+                    <option value="365">Last year</option>
+                </select>
+            </div>
+            <div class="form-group" style="flex: 0 0 auto;">
+                <label for="type_filter">Transaction type</label>
+                <select id="type_filter" name="type_filter" class="form-input" style="width: 140px;">
+                    <option value="">All types</option>
+                    <option value="withdrawal">Withdrawals</option>
+                    <option value="deposit">Deposits</option>
+                    <option value="transfer">Transfers</option>
+                </select>
+            </div>
+            <button type="submit" class="btn btn-primary" id="syncBtn">
+                🔄 Sync from Firefly
+            </button>
+        </form>
+        <div class="form-help mt-2">
+            Fetch transactions from Firefly III to match with your Paperless documents.
+        </div>
+        <div id="syncStatus" style="display: none; margin-top: 0.5rem; padding: 0.5rem; background: var(--gray-50); border-radius: 0.25rem;">
+        </div>
+    </div>
+</div>
+
 <div class="card">
     <div class="card-header">
         <h2>📋 Pending Match Proposals ({{ proposals|length }})</h2>
@@ -251,4 +289,52 @@
         </form>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Poll for sync status
+let syncPollInterval = null;
+
+function checkSyncStatus() {
+    fetch('{% url "api_sync_status" %}')
+        .then(response => response.json())
+        .then(data => {
+            const statusDiv = document.getElementById('syncStatus');
+            const syncBtn = document.getElementById('syncBtn');
+            
+            if (data.running) {
+                statusDiv.style.display = 'block';
+                statusDiv.innerHTML = '<span class="text-primary">⏳ ' + data.progress + '</span>';
+                syncBtn.disabled = true;
+                syncBtn.textContent = '⏳ Syncing...';
+            } else {
+                if (data.error) {
+                    statusDiv.style.display = 'block';
+                    statusDiv.innerHTML = '<span style="color: var(--danger);">❌ Error: ' + data.error + '</span>';
+                } else if (data.result) {
+                    statusDiv.style.display = 'block';
+                    statusDiv.innerHTML = '<span style="color: var(--success);">✓ ' + data.result + '</span>';
+                    // Reload after success to show updated stats
+                    setTimeout(() => window.location.reload(), 2000);
+                }
+                syncBtn.disabled = false;
+                syncBtn.textContent = '🔄 Sync from Firefly';
+                if (syncPollInterval) {
+                    clearInterval(syncPollInterval);
+                    syncPollInterval = null;
+                }
+            }
+        })
+        .catch(err => {
+            console.error('Status check failed:', err);
+        });
+}
+
+// Start polling on page load
+document.addEventListener('DOMContentLoaded', function() {
+    checkSyncStatus();
+    syncPollInterval = setInterval(checkSyncStatus, 2000);
+});
+</script>
 {% endblock %}

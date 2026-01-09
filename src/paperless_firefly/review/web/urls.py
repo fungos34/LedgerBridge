@@ -48,6 +48,11 @@ urlpatterns = [
     path("extraction/<int:extraction_id>/skip/", views.skip_extraction, name="skip"),
     path("extraction/<int:extraction_id>/save/", views.save_extraction, name="save"),
     path("extraction/<int:extraction_id>/reset/", views.reset_extraction, name="reset_extraction"),
+    path(
+        "extraction/<int:extraction_id>/delete/",
+        views.delete_extraction,
+        name="delete_extraction",
+    ),
     # Document proxy (to serve original document from Paperless)
     path("document/<int:document_id>/", views.document_proxy, name="document"),
     path("document/<int:document_id>/thumbnail/", views.document_thumbnail, name="thumbnail"),
@@ -86,6 +91,16 @@ urlpatterns = [
         "reconciliation/link-document/",
         views.link_document_to_transaction,
         name="link_document_to_transaction",
+    ),
+    path(
+        "reconciliation/sync-firefly/",
+        views.sync_firefly_transactions,
+        name="sync_firefly_transactions",
+    ),
+    path(
+        "api/reconciliation/sync-status/",
+        views.api_sync_firefly_status,
+        name="api_sync_status",
     ),
     # ============================================================================
     # LLM Control Routes (Phase 6-7 - SPARK_EVALUATION_REPORT.md 6.7/6.8)

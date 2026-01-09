@@ -1,6 +1,6 @@
 {% extends "review/base.html" %}
 
-{% block title %}LedgerBridge - Home{% endblock %}
+{% block title %}SparkLink - Home{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -149,7 +149,7 @@
         border: 2px solid #86efac;
     }
     
-    .pipeline-node.ledgerbridge {
+    .pipeline-node.sparklink {
         background: #dbeafe;
         border: 2px solid #93c5fd;
     }
@@ -220,7 +220,7 @@
 
 <!-- Pipeline Visualization Diagram -->
 <div class="pipeline-diagram">
-    <h3>🔄 How LedgerBridge Works</h3>
+    <h3>🔄 How SparkLink Works</h3>
     <div class="pipeline-flow">
         <div class="pipeline-node paperless">
             <span class="node-icon">📄</span>
@@ -228,9 +228,9 @@
             <span class="node-desc">Document storage</span>
         </div>
         <span class="pipeline-arrow">→</span>
-        <div class="pipeline-node ledgerbridge">
-            <span class="node-icon">🌉</span>
-            <span class="node-name">LedgerBridge</span>
+        <div class="pipeline-node sparklink">
+            <span class="node-icon">⚡</span>
+            <span class="node-name">SparkLink</span>
             <span class="node-desc">AI Extraction + Review</span>
         </div>
         <span class="pipeline-arrow">→</span>
@@ -277,6 +277,14 @@
         {% else %}
         <span class="service-badge ready">All clear!</span>
         {% endif %}
+    </a>
+    
+    <!-- Reconciliation -->
+    <a href="{% url 'reconciliation_list' %}" class="service-card primary" title="Match documents with bank transactions">
+        <div class="service-icon">🔗</div>
+        <div class="service-title">Reconciliation</div>
+        <div class="service-desc">Match documents with existing bank transactions in Firefly</div>
+        <span class="service-badge" style="background: #dbeafe; color: #1e40af;">Link to Bank Tx</span>
     </a>
     
     <!-- Import Queue -->

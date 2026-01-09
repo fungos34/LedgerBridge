@@ -120,6 +120,37 @@
         display: flex;
         gap: 0.5rem;
         flex-wrap: wrap;
+        row-gap: 0.75rem; /* More space between rows when buttons wrap */
+    }
+    
+    .action-buttons .btn {
+        margin-bottom: 0.25rem; /* Extra margin for wrapped buttons */
+    }
+    
+    /* Quick matches section styling */
+    .quick-matches {
+        margin-top: 1rem;
+        padding-top: 1rem;
+        border-top: 1px solid var(--gray-200);
+    }
+    
+    .quick-match-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.5rem;
+        background: var(--gray-50);
+        border-radius: 0.375rem;
+        margin-bottom: 0.5rem;
+        font-size: 0.875rem;
+    }
+    
+    .quick-match-info {
+        flex: 1;
+    }
+    
+    .quick-match-score {
+        margin-left: 0.5rem;
     }
     
     .confidence-detail {
@@ -622,6 +653,39 @@
                             🔗 Link to Bank Transaction
                         </a>
                     </div>
+                    
+                    <!-- Quick Match Suggestions (shown if matches found) -->
+                    {% if matching_transactions %}
+                    <div class="quick-matches">
+                        <div style="font-size: 0.875rem; font-weight: 500; margin-bottom: 0.5rem; color: var(--gray-700);">
+                            🎯 Quick Match - {{ matching_transactions|length }} potential match{% if matching_transactions|length != 1 %}es{% endif %} found:
+                        </div>
+                        {% for match in matching_transactions|slice:":3" %}
+                        <div class="quick-match-item">
+                            <div class="quick-match-info">
+                                <strong>{{ match.description|default:"(No description)"|truncatechars:40 }}</strong>
+                                <span style="color: var(--gray-500);">
+                                    • {{ match.amount }} • {{ match.date }}
+                                </span>
+                            </div>
+                            <span class="badge quick-match-score {% if match.score >= 80 %}badge-success{% elif match.score >= 60 %}badge-review{% else %}badge-danger{% endif %}">
+                                {{ match.score }}%
+                            </span>
+                            <a href="{% url 'link_document_to_transaction' %}?document_id={{ document_id }}&firefly_id={{ match.firefly_id }}" 
+                               class="btn btn-sm btn-primary"
+                               style="margin-left: 0.5rem;"
+                               onclick="return confirm('Link this document to this transaction?')">
+                                🔗 Link
+                            </a>
+                        </div>
+                        {% endfor %}
+                        {% if matching_transactions|length > 3 %}
+                        <div style="font-size: 0.75rem; color: var(--gray-500); margin-top: 0.5rem;">
+                            <a href="{% url 'reconciliation_list' %}?match_document={{ document_id }}">View all {{ matching_transactions|length }} matches →</a>
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endif %}
                 </div>
             </div>
         </form>
@@ -858,7 +922,9 @@ function rerunInterpretation() {
     fetch('{% url "rerun_interpretation" record.id %}', {
         method: 'POST',
         headers: {
-            'X-CSRFToken': '{{ csrf_token }}'
+            'X-CSRFToken': '{{ csrf_token }}',
+            'X-Requested-With': 'XMLHttpRequest',
+            'Accept': 'application/json'
         }
     })
     .then(response => {
