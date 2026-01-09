@@ -13,7 +13,7 @@ from ..extractors import ExtractorRouter
 from ..firefly_client import FireflyClient
 from ..paperless_client import PaperlessClient
 from ..schemas.dedupe import compute_file_hash
-from ..schemas.firefly_payload import build_firefly_payload
+from ..schemas.firefly_payload import build_firefly_payload_with_splits
 from ..state_store import StateStore
 
 logger = logging.getLogger(__name__)
@@ -405,12 +405,12 @@ def cmd_import(
                     logger.info(f"[{document_id}] Retrying previously failed import")
                     store.delete_import(external_id)
 
-            # Build Firefly payload
+            # Build Firefly payload (handles splits automatically)
             logger.debug(f"Building payload with source_account={default_source_account}")
-            payload = build_firefly_payload(
+            payload = build_firefly_payload_with_splits(
                 ext,
                 default_source_account=default_source_account,
-                paperless_base_url=config.paperless.base_url,
+                paperless_external_url=config.paperless.base_url,
             )
             logger.debug(f"Built payload: {payload.to_json()}")
 

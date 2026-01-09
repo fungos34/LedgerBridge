@@ -9,8 +9,6 @@ Tests cover:
 
 from decimal import Decimal
 
-import pytest
-
 from paperless_firefly.schemas.interpretation_trace import (
     InterpretationTrace,
     LLMUsageRecord,

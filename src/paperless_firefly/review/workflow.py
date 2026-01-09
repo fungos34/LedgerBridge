@@ -128,3 +128,60 @@ class ReviewWorkflow:
             )
 
         return extraction
+
+
+def compute_weighted_category(splits: list[dict]) -> str | None:
+    """
+    Compute the weighted category from split transactions.
+
+    The category with the highest proportion of the total amount is returned.
+    This is used to populate the global category dropdown with a sensible default.
+
+    Args:
+        splits: List of split dicts with 'amount' and 'category' keys.
+               Example: [{'amount': 50.0, 'category': 'Groceries'}, ...]
+
+    Returns:
+        The category with the highest weighted amount, or None if no categories.
+
+    Per AGENT_ARCHITECTURE.md: This is SSOT for weighted category computation.
+    """
+    if not splits:
+        return None
+
+    # Aggregate amounts by category
+    category_amounts: dict[str, float] = {}
+    total_amount = 0.0
+
+    for split in splits:
+        amount = float(split.get("amount", 0) or 0)
+        category = split.get("category")
+
+        if category and amount > 0:
+            category_amounts[category] = category_amounts.get(category, 0) + amount
+        total_amount += amount
+
+    if not category_amounts or total_amount <= 0:
+        return None
+
+    # Find category with highest amount
+    best_category = max(category_amounts.items(), key=lambda x: x[1])
+    return best_category[0]
+
+
+def get_split_categories(splits: list[dict]) -> list[str]:
+    """
+    Get unique categories from split transactions.
+
+    Args:
+        splits: List of split dicts with 'category' keys.
+
+    Returns:
+        List of unique category names (excluding None/empty).
+    """
+    categories = set()
+    for split in splits:
+        category = split.get("category")
+        if category:
+            categories.add(category)
+    return sorted(categories)

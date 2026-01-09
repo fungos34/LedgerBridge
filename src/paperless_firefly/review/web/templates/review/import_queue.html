@@ -1,6 +1,6 @@
 {% extends "review/base.html" %}
 
-{% block title %}Import Queue - LedgerBridge{% endblock %}
+{% block title %}Import Queue - SparkLink{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -269,6 +269,7 @@
                 <th>Vendor</th>
                 <th>Source</th>
                 <th>Status</th>
+                <th>Actions</th>
             </tr>
         </thead>
         <tbody>
@@ -288,6 +289,16 @@
                     <span class="status-badge accepted">Accepted</span>
                     {% elif item.review_decision == 'EDITED' %}
                     <span class="status-badge edited">Edited</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if item.review_decision %}
+                    <form method="post" action="{% url 'reset_extraction' item.id %}" style="display: inline;">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-sm btn-outline" title="Reset to re-review this extraction" onclick="return confirm('Reset this extraction to re-review it?')">
+                            🔄 Reset
+                        </button>
+                    </form>
                     {% endif %}
                 </td>
             </tr>

@@ -20,6 +20,7 @@ urlpatterns = [
     path("logout/", auth_views.LogoutView.as_view(next_page="/login/"), name="logout"),
     path("register/", views.register_user, name="register"),
     path("settings/", views.user_settings, name="settings"),
+    path("change-password/", views.change_password, name="change_password"),
     # Main review queue
     path("review/", views.review_list, name="list"),
     # Archive/History (processed documents)
@@ -50,6 +51,11 @@ urlpatterns = [
     # Document proxy (to serve original document from Paperless)
     path("document/<int:document_id>/", views.document_proxy, name="document"),
     path("document/<int:document_id>/thumbnail/", views.document_thumbnail, name="thumbnail"),
+    path(
+        "api/document/<int:document_id>/status/",
+        views.document_preview_status,
+        name="document_status",
+    ),
     # API endpoints for AJAX
     path("api/extraction/<int:extraction_id>/", views.api_extraction_detail, name="api_detail"),
     path("api/stats/", views.api_stats, name="api_stats"),

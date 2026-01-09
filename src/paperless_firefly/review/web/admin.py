@@ -102,6 +102,6 @@ admin.site.unregister(User)
 admin.site.register(User, UserAdmin)
 
 # Customize admin site header
-admin.site.site_header = "LedgerBridge Administration"
-admin.site.site_title = "LedgerBridge Admin"
+admin.site.site_header = "SparkLink Administration"
+admin.site.site_title = "SparkLink Admin"
 admin.site.index_title = "Dashboard"

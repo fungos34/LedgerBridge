@@ -25,6 +25,32 @@
         min-height: 500px;
     }
     
+    /* Responsive iframe for small screens */
+    @media (max-height: 700px) {
+        .document-viewer {
+            max-height: 50vh;
+            min-height: 300px;
+        }
+    }
+    
+    @media (max-width: 768px) {
+        .document-viewer {
+            position: relative;
+            max-height: 50vh;
+            min-height: 300px;
+        }
+    }
+    
+    .document-viewer.collapsed {
+        height: 60px;
+        min-height: 60px;
+        overflow: hidden;
+    }
+    
+    .document-viewer.collapsed .card-body {
+        display: none;
+    }
+    
     .document-viewer iframe {
         width: 100%;
         height: 100%;
@@ -119,6 +145,46 @@
     .confidence-item-value {
         font-size: 0.875rem;
         font-weight: 600;
+    }
+    
+    /* Required field indicator */
+    .required-star {
+        color: #dc2626;
+        font-weight: bold;
+    }
+    
+    /* Field validation error styling */
+    .form-input.field-error,
+    .form-input:invalid:not(:focus) {
+        border-color: #dc2626;
+        box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.1);
+    }
+    
+    .form-group.has-error .form-label {
+        color: #dc2626;
+    }
+    
+    /* Toggle button for document viewer */
+    .viewer-toggle {
+        background: var(--gray-100);
+        border: 1px solid var(--gray-300);
+        border-radius: 0.25rem;
+        padding: 0.25rem 0.5rem;
+        font-size: 0.75rem;
+        cursor: pointer;
+        display: none;
+    }
+    
+    @media (max-width: 1024px) {
+        .viewer-toggle {
+            display: inline-block;
+        }
+    }
+    
+    /* Tooltip styling */
+    .form-label[title] {
+        cursor: help;
+        border-bottom: 1px dotted var(--gray-400);
     }
     
     .raw-text {
@@ -218,10 +284,13 @@
 
 <div class="review-layout">
     <!-- Document Viewer -->
-    <div class="card document-viewer">
+    <div class="card document-viewer" id="document-viewer">
         <div class="card-header">
             <h2>📄 {{ extraction.paperless_title|truncatechars:40 }}</h2>
             <div class="flex gap-2">
+                <button type="button" class="viewer-toggle" onclick="toggleDocumentViewer()" title="Toggle document preview">
+                    📄 Toggle Preview
+                </button>
                 <a href="{% url 'document' document_id %}?download=1" class="btn btn-sm btn-outline" download>
                     ⬇ Download
                 </a>
@@ -233,6 +302,7 @@
         <div class="card-body" style="height: calc(100% - 60px); padding: 0;">
             <iframe src="{% url 'document' document_id %}" 
                     title="Document Preview"
+                    id="document-iframe"
                     style="width: 100%; height: 100%; border: none;"></iframe>
         </div>
     </div>
@@ -314,7 +384,7 @@
                         <div class="form-section-title">Accounts</div>
                         <div class="form-row">
                             <div class="form-group">
-                                <label class="form-label" for="source_account">Source Account * <span style="color: #dc2626; font-size: 0.8em;">(required)</span></label>
+                                <label class="form-label" for="source_account">Source Account <span class="required-star" style="color: #dc2626;">*</span></label>
                                 <select id="source_account" 
                                         name="source_account" 
                                         class="form-input" 
@@ -329,7 +399,7 @@
                                 {% if not firefly_accounts %}
                                 <div class="form-help" style="color: #dc2626;">⚠️ Could not load Firefly accounts. Check your Firefly API settings.</div>
                                 {% else %}
-                                <div class="form-help">Select the bank account from your Firefly III to debit from</div>
+                                <div class="form-help">The bank account to debit (required for transactions)</div>
                                 {% endif %}
                             </div>
                             <div class="form-group">
@@ -350,20 +420,28 @@
                         <div class="form-section-title">Classification</div>
                         <div class="form-row">
                             <div class="form-group">
-                                <label class="form-label" for="category">
+                                <label class="form-label" for="category" title="The spending category for this transaction (e.g., Groceries, Utilities). Categories help organize your finances.">
                                     Category
                                     {% if llm_suggestion %}
                                     <span class="badge badge-ai" title="AI suggested: {{ llm_suggestion.category }} ({{ llm_suggestion.confidence|floatformat:0 }}% confidence)">
                                         🤖 AI
                                     </span>
+                                    {% elif weighted_category %}
+                                    <span class="badge badge-info" title="Computed from split items">
+                                        📊 From splits
+                                    </span>
                                     {% endif %}
                                 </label>
-                                <input type="text" 
-                                       id="category" 
-                                       name="category" 
-                                       class="form-input" 
-                                       value="{{ proposal.category|default:'' }}"
-                                       placeholder="e.g., Groceries">
+                                <select id="category" 
+                                        name="category" 
+                                        class="form-input">
+                                    <option value="">-- Select Category --</option>
+                                    {% for cat in firefly_categories %}
+                                    <option value="{{ cat.name }}" {% if cat.name == proposal.category or cat.name == weighted_category and not proposal.category %}selected{% endif %}>
+                                        {{ cat.name }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
                                 {% if llm_suggestion %}
                                 <div class="form-help">
                                     AI suggested: <strong>{{ llm_suggestion.category }}</strong>
@@ -371,6 +449,10 @@
                                             onclick="document.getElementById('category').value='{{ llm_suggestion.category }}'">
                                         Use suggestion
                                     </button>
+                                </div>
+                                {% elif weighted_category %}
+                                <div class="form-help">
+                                    Computed from splits: <strong>{{ weighted_category }}</strong>
                                 </div>
                                 {% endif %}
                             </div>
@@ -520,16 +602,16 @@
             <div class="card mt-4">
                 <div class="card-body">
                     <div class="action-buttons">
-                        <button type="submit" class="btn btn-lg btn-success">
+                        <button type="submit" class="btn btn-lg btn-success" title="Save your edits and accept this transaction for import">
                             ✓ Save & Accept
                         </button>
-                        <button type="submit" formaction="{% url 'accept' record.id %}" class="btn btn-lg btn-primary">
+                        <button type="submit" formaction="{% url 'accept' record.id %}" formnovalidate class="btn btn-lg btn-primary" title="Accept the AI-extracted data without changes">
                             ✓ Accept As-Is
                         </button>
-                        <button type="submit" formaction="{% url 'reject' record.id %}" class="btn btn-lg btn-danger">
+                        <button type="submit" formaction="{% url 'reject' record.id %}" formnovalidate class="btn btn-lg btn-danger" title="Reject this document - it won't be imported">
                             ✕ Reject
                         </button>
-                        <button type="submit" formaction="{% url 'skip' record.id %}" class="btn btn-lg btn-secondary">
+                        <button type="submit" formaction="{% url 'skip' record.id %}" formnovalidate class="btn btn-lg btn-secondary" title="Skip for now - review later">
                             Skip →
                         </button>
                     </div>
@@ -759,6 +841,11 @@ function toggleLlmOptOut(enableAi) {
 
 // Re-run interpretation
 function rerunInterpretation() {
+    {% if not llm_globally_enabled %}
+    alert('AI/Ollama is not enabled. Please enable it in Settings to use this feature.');
+    return;
+    {% endif %}
+    
     if (!confirm('Re-run AI interpretation for this document? This will refresh the page with updated suggestions.')) {
         return;
     }
@@ -774,22 +861,75 @@ function rerunInterpretation() {
             'X-CSRFToken': '{{ csrf_token }}'
         }
     })
-    .then(response => response.json())
+    .then(response => {
+        // Check Content-Type before parsing as JSON
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            throw new Error('Server returned non-JSON response. Please try again.');
+        }
+        return response.json();
+    })
     .then(data => {
         if (data.success) {
             // Reload to show updated suggestions
             window.location.reload();
         } else {
-            alert('Failed to re-run interpretation: ' + data.error);
+            alert('Failed to re-run interpretation: ' + (data.error || 'Unknown error'));
             btn.textContent = originalText;
             btn.disabled = false;
         }
     })
     .catch(error => {
-        alert('Network error: ' + error);
+        alert('Network error: ' + error.message);
         btn.textContent = originalText;
         btn.disabled = false;
     });
 }
+
+// Toggle document viewer visibility (for small screens)
+function toggleDocumentViewer() {
+    const viewer = document.getElementById('document-viewer');
+    viewer.classList.toggle('collapsed');
+    const btn = document.querySelector('.viewer-toggle');
+    if (viewer.classList.contains('collapsed')) {
+        btn.textContent = '📄 Show Preview';
+    } else {
+        btn.textContent = '📄 Hide Preview';
+    }
+}
+
+// Form validation with field highlighting
+document.querySelector('form').addEventListener('submit', function(e) {
+    // Only validate for Save & Accept (not for reject/skip which use formnovalidate)
+    if (e.submitter && (e.submitter.getAttribute('formnovalidate') !== null)) {
+        return true;
+    }
+    
+    // Clear previous error states
+    document.querySelectorAll('.form-input.field-error').forEach(el => {
+        el.classList.remove('field-error');
+    });
+    document.querySelectorAll('.form-group.has-error').forEach(el => {
+        el.classList.remove('has-error');
+    });
+    
+    // Check required fields
+    const requiredFields = document.querySelectorAll('[required]');
+    let firstInvalid = null;
+    
+    requiredFields.forEach(field => {
+        if (!field.value || field.value.trim() === '') {
+            field.classList.add('field-error');
+            field.closest('.form-group')?.classList.add('has-error');
+            if (!firstInvalid) firstInvalid = field;
+        }
+    });
+    
+    if (firstInvalid) {
+        e.preventDefault();
+        firstInvalid.focus();
+        firstInvalid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+});
 </script>
 {% endblock %}

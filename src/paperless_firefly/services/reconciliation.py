@@ -774,7 +774,7 @@ class ReconciliationService:
                 return False, "Failed to load extraction data"
 
             # Add manual transaction marker to notes
-            manual_notes = f"MANUAL TRANSACTION - "
+            manual_notes = "MANUAL TRANSACTION - "
             if is_cash:
                 manual_notes += "Cash payment without bank booking. "
             else:

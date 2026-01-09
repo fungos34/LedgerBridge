@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Review{% endblock %} | Paperless → Firefly</title>
+    <title>{% block title %}Review{% endblock %} | SparkLink</title>
     <style>
         :root {
             --primary: #2563eb;
@@ -451,7 +451,7 @@
     <header>
         <div class="container">
             <a href="{% url 'home' %}" style="text-decoration: none; color: inherit;">
-                <h1>🌉 LedgerBridge</h1>
+                <h1>⚡ SparkLink</h1>
             </a>
             <nav class="main-nav">
                 {% if user.is_authenticated %}
@@ -459,16 +459,48 @@
                 <a href="{% url 'list' %}" {% if '/review' in request.path %}class="active"{% endif %}>Review</a>
                 <a href="{% url 'import_queue' %}" {% if '/import' in request.path %}class="active"{% endif %}>Import</a>
                 <a href="{% url 'archive' %}" {% if '/archive' in request.path %}class="active"{% endif %}>Archive</a>
-                <a href="{% url 'settings' %}" {% if '/settings' in request.path %}class="active"{% endif %}>Settings</a>
+                <a href="{% url 'document_browser' %}" {% if '/documents' in request.path %}class="active"{% endif %}>Browse Documents</a>
                 {% endif %}
             </nav>
             <div class="user-menu">
                 {% if user.is_authenticated %}
-                <span class="user-name">{{ user.username }}</span>
-                <form method="post" action="{% url 'logout' %}" style="display: inline;">
-                    {% csrf_token %}
-                    <button type="submit" class="btn btn-sm btn-outline">Logout</button>
-                </form>
+                <div class="user-dropdown" style="position: relative;">
+                    <button type="button" class="btn btn-sm btn-outline user-dropdown-toggle" onclick="toggleUserDropdown()" style="display: flex; align-items: center; gap: 0.5rem;">
+                        <span class="user-name">{{ user.username }}</span>
+                        <span>▼</span>
+                    </button>
+                    <div class="user-dropdown-menu" id="user-dropdown-menu" style="display: none; position: absolute; right: 0; top: 100%; margin-top: 0.25rem; background: white; border: 1px solid var(--gray-200); border-radius: 0.375rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1); min-width: 180px; z-index: 100;">
+                        <a href="{% url 'settings' %}" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">⚙️ Settings</a>
+                        <a href="{% url 'change_password' %}" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">🔑 Change Password</a>
+                        {% if syncthing_url or firefly_importer_url %}
+                        <div style="border-top: 1px solid var(--gray-200); margin: 0.25rem 0;"></div>
+                        {% if syncthing_url %}
+                        <a href="{{ syncthing_url }}" target="_blank" rel="noopener noreferrer" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">🔄 Syncthing</a>
+                        {% endif %}
+                        {% if firefly_importer_url %}
+                        <a href="{{ firefly_importer_url }}" target="_blank" rel="noopener noreferrer" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">📥 Bank Importer</a>
+                        {% endif %}
+                        {% endif %}
+                        <div style="border-top: 1px solid var(--gray-200); margin: 0.25rem 0;"></div>
+                        <form method="post" action="{% url 'logout' %}" style="margin: 0;">
+                            {% csrf_token %}
+                            <button type="submit" style="display: block; width: 100%; text-align: left; padding: 0.5rem 1rem; background: none; border: none; cursor: pointer; color: var(--gray-700); font-size: 0.875rem;">🚪 Logout</button>
+                        </form>
+                    </div>
+                </div>
+                <script>
+                function toggleUserDropdown() {
+                    const menu = document.getElementById('user-dropdown-menu');
+                    menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+                }
+                // Close dropdown when clicking outside
+                document.addEventListener('click', function(e) {
+                    const dropdown = document.querySelector('.user-dropdown');
+                    if (dropdown && !dropdown.contains(e.target)) {
+                        document.getElementById('user-dropdown-menu').style.display = 'none';
+                    }
+                });
+                </script>
                 {% endif %}
             </div>
         </div>

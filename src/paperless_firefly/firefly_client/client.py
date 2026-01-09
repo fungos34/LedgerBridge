@@ -477,13 +477,15 @@ class FireflyClient:
             # Check for more pages
             meta = data.get("meta", {}).get("pagination", {})
             total_pages = meta.get("total_pages", 1)
-            
+
             if page >= total_pages or page >= max_pages:
                 if page >= max_pages and total_pages > max_pages:
                     logger.warning(
                         "Reached max_pages limit (%d) while fetching %s accounts. "
                         "Total pages: %d. Some accounts may not be listed.",
-                        max_pages, account_type, total_pages
+                        max_pages,
+                        account_type,
+                        total_pages,
                     )
                 break
             page += 1

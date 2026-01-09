@@ -17,7 +17,6 @@ All trace events are structured and validated before storage.
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import re
 import time

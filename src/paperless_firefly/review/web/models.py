@@ -37,6 +37,14 @@ class UserProfile(models.Model):
     )
     review_threshold = models.FloatField(default=0.60, help_text="Review confidence threshold")
 
+    # External links for UI quick access (optional)
+    syncthing_url = models.URLField(
+        blank=True, default="", help_text="URL to Syncthing web UI for document syncing"
+    )
+    importer_url = models.URLField(
+        blank=True, default="", help_text="URL to Firefly Importer for bank statement imports"
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

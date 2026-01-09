@@ -515,3 +515,70 @@ class MatchingEngine:
         except Exception:
             pass
         return None
+
+    def score_candidate(
+        self,
+        extraction: dict,
+        candidate: dict,
+    ) -> MatchResult:
+        """
+        Score a single candidate transaction against an extraction.
+
+        This is a standalone entry point for scoring a single candidate,
+        useful for API calls and UI previews where the full find_matches
+        flow is not needed.
+
+        Args:
+            extraction: Dict with amount, date, vendor, description, correspondent
+            candidate: Dict with amount, date, description, destination_account/source_account,
+                       and firefly_id
+
+        Returns:
+            MatchResult with score breakdown
+        """
+        signals: list[MatchScore] = []
+        reasons: list[str] = []
+
+        extracted_amount = self._parse_amount(extraction.get("amount"))
+        extracted_date = self._parse_date(extraction.get("date"))
+        extracted_vendor = extraction.get("vendor") or extraction.get("correspondent")
+        extracted_description = extraction.get("description", "")
+
+        tx_amount = self._parse_amount(candidate.get("amount"))
+        tx_date = self._parse_date(candidate.get("date"))
+        tx_vendor = candidate.get("destination_account") or candidate.get("source_account")
+        tx_description = candidate.get("description", "")
+
+        # Amount matching
+        amount_score = self._score_amount(extracted_amount, tx_amount)
+        signals.append(amount_score)
+        if amount_score.score > 0.5:
+            reasons.append(f"amount_match ({amount_score.detail})")
+
+        # Date matching
+        date_score = self._score_date(extracted_date, tx_date)
+        signals.append(date_score)
+        if date_score.score > 0.5:
+            reasons.append(f"date_close ({date_score.detail})")
+
+        # Description matching
+        desc_score = self._score_description(extracted_description, tx_description)
+        signals.append(desc_score)
+        if desc_score.score > 0.5:
+            reasons.append(f"description_match ({desc_score.detail})")
+
+        # Vendor matching
+        vendor_score = self._score_vendor(extracted_vendor, tx_vendor)
+        signals.append(vendor_score)
+        if vendor_score.score > 0.5:
+            reasons.append(f"vendor_match ({vendor_score.detail})")
+
+        total_score = sum(s.weighted_score for s in signals)
+
+        return MatchResult(
+            firefly_id=candidate.get("firefly_id", 0),
+            document_id=extraction.get("document_id", 0),
+            total_score=total_score,
+            signals=signals,
+            reasons=reasons,
+        )

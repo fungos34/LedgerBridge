@@ -27,9 +27,18 @@ CSRF_TRUSTED_ORIGINS = [
 ]
 
 # Make cookies compatible with HTTPS (browser will drop "secure" cookies otherwise)
-CSRF_COOKIE_SECURE = os.environ.get("DJANGO_CSRF_COOKIE_SECURE", "true").lower() in ("1", "true", "yes", "on")
-SESSION_COOKIE_SECURE = os.environ.get("DJANGO_SESSION_COOKIE_SECURE", "true").lower() in ("1", "true", "yes", "on")
-
+CSRF_COOKIE_SECURE = os.environ.get("DJANGO_CSRF_COOKIE_SECURE", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+SESSION_COOKIE_SECURE = os.environ.get("DJANGO_SESSION_COOKIE_SECURE", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
 
 
 # Application definition

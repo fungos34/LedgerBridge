@@ -89,13 +89,34 @@ def _get_firefly_client(request: HttpRequest | None = None) -> FireflyClient:
     return FireflyClient(base_url=base_url, token=token)
 
 
-def _get_external_urls():
-    """Get external URLs for browser links."""
+def _get_external_urls(user=None):
+    """Get external URLs for browser links.
+
+    Args:
+        user: Optional Django user to get profile-specific URLs.
+
+    Returns:
+        Dict with external URLs (profile URLs override settings defaults).
+    """
+    syncthing_url = getattr(settings, "SYNCTHING_URL", "")
+    importer_url = getattr(settings, "FIREFLY_IMPORTER_URL", "")
+
+    # Check user profile for overrides
+    if user and user.is_authenticated:
+        try:
+            profile = user.profile
+            if profile.syncthing_url:
+                syncthing_url = profile.syncthing_url
+            if profile.importer_url:
+                importer_url = profile.importer_url
+        except Exception:
+            pass  # User may not have profile
+
     return {
         "paperless_url": getattr(settings, "PAPERLESS_EXTERNAL_URL", settings.PAPERLESS_BASE_URL),
         "firefly_url": getattr(settings, "FIREFLY_EXTERNAL_URL", settings.FIREFLY_BASE_URL),
-        "syncthing_url": getattr(settings, "SYNCTHING_URL", ""),
-        "firefly_importer_url": getattr(settings, "FIREFLY_IMPORTER_URL", ""),
+        "syncthing_url": syncthing_url,
+        "firefly_importer_url": importer_url,
     }
 
 
@@ -120,7 +141,7 @@ def landing_page(request: HttpRequest) -> HttpResponse:
     ready_to_import = _get_ready_to_import_count(store)
 
     context = {
-        **_get_external_urls(),
+        **_get_external_urls(request.user if hasattr(request, "user") else None),
         "stats": stats,
         "pending_count": pending_count,
         "ready_to_import": ready_to_import,
@@ -201,6 +222,48 @@ def register_user(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+def change_password(request: HttpRequest) -> HttpResponse:
+    """Change password page."""
+    from django.contrib.auth import update_session_auth_hash
+
+    if request.method == "POST":
+        current_password = request.POST.get("current_password", "")
+        new_password = request.POST.get("new_password", "")
+        confirm_password = request.POST.get("confirm_password", "")
+
+        errors = []
+
+        # Validate current password
+        if not request.user.check_password(current_password):
+            errors.append("Current password is incorrect")
+
+        # Validate new password
+        if not new_password:
+            errors.append("New password is required")
+        elif len(new_password) < 8:
+            errors.append("New password must be at least 8 characters")
+        elif new_password != confirm_password:
+            errors.append("New passwords do not match")
+
+        if errors:
+            for error in errors:
+                messages.error(request, error)
+            return render(request, "review/change_password.html")
+
+        # Update password
+        request.user.set_password(new_password)
+        request.user.save()
+
+        # Keep user logged in after password change
+        update_session_auth_hash(request, request.user)
+
+        messages.success(request, "Password changed successfully!")
+        return redirect("home")
+
+    return render(request, "review/change_password.html")
+
+
+@login_required
 def user_settings(request: HttpRequest) -> HttpResponse:
     """User settings page for configuring API tokens."""
     from .models import UserProfile
@@ -217,6 +280,10 @@ def user_settings(request: HttpRequest) -> HttpResponse:
         profile.default_source_account = request.POST.get(
             "default_source_account", "Checking Account"
         )
+
+        # External links (optional)
+        profile.syncthing_url = request.POST.get("syncthing_url", "")
+        profile.importer_url = request.POST.get("importer_url", "")
 
         try:
             profile.auto_import_threshold = float(request.POST.get("auto_import_threshold", 0.85))
@@ -266,7 +333,7 @@ def user_settings(request: HttpRequest) -> HttpResponse:
         "paperless_status": paperless_status,
         "firefly_status": firefly_status,
         "firefly_accounts": firefly_accounts,
-        **_get_external_urls(),
+        **_get_external_urls(request.user if hasattr(request, "user") else None),
     }
     return render(request, "review/settings.html", context)
 
@@ -314,7 +381,7 @@ def review_list(request: HttpRequest) -> HttpResponse:
         "stats": stats,
         "extraction_status": _extraction_status,
         "debug_mode": _is_debug_mode(),
-        **_get_external_urls(),
+        **_get_external_urls(request.user if hasattr(request, "user") else None),
     }
     return render(request, "review/list.html", context)
 
@@ -378,7 +445,7 @@ def extraction_archive(request: HttpRequest) -> HttpResponse:
     context = {
         "items": items,
         "debug_mode": _is_debug_mode(),
-        **_get_external_urls(),
+        **_get_external_urls(request.user if hasattr(request, "user") else None),
     }
     return render(request, "review/archive.html", context)
 
@@ -599,6 +666,13 @@ def review_detail(request: HttpRequest, extraction_id: int) -> HttpResponse:
             }
         )
 
+    # Compute weighted category from line items (SSOT: workflow.compute_weighted_category)
+    weighted_category = None
+    if line_items_data:
+        from ..workflow import compute_weighted_category
+
+        weighted_category = compute_weighted_category(line_items_data)
+
     context = {
         "record": record,
         "extraction": extraction,
@@ -617,6 +691,7 @@ def review_detail(request: HttpRequest, extraction_id: int) -> HttpResponse:
         # Line items for split transactions
         "line_items": line_items_data,
         "has_line_items": len(line_items_data) > 0,
+        "weighted_category": weighted_category,  # Computed from splits
         # Matching transactions
         "matching_transactions": matching_transactions,
         "has_matches": len(matching_transactions) > 0,
@@ -624,7 +699,7 @@ def review_detail(request: HttpRequest, extraction_id: int) -> HttpResponse:
         "llm_suggestion": llm_suggestion,
         "llm_globally_enabled": llm_globally_enabled,
         "llm_opt_out": record.llm_opt_out,
-        **_get_external_urls(),
+        **_get_external_urls(request.user if hasattr(request, "user") else None),
     }
     return render(request, "review/detail.html", context)
 
@@ -670,6 +745,7 @@ def reset_extraction(request: HttpRequest, extraction_id: int) -> HttpResponse:
     - A document was rejected but should now be imported
     - A document was imported but needs to be updated (reimport)
     - A document was unlisted then relisted
+    - A reviewed item in import queue needs to be re-reviewed
     """
     store = _get_store()
 
@@ -692,6 +768,12 @@ def reset_extraction(request: HttpRequest, extraction_id: int) -> HttpResponse:
     else:
         messages.error(request, "Extraction not found.")
 
+    # Redirect back to referring page (import queue or review list)
+    next_url = (
+        request.POST.get("next") or request.GET.get("next") or request.META.get("HTTP_REFERER")
+    )
+    if next_url and ("import-queue" in next_url or "archive" in next_url):
+        return redirect(next_url)
     return redirect("list")
 
 
@@ -1115,7 +1197,7 @@ def import_queue(request: HttpRequest) -> HttpResponse:
         "recent_imports": recent_imports,
         "import_status": _import_status,
         "debug_mode": _is_debug_mode(),
-        **_get_external_urls(),
+        **_get_external_urls(request.user if hasattr(request, "user") else None),
     }
     return render(request, "review/import_queue.html", context)
 
@@ -1288,6 +1370,83 @@ def run_extract(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+def document_preview_status(request: HttpRequest, document_id: int) -> JsonResponse:
+    """
+    API endpoint to check document availability in Paperless.
+
+    Returns JSON with document status for the frontend to decide how to render.
+    This allows clean separation: JSON API for status, separate endpoint for actual preview.
+
+    Response format:
+    - {"status": "ok", "preview_url": "/document/<id>/"}
+    - {"status": "missing", "message": "...", "actions": [...]}
+    - {"status": "error", "message": "..."}
+    """
+    session = _get_paperless_session(request)
+
+    try:
+        # Check if document exists in Paperless
+        url = f"{settings.PAPERLESS_BASE_URL}/api/documents/{document_id}/"
+        response = session.get(url)
+
+        if response.status_code == 404:
+            return JsonResponse(
+                {
+                    "status": "missing",
+                    "message": (
+                        "This document has been deleted from Paperless. "
+                        "The source file is no longer available in your DMS."
+                    ),
+                    "actions": [
+                        {
+                            "label": "Restore in Paperless",
+                            "description": "Re-upload or restore the document in Paperless-ngx",
+                            "type": "info",
+                        },
+                        {
+                            "label": "Skip this document",
+                            "description": "Skip reviewing this document - it will remain in queue",
+                            "type": "skip",
+                        },
+                        {
+                            "label": "Reject",
+                            "description": "Reject this document to remove it from the review queue",
+                            "type": "reject",
+                        },
+                        {
+                            "label": "Import anyway",
+                            "description": "If you know what this document was, you can still import it",
+                            "type": "proceed",
+                        },
+                    ],
+                    "document_id": document_id,
+                }
+            )
+
+        response.raise_for_status()
+
+        # Document exists, return preview URL
+        from django.urls import reverse
+
+        preview_url = reverse("document", kwargs={"document_id": document_id})
+
+        return JsonResponse(
+            {"status": "ok", "preview_url": preview_url, "document_id": document_id}
+        )
+
+    except requests.RequestException as e:
+        logger.error(f"Error checking document {document_id}: {e}")
+        return JsonResponse(
+            {
+                "status": "error",
+                "message": f"Could not connect to Paperless: {e}",
+                "document_id": document_id,
+            },
+            status=500,
+        )
+
+
+@login_required
 def document_proxy(request: HttpRequest, document_id: int) -> HttpResponse:
     """Proxy the original document from Paperless for viewing."""
     session = _get_paperless_session(request)
@@ -1295,6 +1454,18 @@ def document_proxy(request: HttpRequest, document_id: int) -> HttpResponse:
     force_download = request.GET.get("download", "").lower() in ("1", "true", "yes")
 
     try:
+        # First check if document exists
+        check_url = f"{settings.PAPERLESS_BASE_URL}/api/documents/{document_id}/"
+        check_response = session.get(check_url)
+
+        if check_response.status_code == 404:
+            # Return a user-friendly HTML page for deleted documents
+            return HttpResponse(
+                _render_document_missing_page(document_id),
+                content_type="text/html",
+                status=200,  # 200 so iframe renders it properly
+            )
+
         url = f"{settings.PAPERLESS_BASE_URL}/api/documents/{document_id}/preview/"
         response = session.get(url, stream=True)
 
@@ -1321,7 +1492,107 @@ def document_proxy(request: HttpRequest, document_id: int) -> HttpResponse:
 
     except requests.RequestException as e:
         logger.error(f"Error fetching document {document_id}: {e}")
-        return HttpResponse(f"Error fetching document: {e}", status=502)
+        # Return HTML error page that renders nicely in iframe
+        return HttpResponse(
+            _render_document_error_page(document_id, str(e)),
+            content_type="text/html",
+            status=200,  # 200 so iframe renders it
+        )
+
+
+def _render_document_missing_page(document_id: int) -> str:
+    """Render an HTML page for missing documents (displayed in iframe)."""
+    return f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document Not Found</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            padding: 2rem;
+            background: #fef2f2;
+            color: #991b1b;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: calc(100vh - 4rem);
+            text-align: center;
+        }}
+        .icon {{ font-size: 4rem; margin-bottom: 1rem; }}
+        h1 {{ font-size: 1.5rem; margin-bottom: 0.5rem; }}
+        p {{ color: #7f1d1d; max-width: 400px; line-height: 1.6; }}
+        .actions {{ margin-top: 1.5rem; background: #fff; padding: 1rem; border-radius: 0.5rem; }}
+        .actions h3 {{ font-size: 0.875rem; color: #374151; margin-bottom: 0.5rem; }}
+        .actions ul {{ text-align: left; color: #6b7280; font-size: 0.875rem; padding-left: 1.5rem; }}
+        .actions li {{ margin-bottom: 0.25rem; }}
+    </style>
+</head>
+<body>
+    <div class="icon">📄❌</div>
+    <h1>Document Not Found in Paperless</h1>
+    <p>
+        The source document (ID: {document_id}) has been deleted from Paperless-ngx.
+        The file is no longer available for preview.
+    </p>
+    <div class="actions">
+        <h3>What you can do:</h3>
+        <ul>
+            <li><strong>Restore:</strong> Re-upload or restore the document in Paperless</li>
+            <li><strong>Skip:</strong> Move to the next document for now</li>
+            <li><strong>Reject:</strong> Remove this from the review queue</li>
+            <li><strong>Import anyway:</strong> If you remember the details, proceed with import</li>
+        </ul>
+    </div>
+</body>
+</html>
+"""
+
+
+def _render_document_error_page(document_id: int, error: str) -> str:
+    """Render an HTML page for document fetch errors (displayed in iframe)."""
+    return f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Error Loading Document</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            padding: 2rem;
+            background: #fef3c7;
+            color: #92400e;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: calc(100vh - 4rem);
+            text-align: center;
+        }}
+        .icon {{ font-size: 4rem; margin-bottom: 1rem; }}
+        h1 {{ font-size: 1.5rem; margin-bottom: 0.5rem; }}
+        p {{ color: #78350f; max-width: 400px; line-height: 1.6; }}
+        .error {{ font-family: monospace; font-size: 0.75rem; background: #fff; padding: 0.5rem; border-radius: 0.25rem; margin-top: 1rem; }}
+    </style>
+</head>
+<body>
+    <div class="icon">⚠️</div>
+    <h1>Could Not Load Document</h1>
+    <p>
+        There was a problem connecting to Paperless to load document {document_id}.
+        Please check your Paperless connection and try again.
+    </p>
+    <div class="error">{error}</div>
+</body>
+</html>
+"""
 
 
 @login_required
@@ -1493,7 +1764,7 @@ def document_browser(request: HttpRequest) -> HttpResponse:
         "total_count": total_count,
         "has_prev": page > 1,
         "has_next": page < total_pages,
-        **_get_external_urls(),
+        **_get_external_urls(request.user if hasattr(request, "user") else None),
     }
     return render(request, "review/document_browser.html", context)
 
@@ -1624,7 +1895,7 @@ def reconciliation_list(request: HttpRequest) -> HttpResponse:
         "stats": stats,
         "match_document": match_document_info,
         "debug_mode": _is_debug_mode(),
-        **_get_external_urls(),
+        **_get_external_urls(request.user if hasattr(request, "user") else None),
     }
     return render(request, "review/reconciliation_list.html", context)
 
@@ -1694,7 +1965,7 @@ def reconciliation_detail(request: HttpRequest, proposal_id: int) -> HttpRespons
         "pending_count": len(pending_ids),
         "current_position": current_idx + 1 if current_idx >= 0 else 0,
         "audit_trail": audit_trail,
-        **_get_external_urls(),
+        **_get_external_urls(request.user if hasattr(request, "user") else None),
     }
     return render(request, "review/reconciliation_detail.html", context)
 
@@ -1940,7 +2211,7 @@ def link_document_to_transaction(request: HttpRequest) -> HttpResponse:
         "firefly_id": firefly_id_int,
         "extraction": extraction_record,
         "transaction": tx_cache,
-        **_get_external_urls(),
+        **_get_external_urls(request.user if hasattr(request, "user") else None),
     }
 
     return render(request, "review/link_confirmation.html", context)
@@ -1977,7 +2248,7 @@ def unlinked_transactions(request: HttpRequest) -> HttpResponse:
     context = {
         "transactions": transactions,
         "total_count": len(transactions),
-        **_get_external_urls(),
+        **_get_external_urls(request.user if hasattr(request, "user") else None),
     }
     return render(request, "review/unlinked_transactions.html", context)
 
@@ -2117,7 +2388,7 @@ def audit_trail_list(request: HttpRequest) -> HttpResponse:
         "filter_document": filter_document or "",
         "filter_firefly": filter_firefly or "",
         "filter_source": filter_source or "",
-        **_get_external_urls(),
+        **_get_external_urls(request.user if hasattr(request, "user") else None),
     }
     return render(request, "review/audit_trail_list.html", context)
 
@@ -2188,6 +2459,6 @@ def audit_trail_detail(request: HttpRequest, run_id: int) -> HttpResponse:
         "run_id": run_id,
         "doc_record": doc_record,
         "tx_details": tx_details,
-        **_get_external_urls(),
+        **_get_external_urls(request.user if hasattr(request, "user") else None),
     }
     return render(request, "review/audit_trail_detail.html", context)
