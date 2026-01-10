@@ -48,6 +48,18 @@ def _is_debug_mode() -> bool:
     return getattr(settings, "LEDGERBRIDGE_DEBUG", False)
 
 
+def _get_config_path():
+    """Get the config file path."""
+    from pathlib import Path
+
+    config_path = (
+        Path(getattr(settings, "STATE_DB_PATH", "/app/data/state.db")).parent / "config.yaml"
+    )
+    if not config_path.exists():
+        config_path = Path("/app/config/config.yaml")
+    return config_path
+
+
 def _get_store() -> StateStore:
     """Get the state store instance."""
     return StateStore(settings.STATE_DB_PATH)
@@ -1150,8 +1162,8 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
             else:
                 config = load_config(config_path)
 
-                # Get categories from Firefly
-                firefly_client = _get_firefly_client()
+                # Get categories from Firefly (pass request for user credentials)
+                firefly_client = _get_firefly_client(request)
                 categories = []
                 if firefly_client:
                     try:
@@ -2329,7 +2341,7 @@ def run_auto_match(request: HttpRequest) -> JsonResponse:
 
     try:
         firefly_client = _get_firefly_client(request)
-        config = load_config()
+        config = load_config(_get_config_path())
 
         service = ReconciliationService(
             config=config,
@@ -2595,7 +2607,7 @@ def accept_proposal(request: HttpRequest, proposal_id: int) -> HttpResponse:
 
         from ...config import load_config
 
-        config = load_config()
+        config = load_config(_get_config_path())
 
         service = ReconciliationService(
             config=config,
@@ -2705,7 +2717,7 @@ def manual_link(request: HttpRequest) -> HttpResponse:
         firefly_client = _get_firefly_client(request)
         from ...config import load_config
 
-        config = load_config()
+        config = load_config(_get_config_path())
 
         service = ReconciliationService(
             config=config,
@@ -2765,7 +2777,9 @@ def link_document_to_transaction(request: HttpRequest) -> HttpResponse:
         # Perform the actual linking
         try:
             firefly_client = _get_firefly_client(request)
-            config = load_config()
+            from ...config import load_config
+
+            config = load_config(_get_config_path())
 
             service = ReconciliationService(
                 config=config,
