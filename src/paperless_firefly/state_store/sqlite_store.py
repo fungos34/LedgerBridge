@@ -426,6 +426,44 @@ class StateStore:
                     (now, decision, extraction_id),
                 )
 
+    def update_extraction_status(
+        self,
+        extraction_id: int,
+        review_decision: str | None = None,
+        review_state: str | None = None,
+    ) -> bool:
+        """Update extraction status and/or decision.
+
+        Args:
+            extraction_id: The extraction ID to update.
+            review_decision: New review decision (e.g., LINKED, ORPHAN_CONFIRMED).
+            review_state: New review state (e.g., ORPHAN_CONFIRMED).
+
+        Returns:
+            True if updated, False if extraction not found.
+        """
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+        with self._transaction() as conn:
+            updates = ["reviewed_at = ?"]
+            params = [now]
+
+            if review_decision is not None:
+                updates.append("review_decision = ?")
+                params.append(review_decision)
+
+            if review_state is not None:
+                updates.append("review_state = ?")
+                params.append(review_state)
+
+            params.append(extraction_id)
+
+            cursor = conn.execute(
+                f"UPDATE extractions SET {', '.join(updates)} WHERE id = ?",
+                params,
+            )
+            return cursor.rowcount > 0
+
     def update_extraction_llm_opt_out(
         self,
         extraction_id: int,

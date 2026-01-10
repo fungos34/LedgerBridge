@@ -2018,6 +2018,424 @@ def toggle_document_listing(request: HttpRequest, document_id: int) -> HttpRespo
 # ============================================================================
 
 
+def _get_reconciliation_dashboard_stats(store: StateStore) -> dict:
+    """Get comprehensive statistics for reconciliation dashboard."""
+    conn = store._get_connection()
+    try:
+        # Paperless documents pending (not yet linked or confirmed orphan)
+        paperless_pending = conn.execute(
+            """SELECT COUNT(*) FROM extractions
+               WHERE review_state IN ('PENDING', 'NEEDS_REVIEW', 'AUTO_APPROVED')
+               AND review_decision NOT IN ('IMPORTED', 'LINKED', 'ORPHAN_CONFIRMED')
+               OR review_decision IS NULL"""
+        ).fetchone()[0]
+
+        # Firefly transactions unmatched
+        firefly_unmatched = conn.execute(
+            "SELECT COUNT(*) FROM firefly_cache WHERE match_status = 'UNMATCHED'"
+        ).fetchone()[0]
+
+        # Auto-matched
+        auto_matched = conn.execute(
+            "SELECT COUNT(*) FROM match_proposals WHERE status = 'AUTO_MATCHED'"
+        ).fetchone()[0]
+
+        # Pending review
+        pending_review = conn.execute(
+            "SELECT COUNT(*) FROM match_proposals WHERE status = 'PENDING'"
+        ).fetchone()[0]
+
+        # Ready to import (linked or orphan confirmed)
+        ready_import = conn.execute(
+            """SELECT COUNT(*) FROM extractions
+               WHERE review_decision IN ('LINKED', 'ORPHAN_CONFIRMED')
+               AND review_state != 'IMPORTED'"""
+        ).fetchone()[0]
+
+        # Orphan confirmed
+        orphan_confirmed = conn.execute(
+            "SELECT COUNT(*) FROM extractions WHERE review_decision = 'ORPHAN_CONFIRMED'"
+        ).fetchone()[0]
+
+        return {
+            "paperless_pending": paperless_pending or 0,
+            "firefly_unmatched": firefly_unmatched or 0,
+            "auto_matched": auto_matched or 0,
+            "pending_review": pending_review or 0,
+            "ready_import": ready_import or 0,
+            "orphan_confirmed": orphan_confirmed or 0,
+        }
+    except Exception as e:
+        logger.error(f"Error getting dashboard stats: {e}")
+        return {
+            "paperless_pending": 0,
+            "firefly_unmatched": 0,
+            "auto_matched": 0,
+            "pending_review": 0,
+            "ready_import": 0,
+            "orphan_confirmed": 0,
+        }
+    finally:
+        conn.close()
+
+
+@login_required
+def reconciliation_dashboard(request: HttpRequest) -> HttpResponse:
+    """
+    Unified reconciliation dashboard showing both Paperless documents
+    and Firefly transactions side-by-side.
+
+    This is the main reconciliation view that:
+    - Shows all pending Paperless documents (not yet linked/imported)
+    - Shows all unmatched Firefly transactions
+    - Allows manual selection and linking
+    - Shows match proposals and suggestions
+    - Supports orphan confirmation
+    """
+    store = _get_store()
+
+    # Get dashboard stats
+    stats = _get_reconciliation_dashboard_stats(store)
+
+    # Get filter tags from user profile or default
+    filter_tags = "finance/inbox"
+    if request.user.is_authenticated:
+        try:
+            profile = request.user.profile
+            if hasattr(profile, "paperless_filter_tags") and profile.paperless_filter_tags:
+                filter_tags = profile.paperless_filter_tags
+        except Exception:
+            pass
+
+    # Get Paperless records (extractions not yet linked/imported)
+    paperless_records = []
+    conn = store._get_connection()
+    try:
+        rows = conn.execute(
+            """SELECT e.*, pd.title as doc_title
+               FROM extractions e
+               LEFT JOIN paperless_documents pd ON e.document_id = pd.document_id
+               WHERE e.review_state NOT IN ('IMPORTED')
+               ORDER BY e.created_at DESC
+               LIMIT 100"""
+        ).fetchall()
+
+        for row in rows:
+            record = dict(row)
+            try:
+                extraction_data = json.loads(record.get("extraction_json", "{}"))
+                proposal = extraction_data.get("proposal", {})
+                record["title"] = (
+                    extraction_data.get("paperless_title")
+                    or record.get("doc_title")
+                    or f"Doc #{record['document_id']}"
+                )
+                record["amount"] = proposal.get("amount")
+                record["currency"] = proposal.get("currency", "EUR")
+                record["date"] = proposal.get("date")
+                record["vendor"] = proposal.get("destination_name") or extraction_data.get(
+                    "vendor_name"
+                )
+                record["category"] = proposal.get("category")
+                record["status"] = record.get("review_state", "PENDING")
+                record["linked"] = record.get("review_decision") == "LINKED"
+                record["orphan_confirmed"] = record.get("review_decision") == "ORPHAN_CONFIRMED"
+
+                # Get match suggestions for this document
+                suggestions = conn.execute(
+                    """SELECT fc.firefly_id, fc.description, mp.match_score
+                       FROM match_proposals mp
+                       JOIN firefly_cache fc ON mp.firefly_id = fc.firefly_id
+                       WHERE mp.document_id = ? AND mp.status = 'PENDING'
+                       ORDER BY mp.match_score DESC LIMIT 5""",
+                    (record["document_id"],),
+                ).fetchall()
+                record["match_suggestions"] = [
+                    {
+                        "firefly_id": s["firefly_id"],
+                        "description": s["description"],
+                        "confidence": int(s["match_score"] * 100),
+                    }
+                    for s in suggestions
+                ]
+
+            except (json.JSONDecodeError, TypeError):
+                record["title"] = f"Document #{record['document_id']}"
+                record["match_suggestions"] = []
+
+            paperless_records.append(record)
+
+    except Exception as e:
+        logger.error(f"Error loading paperless records: {e}")
+    finally:
+        conn.close()
+
+    # Get Firefly records (cached transactions)
+    firefly_records = []
+    conn = store._get_connection()
+    try:
+        rows = conn.execute(
+            """SELECT * FROM firefly_cache
+               ORDER BY date DESC
+               LIMIT 100"""
+        ).fetchall()
+
+        for row in rows:
+            record = dict(row)
+            record["linked"] = record.get("match_status") == "CONFIRMED"
+            record["orphan_confirmed"] = record.get("match_status") == "ORPHAN_CONFIRMED"
+            record["category"] = record.get("category_name")
+            record["linked_document_id"] = record.get("matched_document_id")
+            firefly_records.append(record)
+
+    except Exception as e:
+        logger.error(f"Error loading firefly records: {e}")
+    finally:
+        conn.close()
+
+    # Get pending proposals for the bottom table
+    pending_proposals = store.get_pending_proposals()
+    for p in pending_proposals:
+        p["score_pct"] = p.get("match_score", 0) * 100
+
+    context = {
+        "stats": stats,
+        "filter_tags": filter_tags,
+        "paperless_records": paperless_records,
+        "firefly_records": firefly_records,
+        "pending_proposals": pending_proposals,
+        "selected_match": None,  # Will be populated if a match is being reviewed
+        **_get_external_urls(request.user if hasattr(request, "user") else None),
+    }
+
+    return render(request, "review/reconciliation_dashboard.html", context)
+
+
+@login_required
+@require_http_methods(["POST"])
+def confirm_orphan(request: HttpRequest) -> HttpResponse:
+    """
+    Confirm a record as an orphan (no matching partner).
+
+    This marks either:
+    - A Paperless document without a matching Firefly transaction (e.g., cash payment)
+    - A Firefly transaction without a matching Paperless document (e.g., no receipt)
+
+    The record will be marked as ready for import without a link.
+    """
+    record_type = request.POST.get("record_type")
+    record_id = request.POST.get("record_id")
+    reason = request.POST.get("orphan_reason", "other")
+    confirm = request.POST.get("confirm_orphan")
+
+    if not confirm:
+        messages.error(request, "You must confirm that no match exists")
+        return redirect("reconciliation_dashboard")
+
+    if not record_type or not record_id:
+        messages.error(request, "Missing record information")
+        return redirect("reconciliation_dashboard")
+
+    store = _get_store()
+
+    try:
+        record_id_int = int(record_id)
+
+        if record_type == "paperless":
+            # Update extraction to mark as orphan confirmed
+            extraction = store.get_extraction_by_document(record_id_int)
+            if extraction:
+                store.update_extraction_status(
+                    extraction.id,
+                    review_decision="ORPHAN_CONFIRMED",
+                    review_state="ORPHAN_CONFIRMED",
+                )
+
+                # Record in audit trail
+                store.create_interpretation_run(
+                    document_id=record_id_int,
+                    firefly_id=None,
+                    external_id=None,
+                    pipeline_version="1.0.0",
+                    inputs_summary={
+                        "action": "orphan_confirmed",
+                        "reason": reason,
+                        "record_type": "paperless",
+                    },
+                    final_state="ORPHAN_CONFIRMED",
+                    decision_source="USER",
+                    firefly_write_action=None,
+                )
+
+                messages.success(
+                    request,
+                    f"Document #{record_id_int} confirmed as orphan (no matching bank transaction)",
+                )
+
+        elif record_type == "firefly":
+            # Update firefly cache to mark as orphan confirmed
+            conn = store._get_connection()
+            try:
+                conn.execute(
+                    "UPDATE firefly_cache SET match_status = 'ORPHAN_CONFIRMED' WHERE firefly_id = ?",
+                    (record_id_int,),
+                )
+                conn.commit()
+
+                # Record in audit trail
+                store.create_interpretation_run(
+                    document_id=None,
+                    firefly_id=record_id_int,
+                    external_id=None,
+                    pipeline_version="1.0.0",
+                    inputs_summary={
+                        "action": "orphan_confirmed",
+                        "reason": reason,
+                        "record_type": "firefly",
+                    },
+                    final_state="ORPHAN_CONFIRMED",
+                    decision_source="USER",
+                    firefly_write_action=None,
+                )
+
+                messages.success(
+                    request,
+                    f"Transaction #{record_id_int} confirmed as orphan (no matching document)",
+                )
+
+            finally:
+                conn.close()
+
+    except Exception as e:
+        logger.error(f"Error confirming orphan: {e}")
+        messages.error(request, f"Error: {e}")
+
+    return redirect("reconciliation_dashboard")
+
+
+@login_required
+@require_http_methods(["POST"])
+def run_auto_match(request: HttpRequest) -> JsonResponse:
+    """
+    Run the automatic matching algorithm on all pending records.
+
+    This creates match proposals for Paperless documents that match
+    Firefly transactions based on amount, date, and other criteria.
+    """
+    from ...config import load_config
+    from ...services.reconciliation import ReconciliationService
+
+    store = _get_store()
+
+    try:
+        firefly_client = _get_firefly_client(request)
+        config = load_config()
+
+        service = ReconciliationService(
+            config=config,
+            state_store=store,
+            firefly_client=firefly_client,
+        )
+
+        result = service.run_reconciliation(dry_run=False)
+
+        return JsonResponse(
+            {
+                "success": result.success,
+                "proposals_created": result.proposals_created,
+                "auto_linked": result.auto_linked,
+                "errors": result.errors,
+            }
+        )
+
+    except Exception as e:
+        logger.exception(f"Error running auto-match: {e}")
+        return JsonResponse({"success": False, "error": str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["POST"])
+def sync_paperless(request: HttpRequest) -> HttpResponse:
+    """
+    Sync documents from Paperless into local state for reconciliation.
+
+    Fetches documents matching the configured filter tags and
+    runs extraction on new ones.
+    """
+
+    from ...paperless_client import PaperlessClient
+
+    store = _get_store()
+
+    try:
+        # Get filter tags
+        tags = request.POST.get("tags", "finance/inbox")
+
+        # Create Paperless client
+        paperless = PaperlessClient(
+            base_url=settings.PAPERLESS_BASE_URL,
+            token=settings.PAPERLESS_TOKEN,
+        )
+
+        # Fetch documents with matching tags (not archived)
+        documents = paperless.list_documents(
+            tags=tags.split(",") if tags else None,
+            is_inbox_item=True,  # Only unarchived
+        )
+
+        synced = 0
+        for doc in documents[:50]:  # Limit to 50 per sync
+            doc_id = doc.get("id")
+            if not doc_id:
+                continue
+
+            # Skip if already processed
+            if store.get_extraction_by_document(doc_id):
+                continue
+
+            # Store document record
+            store.upsert_document(
+                document_id=doc_id,
+                source_hash=f"paperless-{doc_id}",
+                title=doc.get("title"),
+                tags=doc.get("tags", []),
+            )
+
+            # Run extraction (simplified - just store basic info)
+            extraction_data = {
+                "paperless_title": doc.get("title"),
+                "paperless_id": doc_id,
+                "proposal": {
+                    "description": doc.get("title", ""),
+                    "date": doc.get("created"),
+                },
+            }
+
+            external_id = generate_external_id(
+                {
+                    "paperless_id": doc_id,
+                    "title": doc.get("title"),
+                }
+            )
+
+            store.save_extraction(
+                document_id=doc_id,
+                external_id=external_id,
+                extraction_json=json.dumps(extraction_data),
+                overall_confidence=0.5,
+                review_state="PENDING",
+            )
+            synced += 1
+
+        messages.success(request, f"Synced {synced} documents from Paperless")
+
+    except Exception as e:
+        logger.exception(f"Error syncing Paperless: {e}")
+        messages.error(request, f"Error syncing: {e}")
+
+    return redirect("reconciliation_dashboard")
+
+
 @login_required
 def reconciliation_list(request: HttpRequest) -> HttpResponse:
     """

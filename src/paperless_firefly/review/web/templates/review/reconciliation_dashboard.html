@@ -1,0 +1,1006 @@
+{% extends "review/base.html" %}
+
+{% block title %}Reconciliation Dashboard - SparkLink{% endblock %}
+
+{% block extra_css %}
+<style>
+    .dashboard-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1.5rem;
+        margin-bottom: 1.5rem;
+    }
+    
+    @media (max-width: 1200px) {
+        .dashboard-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+    
+    .panel {
+        background: white;
+        border-radius: 0.5rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        overflow: hidden;
+    }
+    
+    .panel-header {
+        padding: 1rem 1.25rem;
+        border-bottom: 1px solid var(--gray-200);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: var(--gray-50);
+    }
+    
+    .panel-header h2 {
+        font-size: 1rem;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    .panel-header .count {
+        background: var(--gray-200);
+        padding: 0.125rem 0.5rem;
+        border-radius: 9999px;
+        font-size: 0.75rem;
+        font-weight: 500;
+    }
+    
+    .panel-body {
+        max-height: 600px;
+        overflow-y: auto;
+    }
+    
+    .record-list {
+        list-style: none;
+    }
+    
+    .record-item {
+        padding: 1rem 1.25rem;
+        border-bottom: 1px solid var(--gray-100);
+        cursor: pointer;
+        transition: background 0.15s;
+    }
+    
+    .record-item:hover {
+        background: var(--gray-50);
+    }
+    
+    .record-item.selected {
+        background: #dbeafe;
+        border-left: 3px solid var(--primary);
+    }
+    
+    .record-item.linked {
+        background: #dcfce7;
+        border-left: 3px solid var(--success);
+    }
+    
+    .record-item.orphan-confirmed {
+        background: #fef3c7;
+        border-left: 3px solid var(--warning);
+    }
+    
+    .record-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 0.5rem;
+    }
+    
+    .record-title {
+        font-weight: 600;
+        font-size: 0.875rem;
+        color: var(--gray-900);
+        max-width: 250px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    
+    .record-amount {
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-weight: 600;
+        color: var(--gray-900);
+    }
+    
+    .record-amount.negative {
+        color: var(--danger);
+    }
+    
+    .record-meta {
+        font-size: 0.75rem;
+        color: var(--gray-500);
+        display: flex;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+    }
+    
+    .record-status {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        padding: 0.125rem 0.5rem;
+        border-radius: 9999px;
+        font-size: 0.625rem;
+        font-weight: 500;
+        text-transform: uppercase;
+    }
+    
+    .status-pending { background: #fef3c7; color: #92400e; }
+    .status-review { background: #dbeafe; color: #1d4ed8; }
+    .status-linked { background: #dcfce7; color: #166534; }
+    .status-orphan { background: #fee2e2; color: #991b1b; }
+    .status-ready { background: #d1fae5; color: #065f46; }
+    
+    .category-badge {
+        background: var(--gray-100);
+        padding: 0.125rem 0.375rem;
+        border-radius: 0.25rem;
+        font-size: 0.625rem;
+        color: var(--gray-700);
+    }
+    
+    /* Matching Panel */
+    .match-panel {
+        background: white;
+        border-radius: 0.5rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        margin-bottom: 1.5rem;
+    }
+    
+    .match-panel-header {
+        padding: 1rem 1.25rem;
+        background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+        color: white;
+    }
+    
+    .match-panel-header h2 {
+        font-size: 1rem;
+        font-weight: 600;
+        margin-bottom: 0.25rem;
+    }
+    
+    .match-panel-header p {
+        font-size: 0.75rem;
+        opacity: 0.9;
+    }
+    
+    .match-content {
+        padding: 1.5rem;
+    }
+    
+    .match-sides {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        gap: 1rem;
+        align-items: start;
+    }
+    
+    .match-side {
+        background: var(--gray-50);
+        border-radius: 0.5rem;
+        padding: 1rem;
+    }
+    
+    .match-side h3 {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        color: var(--gray-500);
+        margin-bottom: 0.75rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    .match-arrow {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 1rem;
+        color: var(--gray-400);
+    }
+    
+    .match-arrow .confidence {
+        font-size: 0.75rem;
+        color: var(--gray-500);
+        margin-top: 0.5rem;
+    }
+    
+    .match-actions {
+        display: flex;
+        gap: 0.75rem;
+        margin-top: 1.5rem;
+        padding-top: 1rem;
+        border-top: 1px solid var(--gray-200);
+        justify-content: center;
+    }
+    
+    /* Orphan Confirmation */
+    .orphan-section {
+        margin-top: 1rem;
+        padding: 1rem;
+        background: #fef3c7;
+        border-radius: 0.5rem;
+        border: 1px dashed #d97706;
+    }
+    
+    .orphan-section h4 {
+        font-size: 0.875rem;
+        color: #92400e;
+        margin-bottom: 0.5rem;
+    }
+    
+    .orphan-section p {
+        font-size: 0.75rem;
+        color: #92400e;
+        margin-bottom: 0.75rem;
+    }
+    
+    .orphan-checkbox {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    .orphan-checkbox input {
+        width: 1.25rem;
+        height: 1.25rem;
+    }
+    
+    .orphan-checkbox label {
+        font-size: 0.875rem;
+        font-weight: 500;
+    }
+    
+    /* Sync Controls */
+    .sync-bar {
+        display: flex;
+        gap: 1rem;
+        align-items: center;
+        padding: 1rem 1.25rem;
+        background: var(--gray-50);
+        border-bottom: 1px solid var(--gray-200);
+        flex-wrap: wrap;
+    }
+    
+    .sync-bar form {
+        display: flex;
+        gap: 0.5rem;
+        align-items: center;
+    }
+    
+    .sync-status {
+        font-size: 0.75rem;
+        padding: 0.25rem 0.75rem;
+        background: white;
+        border-radius: 0.25rem;
+        border: 1px solid var(--gray-200);
+    }
+    
+    .sync-status.syncing {
+        background: #dbeafe;
+        border-color: #93c5fd;
+        color: #1d4ed8;
+    }
+    
+    /* Stats Bar */
+    .stats-bar {
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+    }
+    
+    @media (max-width: 1024px) {
+        .stats-bar {
+            grid-template-columns: repeat(3, 1fr);
+        }
+    }
+    
+    .stat-card {
+        background: white;
+        border-radius: 0.5rem;
+        padding: 1rem;
+        text-align: center;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+    
+    .stat-card .value {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: var(--gray-900);
+    }
+    
+    .stat-card .label {
+        font-size: 0.625rem;
+        color: var(--gray-500);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+    
+    .stat-card.paperless .value { color: #7c3aed; }
+    .stat-card.firefly .value { color: #059669; }
+    .stat-card.matched .value { color: var(--primary); }
+    .stat-card.pending .value { color: var(--warning); }
+    .stat-card.ready .value { color: var(--success); }
+    .stat-card.orphan .value { color: #dc2626; }
+    
+    /* Empty state */
+    .empty-panel {
+        padding: 3rem;
+        text-align: center;
+        color: var(--gray-500);
+    }
+    
+    .empty-panel h3 {
+        margin-bottom: 0.5rem;
+    }
+    
+    /* Tabs */
+    .panel-tabs {
+        display: flex;
+        gap: 0;
+        border-bottom: 1px solid var(--gray-200);
+        background: var(--gray-50);
+    }
+    
+    .panel-tab {
+        padding: 0.75rem 1rem;
+        font-size: 0.75rem;
+        font-weight: 500;
+        color: var(--gray-500);
+        border-bottom: 2px solid transparent;
+        cursor: pointer;
+        transition: all 0.15s;
+    }
+    
+    .panel-tab:hover {
+        color: var(--gray-700);
+        background: white;
+    }
+    
+    .panel-tab.active {
+        color: var(--primary);
+        border-bottom-color: var(--primary);
+        background: white;
+    }
+    
+    /* Quick match suggestions */
+    .quick-matches {
+        padding: 0.75rem 1.25rem;
+        background: #eff6ff;
+        border-bottom: 1px solid #dbeafe;
+    }
+    
+    .quick-matches h4 {
+        font-size: 0.75rem;
+        color: #1d4ed8;
+        margin-bottom: 0.5rem;
+    }
+    
+    .quick-match-list {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+    }
+    
+    .quick-match-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.375rem;
+        padding: 0.375rem 0.75rem;
+        background: white;
+        border: 1px solid #93c5fd;
+        border-radius: 0.375rem;
+        font-size: 0.75rem;
+        color: #1d4ed8;
+        cursor: pointer;
+        transition: all 0.15s;
+    }
+    
+    .quick-match-btn:hover {
+        background: #1d4ed8;
+        color: white;
+    }
+    
+    .quick-match-btn .confidence {
+        background: #dbeafe;
+        padding: 0.125rem 0.25rem;
+        border-radius: 0.25rem;
+        font-size: 0.625rem;
+    }
+    
+    /* Split preview */
+    .split-preview {
+        margin-top: 0.75rem;
+        padding: 0.75rem;
+        background: white;
+        border-radius: 0.375rem;
+        border: 1px solid var(--gray-200);
+    }
+    
+    .split-preview h5 {
+        font-size: 0.625rem;
+        text-transform: uppercase;
+        color: var(--gray-500);
+        margin-bottom: 0.5rem;
+    }
+    
+    .split-line {
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.75rem;
+        padding: 0.25rem 0;
+        border-bottom: 1px dashed var(--gray-100);
+    }
+    
+    .split-line:last-child {
+        border-bottom: none;
+    }
+    
+    .split-line .category {
+        color: var(--gray-500);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Stats Bar -->
+<div class="stats-bar">
+    <div class="stat-card paperless">
+        <div class="value">{{ stats.paperless_pending }}</div>
+        <div class="label">📄 Paperless Pending</div>
+    </div>
+    <div class="stat-card firefly">
+        <div class="value">{{ stats.firefly_unmatched }}</div>
+        <div class="label">🏦 Firefly Unmatched</div>
+    </div>
+    <div class="stat-card matched">
+        <div class="value">{{ stats.auto_matched }}</div>
+        <div class="label">🔗 Auto-Matched</div>
+    </div>
+    <div class="stat-card pending">
+        <div class="value">{{ stats.pending_review }}</div>
+        <div class="label">⏳ Pending Review</div>
+    </div>
+    <div class="stat-card ready">
+        <div class="value">{{ stats.ready_import }}</div>
+        <div class="label">✅ Ready to Import</div>
+    </div>
+    <div class="stat-card orphan">
+        <div class="value">{{ stats.orphan_confirmed }}</div>
+        <div class="label">📍 Orphan Confirmed</div>
+    </div>
+</div>
+
+<!-- Sync Controls -->
+<div class="card mb-4">
+    <div class="sync-bar">
+        <form method="post" action="{% url 'sync_paperless' %}" class="sync-form">
+            {% csrf_token %}
+            <input type="hidden" name="tags" value="{{ filter_tags }}">
+            <button type="submit" class="btn btn-outline btn-sm" id="syncPaperlessBtn">
+                📄 Sync Paperless
+            </button>
+        </form>
+        <form method="post" action="{% url 'sync_firefly_transactions' %}" class="sync-form">
+            {% csrf_token %}
+            <select name="days" class="form-input" style="width: 110px; padding: 0.375rem;">
+                <option value="30">30 days</option>
+                <option value="90" selected>90 days</option>
+                <option value="180">180 days</option>
+            </select>
+            <button type="submit" class="btn btn-outline btn-sm" id="syncFireflyBtn">
+                🏦 Sync Firefly
+            </button>
+        </form>
+        <div id="syncStatus" class="sync-status" style="display: none;"></div>
+        <div style="flex: 1;"></div>
+        <button type="button" class="btn btn-primary btn-sm" onclick="runAutoMatch()">
+            🔄 Run Auto-Match
+        </button>
+        <a href="{% url 'audit_trail_list' %}" class="btn btn-outline btn-sm">
+            📋 Audit Trail
+        </a>
+    </div>
+</div>
+
+{% if selected_match %}
+<!-- Active Match Panel -->
+<div class="match-panel">
+    <div class="match-panel-header">
+        <h2>🔗 Match Review</h2>
+        <p>Review and confirm the proposed match between Paperless document and Firefly transaction</p>
+    </div>
+    <div class="match-content">
+        <div class="match-sides">
+            <!-- Paperless Side -->
+            <div class="match-side">
+                <h3>📄 Paperless Document</h3>
+                <div class="record-header">
+                    <span class="record-title">{{ selected_match.paperless.title }}</span>
+                    <span class="record-amount">{{ selected_match.paperless.amount }} {{ selected_match.paperless.currency }}</span>
+                </div>
+                <div class="record-meta">
+                    <span>📅 {{ selected_match.paperless.date }}</span>
+                    <span>🏢 {{ selected_match.paperless.vendor }}</span>
+                </div>
+                {% if selected_match.paperless.splits %}
+                <div class="split-preview">
+                    <h5>Line Items Detected</h5>
+                    {% for split in selected_match.paperless.splits %}
+                    <div class="split-line">
+                        <span>{{ split.description }}</span>
+                        <span>{{ split.amount }} <span class="category">{{ split.category }}</span></span>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+                <div style="margin-top: 0.75rem;">
+                    <a href="{% url 'detail' selected_match.paperless.document_id %}" class="btn btn-outline btn-sm">
+                        Edit Details →
+                    </a>
+                </div>
+            </div>
+            
+            <!-- Arrow / Confidence -->
+            <div class="match-arrow">
+                <span style="font-size: 2rem;">⟷</span>
+                <div class="confidence">
+                    {{ selected_match.confidence }}% match
+                </div>
+                <div style="font-size: 0.625rem; color: var(--gray-400); margin-top: 0.25rem;">
+                    {% for reason in selected_match.reasons %}
+                    <span>{{ reason }}</span>{% if not forloop.last %}, {% endif %}
+                    {% endfor %}
+                </div>
+            </div>
+            
+            <!-- Firefly Side -->
+            <div class="match-side">
+                <h3>🏦 Firefly Transaction</h3>
+                <div class="record-header">
+                    <span class="record-title">{{ selected_match.firefly.description }}</span>
+                    <span class="record-amount {% if selected_match.firefly.amount < 0 %}negative{% endif %}">
+                        {{ selected_match.firefly.amount }} EUR
+                    </span>
+                </div>
+                <div class="record-meta">
+                    <span>📅 {{ selected_match.firefly.date }}</span>
+                    <span>🏦 {{ selected_match.firefly.source_account }} → {{ selected_match.firefly.destination_account }}</span>
+                </div>
+                {% if selected_match.firefly.category %}
+                <div style="margin-top: 0.5rem;">
+                    <span class="category-badge">{{ selected_match.firefly.category }}</span>
+                </div>
+                {% endif %}
+                <div style="margin-top: 0.75rem;">
+                    {% if external_urls.firefly_url %}
+                    <a href="{{ external_urls.firefly_url }}/transactions/show/{{ selected_match.firefly.id }}" 
+                       target="_blank" class="btn btn-outline btn-sm">
+                        View in Firefly ↗
+                    </a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        
+        <div class="match-actions">
+            <form method="post" action="{% url 'accept_proposal' selected_match.proposal_id %}">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-success">
+                    ✓ Confirm Link
+                </button>
+            </form>
+            <form method="post" action="{% url 'reject_proposal' selected_match.proposal_id %}">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-danger">
+                    ✕ Reject Match
+                </button>
+            </form>
+            <button type="button" class="btn btn-outline" onclick="rerunAI({{ selected_match.paperless.document_id }})">
+                🤖 Re-run AI
+            </button>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Main Dashboard Grid -->
+<div class="dashboard-grid">
+    <!-- Paperless Documents Panel -->
+    <div class="panel">
+        <div class="panel-header">
+            <h2>📄 Paperless Documents <span class="count">{{ paperless_records|length }}</span></h2>
+        </div>
+        <div class="panel-tabs">
+            <div class="panel-tab active" data-filter="all" data-panel="paperless">All</div>
+            <div class="panel-tab" data-filter="pending" data-panel="paperless">Pending</div>
+            <div class="panel-tab" data-filter="linked" data-panel="paperless">Linked</div>
+            <div class="panel-tab" data-filter="orphan" data-panel="paperless">Orphan</div>
+        </div>
+        <div class="panel-body" id="paperlessPanel">
+            {% if paperless_records %}
+            <ul class="record-list">
+                {% for record in paperless_records %}
+                <li class="record-item {% if record.linked %}linked{% endif %} {% if record.orphan_confirmed %}orphan-confirmed{% endif %}"
+                    data-id="{{ record.document_id }}"
+                    data-type="paperless"
+                    data-status="{{ record.status }}"
+                    onclick="selectRecord(this, 'paperless', {{ record.document_id }})">
+                    <div class="record-header">
+                        <span class="record-title" title="{{ record.title }}">{{ record.title|truncatechars:35 }}</span>
+                        <span class="record-amount">{{ record.amount|default:"—" }} {{ record.currency|default:"EUR" }}</span>
+                    </div>
+                    <div class="record-meta">
+                        <span>📅 {{ record.date|default:"No date" }}</span>
+                        <span>🏢 {{ record.vendor|default:"Unknown" }}</span>
+                        {% if record.category %}
+                        <span class="category-badge">{{ record.category }}</span>
+                        {% endif %}
+                    </div>
+                    <div style="margin-top: 0.5rem; display: flex; justify-content: space-between; align-items: center;">
+                        <span class="record-status {% if record.linked %}status-linked{% elif record.orphan_confirmed %}status-orphan{% elif record.status == 'NEEDS_REVIEW' %}status-review{% else %}status-pending{% endif %}">
+                            {% if record.linked %}✓ Linked{% elif record.orphan_confirmed %}📍 Orphan{% elif record.status == 'NEEDS_REVIEW' %}👁 Review{% else %}⏳ Pending{% endif %}
+                        </span>
+                        {% if record.match_suggestions %}
+                        <span class="text-xs text-muted">{{ record.match_suggestions|length }} suggestions</span>
+                        {% endif %}
+                    </div>
+                    {% if record.match_suggestions and not record.linked %}
+                    <div class="quick-matches">
+                        <h4>Quick Match Suggestions</h4>
+                        <div class="quick-match-list">
+                            {% for sug in record.match_suggestions|slice:":3" %}
+                            <button class="quick-match-btn" onclick="event.stopPropagation(); quickLink({{ record.document_id }}, {{ sug.firefly_id }})">
+                                {{ sug.description|truncatechars:20 }} <span class="confidence">{{ sug.confidence }}%</span>
+                            </button>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <div class="empty-panel">
+                <h3>📄 No Paperless documents</h3>
+                <p>Sync documents from Paperless to get started</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    
+    <!-- Firefly Transactions Panel -->
+    <div class="panel">
+        <div class="panel-header">
+            <h2>🏦 Firefly Transactions <span class="count">{{ firefly_records|length }}</span></h2>
+        </div>
+        <div class="panel-tabs">
+            <div class="panel-tab active" data-filter="all" data-panel="firefly">All</div>
+            <div class="panel-tab" data-filter="unmatched" data-panel="firefly">Unmatched</div>
+            <div class="panel-tab" data-filter="linked" data-panel="firefly">Linked</div>
+            <div class="panel-tab" data-filter="orphan" data-panel="firefly">Orphan</div>
+        </div>
+        <div class="panel-body" id="fireflyPanel">
+            {% if firefly_records %}
+            <ul class="record-list">
+                {% for tx in firefly_records %}
+                <li class="record-item {% if tx.linked %}linked{% endif %} {% if tx.orphan_confirmed %}orphan-confirmed{% endif %}"
+                    data-id="{{ tx.firefly_id }}"
+                    data-type="firefly"
+                    data-status="{{ tx.match_status }}"
+                    onclick="selectRecord(this, 'firefly', {{ tx.firefly_id }})">
+                    <div class="record-header">
+                        <span class="record-title" title="{{ tx.description }}">{{ tx.description|truncatechars:35 }}</span>
+                        <span class="record-amount {% if tx.amount < 0 %}negative{% endif %}">{{ tx.amount }} EUR</span>
+                    </div>
+                    <div class="record-meta">
+                        <span>📅 {{ tx.date }}</span>
+                        <span>🏦 {{ tx.source_account|default:"—" }}</span>
+                        {% if tx.category %}
+                        <span class="category-badge">{{ tx.category }}</span>
+                        {% endif %}
+                    </div>
+                    <div style="margin-top: 0.5rem; display: flex; justify-content: space-between; align-items: center;">
+                        <span class="record-status {% if tx.linked %}status-linked{% elif tx.orphan_confirmed %}status-orphan{% elif tx.match_status == 'PROPOSED' %}status-review{% else %}status-pending{% endif %}">
+                            {% if tx.linked %}✓ Linked{% elif tx.orphan_confirmed %}📍 Orphan{% elif tx.match_status == 'PROPOSED' %}👁 Proposed{% else %}⏳ Unmatched{% endif %}
+                        </span>
+                        {% if tx.linked_document_id %}
+                        <span class="text-xs text-muted">→ Doc #{{ tx.linked_document_id }}</span>
+                        {% endif %}
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <div class="empty-panel">
+                <h3>🏦 No Firefly transactions</h3>
+                <p>Sync transactions from Firefly to get started</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Orphan Confirmation Panel (shown when a record is selected without match) -->
+<div id="orphanConfirmPanel" class="card mb-4" style="display: none;">
+    <div class="card-header" style="background: #fef3c7;">
+        <h2>📍 Confirm No Match Available</h2>
+    </div>
+    <div class="card-body">
+        <div class="orphan-section" style="background: white;">
+            <h4>Selected: <span id="orphanRecordTitle"></span></h4>
+            <p>
+                If you've searched and there is no matching partner for this record, you can confirm it as an orphan.
+                This will mark it as ready for import without a linked partner.
+            </p>
+            <form method="post" action="{% url 'confirm_orphan' %}" id="orphanForm">
+                {% csrf_token %}
+                <input type="hidden" name="record_type" id="orphanRecordType">
+                <input type="hidden" name="record_id" id="orphanRecordId">
+                <div class="orphan-checkbox">
+                    <input type="checkbox" id="orphanConfirm" name="confirm_orphan" required>
+                    <label for="orphanConfirm">
+                        I confirm there is no matching document/transaction for this record
+                    </label>
+                </div>
+                <div style="margin-top: 1rem;">
+                    <select name="orphan_reason" class="form-input" style="width: auto;" required>
+                        <option value="">-- Select reason --</option>
+                        <option value="cash_payment">Cash payment (no bank record)</option>
+                        <option value="no_receipt">No receipt/bill documented</option>
+                        <option value="manual_entry">Manual/adjusted entry</option>
+                        <option value="other">Other reason</option>
+                    </select>
+                </div>
+                <div style="margin-top: 1rem;">
+                    <button type="submit" class="btn btn-warning">
+                        📍 Confirm as Orphan
+                    </button>
+                    <button type="button" class="btn btn-outline" onclick="hideOrphanPanel()">
+                        Cancel
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Pending Proposals (compact list) -->
+{% if pending_proposals %}
+<div class="card">
+    <div class="card-header">
+        <h2>⏳ Pending Match Proposals <span class="count">{{ pending_proposals|length }}</span></h2>
+        <a href="{% url 'reconciliation_detail' pending_proposals.0.id %}" class="btn btn-primary btn-sm">
+            Review First →
+        </a>
+    </div>
+    <div style="max-height: 300px; overflow-y: auto;">
+        <table>
+            <thead>
+                <tr>
+                    <th>Score</th>
+                    <th>Document</th>
+                    <th>Transaction</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in pending_proposals|slice:":10" %}
+                <tr>
+                    <td>
+                        <span class="text-mono">{{ p.score_pct|floatformat:0 }}%</span>
+                    </td>
+                    <td>
+                        <strong>{{ p.doc_title|truncatechars:25 }}</strong>
+                        <div class="text-xs text-muted">{{ p.doc_amount|default:"—" }}</div>
+                    </td>
+                    <td>
+                        {{ p.tx_description|truncatechars:25 }}
+                        <div class="text-xs text-muted">{{ p.tx_amount }} • {{ p.tx_date }}</div>
+                    </td>
+                    <td>
+                        <div class="flex gap-1">
+                            <a href="{% url 'reconciliation_detail' p.id %}" class="btn btn-outline btn-sm">👁</a>
+                            <form method="post" action="{% url 'accept_proposal' p.id %}" style="display:inline;">
+                                {% csrf_token %}
+                                <button class="btn btn-success btn-sm">✓</button>
+                            </form>
+                            <form method="post" action="{% url 'reject_proposal' p.id %}" style="display:inline;">
+                                {% csrf_token %}
+                                <button class="btn btn-danger btn-sm">✕</button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let selectedPaperless = null;
+let selectedFirefly = null;
+
+function selectRecord(element, type, id) {
+    // Remove previous selection of same type
+    document.querySelectorAll(`.record-item[data-type="${type}"].selected`).forEach(el => {
+        el.classList.remove('selected');
+    });
+    
+    // Add selection
+    element.classList.add('selected');
+    
+    if (type === 'paperless') {
+        selectedPaperless = id;
+    } else {
+        selectedFirefly = id;
+    }
+    
+    // If both selected, show link option
+    if (selectedPaperless && selectedFirefly) {
+        showLinkOption();
+    } else {
+        // Show orphan panel option for single selection
+        showOrphanOption(type, id, element.querySelector('.record-title').textContent);
+    }
+}
+
+function showLinkOption() {
+    // Redirect to link confirmation
+    window.location.href = `{% url 'link_document_to_transaction' %}?document_id=${selectedPaperless}&firefly_id=${selectedFirefly}`;
+}
+
+function showOrphanOption(type, id, title) {
+    document.getElementById('orphanConfirmPanel').style.display = 'block';
+    document.getElementById('orphanRecordType').value = type;
+    document.getElementById('orphanRecordId').value = id;
+    document.getElementById('orphanRecordTitle').textContent = title;
+    document.getElementById('orphanConfirm').checked = false;
+}
+
+function hideOrphanPanel() {
+    document.getElementById('orphanConfirmPanel').style.display = 'none';
+}
+
+function quickLink(documentId, fireflyId) {
+    if (confirm('Link this document to the selected transaction?')) {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '{% url "manual_link" %}';
+        form.innerHTML = `
+            <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+            <input type="hidden" name="document_id" value="${documentId}">
+            <input type="hidden" name="firefly_id" value="${fireflyId}">
+        `;
+        document.body.appendChild(form);
+        form.submit();
+    }
+}
+
+function rerunAI(documentId) {
+    fetch(`/extraction/${documentId}/rerun-interpretation/`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'X-Requested-With': 'XMLHttpRequest',
+            'Accept': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('AI interpretation re-run successfully!');
+            location.reload();
+        } else {
+            alert('Error: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(err => alert('Failed to re-run AI: ' + err));
+}
+
+function runAutoMatch() {
+    fetch('{% url "run_auto_match" %}', {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}',
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(`Auto-match complete: ${data.proposals_created} proposals created, ${data.auto_linked} auto-linked`);
+            location.reload();
+        } else {
+            alert('Error: ' + (data.error || 'Unknown error'));
+        }
+    });
+}
+
+// Tab filtering
+document.querySelectorAll('.panel-tab').forEach(tab => {
+    tab.addEventListener('click', function() {
+        const panel = this.dataset.panel;
+        const filter = this.dataset.filter;
+        
+        // Update active tab
+        document.querySelectorAll(`.panel-tab[data-panel="${panel}"]`).forEach(t => t.classList.remove('active'));
+        this.classList.add('active');
+        
+        // Filter records
+        const panelEl = panel === 'paperless' ? document.getElementById('paperlessPanel') : document.getElementById('fireflyPanel');
+        panelEl.querySelectorAll('.record-item').forEach(item => {
+            const status = item.dataset.status;
+            if (filter === 'all') {
+                item.style.display = '';
+            } else if (filter === 'pending' && (status === 'PENDING' || status === 'NEEDS_REVIEW')) {
+                item.style.display = '';
+            } else if (filter === 'linked' && item.classList.contains('linked')) {
+                item.style.display = '';
+            } else if (filter === 'orphan' && item.classList.contains('orphan-confirmed')) {
+                item.style.display = '';
+            } else if (filter === 'unmatched' && status === 'UNMATCHED') {
+                item.style.display = '';
+            } else {
+                item.style.display = 'none';
+            }
+        });
+    });
+});
+
+// Sync status polling (only when sync is active)
+let syncPolling = false;
+
+function checkSyncStatus() {
+    fetch('{% url "api_sync_status" %}')
+        .then(response => response.json())
+        .then(data => {
+            const statusDiv = document.getElementById('syncStatus');
+            
+            if (data.running) {
+                statusDiv.style.display = 'block';
+                statusDiv.className = 'sync-status syncing';
+                statusDiv.textContent = '⏳ ' + data.progress;
+                if (!syncPolling) {
+                    syncPolling = true;
+                    setTimeout(checkSyncStatus, 2000);
+                }
+            } else {
+                syncPolling = false;
+                if (data.error) {
+                    statusDiv.style.display = 'block';
+                    statusDiv.className = 'sync-status';
+                    statusDiv.innerHTML = '<span style="color:var(--danger);">❌ ' + data.error + '</span>';
+                } else if (data.result) {
+                    statusDiv.style.display = 'block';
+                    statusDiv.className = 'sync-status';
+                    statusDiv.innerHTML = '<span style="color:var(--success);">✓ ' + data.result + '</span>';
+                    // Don't auto-reload, let user click refresh
+                } else {
+                    statusDiv.style.display = 'none';
+                }
+            }
+        })
+        .catch(() => {
+            syncPolling = false;
+        });
+}
+
+// Check once on page load
+document.addEventListener('DOMContentLoaded', function() {
+    checkSyncStatus();
+});
+</script>
+{% endblock %}

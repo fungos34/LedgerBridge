@@ -69,7 +69,8 @@ urlpatterns = [
     # ============================================================================
     # Reconciliation Routes (Phase 3)
     # ============================================================================
-    path("reconciliation/", views.reconciliation_list, name="reconciliation_list"),
+    path("reconciliation/", views.reconciliation_dashboard, name="reconciliation_dashboard"),
+    path("reconciliation/list/", views.reconciliation_list, name="reconciliation_list"),
     path(
         "reconciliation/<int:proposal_id>/",
         views.reconciliation_detail,
@@ -96,6 +97,21 @@ urlpatterns = [
         "reconciliation/sync-firefly/",
         views.sync_firefly_transactions,
         name="sync_firefly_transactions",
+    ),
+    path(
+        "reconciliation/sync-paperless/",
+        views.sync_paperless,
+        name="sync_paperless",
+    ),
+    path(
+        "reconciliation/confirm-orphan/",
+        views.confirm_orphan,
+        name="confirm_orphan",
+    ),
+    path(
+        "reconciliation/run-auto-match/",
+        views.run_auto_match,
+        name="run_auto_match",
     ),
     path(
         "api/reconciliation/sync-status/",
