@@ -60,9 +60,20 @@ def _get_config_path():
     return config_path
 
 
+# Global store instance for singleton pattern
+_store_instance: StateStore | None = None
+_store_lock = threading.Lock()
+
+
 def _get_store() -> StateStore:
-    """Get the state store instance."""
-    return StateStore(settings.STATE_DB_PATH)
+    """Get the state store instance (singleton pattern to avoid repeated migrations)."""
+    global _store_instance
+    if _store_instance is None:
+        with _store_lock:
+            # Double-check locking pattern
+            if _store_instance is None:
+                _store_instance = StateStore(settings.STATE_DB_PATH, run_migrations=True)
+    return _store_instance
 
 
 def _get_paperless_session(request: HttpRequest | None = None) -> requests.Session:
@@ -1567,16 +1578,18 @@ def run_extract(request: HttpRequest) -> HttpResponse:
                     # Cache transactions
                     for tx in transactions:
                         store.upsert_firefly_cache(
-                            firefly_id=tx.get("id"),
-                            type_=tx.get("type", "withdrawal"),
-                            date=tx.get("date"),
-                            amount=tx.get("amount"),
-                            description=tx.get("description"),
-                            source_account=tx.get("source_name"),
-                            destination_account=tx.get("destination_name"),
-                            category_name=tx.get("category_name"),
-                            external_id=tx.get("external_id"),
-                            internal_reference=tx.get("internal_reference"),
+                            firefly_id=tx.id,
+                            type_=tx.type,
+                            date=tx.date,
+                            amount=tx.amount,
+                            description=tx.description,
+                            source_account=tx.source_name,
+                            destination_account=tx.destination_name,
+                            category_name=tx.category_name,
+                            external_id=tx.external_id,
+                            internal_reference=tx.internal_reference,
+                            notes=tx.notes,
+                            tags=tx.tags,
                         )
 
                     _extraction_status[
@@ -2435,15 +2448,15 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
             token=settings.PAPERLESS_TOKEN,
         )
 
-        # Fetch documents with matching tags (not archived)
+        # Fetch documents with matching tags
         documents = paperless.list_documents(
             tags=tags.split(",") if tags else None,
-            is_inbox_item=True,  # Only unarchived
         )
 
         synced = 0
-        for doc in documents[:50]:  # Limit to 50 per sync
-            doc_id = doc.get("id")
+        doc_list = list(documents)[:50]  # Convert generator and limit to 50 per sync
+        for doc in doc_list:
+            doc_id = doc.id
             if not doc_id:
                 continue
 
@@ -2455,24 +2468,24 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
             store.upsert_document(
                 document_id=doc_id,
                 source_hash=f"paperless-{doc_id}",
-                title=doc.get("title"),
-                tags=doc.get("tags", []),
+                title=doc.title,
+                tags=doc.tags,
             )
 
             # Run extraction (simplified - just store basic info)
             extraction_data = {
-                "paperless_title": doc.get("title"),
+                "paperless_title": doc.title,
                 "paperless_id": doc_id,
                 "proposal": {
-                    "description": doc.get("title", ""),
-                    "date": doc.get("created"),
+                    "description": doc.title or "",
+                    "date": doc.created,
                 },
             }
 
             external_id = generate_external_id(
                 {
                     "paperless_id": doc_id,
-                    "title": doc.get("title"),
+                    "title": doc.title,
                 }
             )
 

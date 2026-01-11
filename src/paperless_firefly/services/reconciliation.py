@@ -450,7 +450,9 @@ class ReconciliationService:
             )
             success = self.firefly.update_transaction_linkage(
                 transaction_id=firefly_id,
-                document_id=document_id,
+                external_id=markers.external_id,
+                internal_reference=markers.internal_reference,
+                notes_to_append=markers.notes_marker,
             )
 
             if not success:

@@ -151,12 +151,21 @@ Confidence < 0.60            → Flagged as low-quality, needs careful review
 
 ## 🖥️ Web Review Interface
 
-The web interface provides:
+The web interface provides two main workflows:
 
-- **Document Preview**: Inline iframe showing the original document
-- **Extracted Data**: All fields with individual confidence scores
-- **Editable Fields**: Modify any extracted value before approval
-- **Actions**: Accept (import), Reject (skip), Skip (review later)
+### 1. Review Queue (`/review/`)
+For creating **new transactions** from documents:
+- Document preview with extracted data
+- Confidence scores for each field
+- Edit, Accept, Reject, or Skip actions
+
+### 2. Reconciliation Dashboard (`/reconciliation/`)
+For linking documents to **existing bank transactions**:
+- Side-by-side view of Paperless documents and Firefly transactions
+- Manual or automatic matching
+- Orphan confirmation for unmatched items
+
+See [docs/WORKFLOW.md](docs/WORKFLOW.md) for the complete workflow guide.
 
 Access at http://localhost:8080 when running the review server.
 
