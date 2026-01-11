@@ -83,12 +83,21 @@ TEMPLATES = [
 # Database for Django auth
 # Use a separate SQLite file for user management
 AUTH_DB_PATH = os.environ.get("AUTH_DB_PATH", "/app/data/auth.db")
+STATE_DB_PATH_FOR_DJANGO = os.environ.get("STATE_DB_PATH", "/app/data/state.db")
+
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": AUTH_DB_PATH,
-    }
+    },
+    "state_store": {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": STATE_DB_PATH_FOR_DJANGO,
+    },
 }
+
+# Database router for state store models
+DATABASE_ROUTERS = ["paperless_firefly.review.web.db_router.StateStoreRouter"]
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
