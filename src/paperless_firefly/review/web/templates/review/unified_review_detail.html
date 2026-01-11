@@ -509,6 +509,11 @@
                 {{ linked_record.title|truncatechars:40 }}
                 {% endif %}
             </div>
+            <div style="margin-top: 0.75rem;">
+                <button type="button" class="btn btn-outline btn-sm" onclick="unlinkRecord()" title="Remove this linkage">
+                    🔓 Unlink
+                </button>
+            </div>
         </div>
         {% endif %}
         
@@ -537,8 +542,8 @@
                 </div>
                 <div class="suggestion-meta">
                     {{ suggestion.amount }} • {{ suggestion.date }}
-                    {% if suggestion.vendor or suggestion.destination %}
-                    • {{ suggestion.vendor|default:suggestion.destination }}
+                    {% if suggestion.vendor or suggestion.destination_account %}
+                    • {{ suggestion.vendor|default:suggestion.destination_account }}
                     {% endif %}
                 </div>
                 <div class="suggestion-actions">
@@ -663,6 +668,38 @@ function loadMoreSuggestions() {
     })
     .catch(error => {
         console.error('Error loading suggestions:', error);
+    });
+}
+
+function unlinkRecord() {
+    if (!confirm('Remove the linkage between these records? This will set the record back to "pending" status.')) {
+        return;
+    }
+    
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    
+    fetch('{% url "api_unlink" %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken
+        },
+        body: JSON.stringify({
+            record_type: recordType,
+            record_id: recordId
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(data.message);
+            location.reload();
+        } else {
+            alert('Error: ' + data.error);
+        }
+    })
+    .catch(error => {
+        alert('Error removing link: ' + error);
     });
 }
 </script>

@@ -2450,7 +2450,7 @@ def confirm_orphan(request: HttpRequest) -> HttpResponse:
 
 @login_required
 @require_http_methods(["POST"])
-def run_auto_match(request: HttpRequest) -> JsonResponse:
+def run_auto_match(request: HttpRequest) -> HttpResponse:
     """
     Run the automatic matching algorithm on all pending records.
 
@@ -2474,18 +2474,17 @@ def run_auto_match(request: HttpRequest) -> JsonResponse:
 
         result = service.run_reconciliation(dry_run=False)
 
-        return JsonResponse(
-            {
-                "success": result.success,
-                "proposals_created": result.proposals_created,
-                "auto_linked": result.auto_linked,
-                "errors": result.errors,
-            }
-        )
+        if result.success:
+            msg = f"Auto-match complete: {result.proposals_created} proposals created, {result.auto_linked} auto-linked"
+            messages.success(request, msg)
+        else:
+            messages.error(request, f"Auto-match completed with errors: {', '.join(result.errors)}")
 
     except Exception as e:
         logger.exception(f"Error running auto-match: {e}")
-        return JsonResponse({"success": False, "error": str(e)}, status=500)
+        messages.error(request, f"Error running auto-match: {e}")
+    
+    return redirect("unified_review_list")
 
 
 @login_required
@@ -3980,5 +3979,88 @@ def api_quick_link(request: HttpRequest) -> JsonResponse:
     
     except Exception as e:
         logger.error(f"Error creating quick link: {e}")
+        return JsonResponse({"success": False, "error": str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["POST"])
+def api_unlink(request: HttpRequest) -> JsonResponse:
+    """API endpoint to remove a linkage between records.
+    
+    This sets the linkage back to PENDING status, allowing re-linking.
+    """
+    store = _get_store()
+    
+    try:
+        data = json.loads(request.body)
+        record_type = data.get("record_type")
+        record_id = data.get("record_id")
+        
+        if not record_type or not record_id:
+            return JsonResponse({
+                "success": False,
+                "error": "record_type and record_id required"
+            }, status=400)
+        
+        record_id = int(record_id)
+        linkage = None
+        
+        if record_type == "paperless":
+            # Get extraction by document ID
+            extraction = store.get_extraction_by_document(record_id)
+            if extraction:
+                linkage = store.get_linkage_by_extraction(extraction.id)
+        elif record_type == "firefly":
+            linkage = store.get_linkage_by_firefly_id(record_id)
+        else:
+            return JsonResponse({
+                "success": False,
+                "error": f"Invalid record_type: {record_type}"
+            }, status=400)
+        
+        if not linkage:
+            return JsonResponse({
+                "success": False,
+                "error": "No linkage found for this record"
+            }, status=404)
+        
+        # Reset the linkage to PENDING
+        store.update_linkage_type(
+            linkage_id=linkage["id"],
+            link_type="PENDING",
+            linked_by="USER_UNLINKED",
+        )
+        
+        # If it was a Paperless extraction, reset the match status
+        if record_type == "paperless" and linkage.get("firefly_id"):
+            store.update_firefly_match_status(
+                firefly_id=linkage["firefly_id"],
+                status="UNMATCHED",
+                document_id=None,
+            )
+        elif record_type == "firefly" and linkage.get("document_id"):
+            # Clear the matched_document_id in firefly_cache
+            conn = store._get_connection()
+            try:
+                conn.execute(
+                    "UPDATE firefly_cache SET match_status = 'UNMATCHED', matched_document_id = NULL WHERE firefly_id = ?",
+                    (record_id,)
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        
+        return JsonResponse({
+            "success": True,
+            "message": "Linkage removed. Record is back to pending status."
+        })
+        
+    except json.JSONDecodeError:
+        return JsonResponse({
+            "success": False,
+            "error": "Invalid JSON body"
+        }, status=400)
+    except Exception as e:
+        logger.error(f"Error removing link: {e}")
         return JsonResponse({"success": False, "error": str(e)}, status=500)
 

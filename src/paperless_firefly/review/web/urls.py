@@ -141,6 +141,11 @@ urlpatterns = [
         views.api_quick_link,
         name="api_quick_link",
     ),
+    path(
+        "api/unlink/",
+        views.api_unlink,
+        name="api_unlink",
+    ),
     # ============================================================================
     # LLM Control Routes (Phase 6-7 - SPARK_EVALUATION_REPORT.md 6.7/6.8)
     # ============================================================================
