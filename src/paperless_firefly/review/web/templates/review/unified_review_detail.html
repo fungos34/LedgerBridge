@@ -1,14 +1,24 @@
 {% extends "review/base.html" %}
 
 {% block title %}Review: {{ record.title|truncatechars:40 }} - SparkLink{% endblock %}
+{% block pending_count %}{{ pending_count }}{% endblock %}
 
 {% block extra_css %}
 <style>
     .review-layout {
         display: grid;
-        grid-template-columns: 1fr 400px;
+        grid-template-columns: 1fr 1fr 400px;
         gap: 1.5rem;
         align-items: start;
+    }
+    
+    @media (max-width: 1400px) {
+        .review-layout {
+            grid-template-columns: 1fr 400px;
+        }
+        .document-viewer {
+            display: none;
+        }
     }
     
     @media (max-width: 1024px) {
@@ -77,6 +87,115 @@
         }
     }
     
+    /* Document Viewer */
+    .document-viewer {
+        position: sticky;
+        top: 1rem;
+        height: calc(100vh - 8rem);
+        min-height: 500px;
+    }
+    
+    .document-viewer.collapsed {
+        height: 60px;
+        min-height: 60px;
+        overflow: hidden;
+    }
+    
+    .document-viewer.collapsed .card-body {
+        display: none;
+    }
+    
+    .document-viewer iframe {
+        width: 100%;
+        height: 100%;
+        border: none;
+        border-radius: 0.375rem;
+    }
+    
+    .viewer-toggle {
+        background: var(--gray-100);
+        border: 1px solid var(--gray-300);
+        border-radius: 0.25rem;
+        padding: 0.25rem 0.5rem;
+        font-size: 0.75rem;
+        cursor: pointer;
+        display: none;
+    }
+    
+    @media (max-width: 1400px) {
+        .viewer-toggle {
+            display: inline-block;
+        }
+    }
+    
+    /* Confidence Details */
+    .confidence-detail {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 0.5rem;
+        margin-top: 0.5rem;
+    }
+    
+    .confidence-item {
+        text-align: center;
+        padding: 0.5rem;
+        background: var(--gray-50);
+        border-radius: 0.25rem;
+    }
+    
+    .confidence-item-label {
+        font-size: 0.625rem;
+        text-transform: uppercase;
+        color: var(--gray-500);
+    }
+    
+    .confidence-item-value {
+        font-size: 0.875rem;
+        font-weight: 600;
+    }
+    
+    /* Required field indicator */
+    .required-star {
+        color: #dc2626;
+        font-weight: bold;
+    }
+    
+    /* Field validation error */
+    .form-input.field-error,
+    .form-input:invalid:not(:focus) {
+        border-color: #dc2626;
+        box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.1);
+    }
+    
+    /* Provenance */
+    .provenance-info {
+        font-size: 0.75rem;
+        color: var(--gray-500);
+    }
+    
+    .provenance-info dt {
+        font-weight: 500;
+        display: inline;
+    }
+    
+    .provenance-info dd {
+        display: inline;
+        margin: 0;
+        margin-right: 1rem;
+    }
+    
+    .raw-text {
+        max-height: 200px;
+        overflow-y: auto;
+        background: var(--gray-50);
+        padding: 0.75rem;
+        border-radius: 0.375rem;
+        font-family: monospace;
+        font-size: 0.75rem;
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+    
     /* Link Section */
     .link-section {
         background: white;
@@ -85,6 +204,8 @@
         overflow: hidden;
         position: sticky;
         top: 1rem;
+        max-height: calc(100vh - 2rem);
+        overflow-y: auto;
     }
     
     .link-header {
@@ -287,11 +408,18 @@
 <div class="nav-buttons">
     <div class="flex gap-2 items-center">
         <a href="{% url 'unified_review_list' %}" class="btn btn-outline">← Back to List</a>
+        {% if prev_id %}
+        <a href="{% url 'unified_review_detail' record_type prev_id %}" class="btn btn-outline">← Previous</a>
+        {% endif %}
         <span class="record-type-badge {{ record_type }}">
             {% if record_type == 'paperless' %}📄 Paperless{% else %}🏦 Firefly{% endif %}
         </span>
     </div>
-    <div class="flex gap-2">
+    <span class="position text-muted text-sm">{{ current_position }} of {{ pending_count }}</span>
+    <div class="flex gap-2 items-center">
+        {% if next_id %}
+        <a href="{% url 'unified_review_detail' record_type next_id %}" class="btn btn-outline">Next →</a>
+        {% endif %}
         <span class="confidence-badge {% if record.confidence >= 80 %}confidence-high{% elif record.confidence >= 50 %}confidence-medium{% else %}confidence-low{% endif %}">
             {{ record.confidence|floatformat:0 }}% confidence
         </span>
@@ -299,6 +427,32 @@
 </div>
 
 <div class="review-layout">
+    {% if record_type == 'paperless' %}
+    <!-- Document Viewer (Paperless only) -->
+    <div class="card document-viewer" id="document-viewer">
+        <div class="card-header">
+            <h2>📄 Document Preview</h2>
+            <div class="flex gap-2">
+                <button type="button" class="viewer-toggle" onclick="toggleDocumentViewer()" title="Toggle document preview">
+                    📄 Toggle
+                </button>
+                <a href="{% url 'document' record.id %}?download=1" class="btn btn-sm btn-outline" download>
+                    ⬇ Download
+                </a>
+                <a href="{{ paperless_url }}/documents/{{ record.id }}/" target="_blank" class="btn btn-sm btn-outline">
+                    Open in Paperless ↗
+                </a>
+            </div>
+        </div>
+        <div class="card-body" style="height: calc(100% - 60px); padding: 0;">
+            <iframe src="{% url 'document' record.id %}" 
+                    title="Document Preview"
+                    id="document-iframe"
+                    style="width: 100%; height: 100%; border: none;"></iframe>
+        </div>
+    </div>
+    {% endif %}
+    
     <!-- Main Form -->
     <div>
         <form method="post" action="{% if record_type == 'paperless' %}{% url 'save' record.extraction_id %}{% endif %}" id="review-form">
@@ -313,7 +467,7 @@
                         <div class="form-section-title">Amount</div>
                         <div class="form-row">
                             <div class="form-group">
-                                <label class="form-label" for="amount">Amount *</label>
+                                <label class="form-label" for="amount">Amount <span class="required-star">*</span></label>
                                 <input type="number" 
                                        id="amount" 
                                        name="amount" 
@@ -322,16 +476,24 @@
                                        step="0.01"
                                        {% if record_type == 'firefly' %}readonly{% endif %}
                                        required>
+                                {% if confidence.amount %}
+                                <div class="form-help">Confidence: {{ confidence.amount|floatformat:0 }}%</div>
+                                {% endif %}
                             </div>
                             <div class="form-group">
-                                <label class="form-label" for="currency">Currency</label>
+                                <label class="form-label" for="currency">Currency <span class="required-star">*</span></label>
                                 <input type="text" 
                                        id="currency" 
                                        name="currency" 
                                        class="form-input" 
                                        value="{{ record.currency }}"
                                        maxlength="3"
-                                       {% if record_type == 'firefly' %}readonly{% endif %}>
+                                       style="text-transform: uppercase;"
+                                       {% if record_type == 'firefly' %}readonly{% endif %}
+                                       required>
+                                {% if confidence.currency %}
+                                <div class="form-help">Confidence: {{ confidence.currency|floatformat:0 }}%</div>
+                                {% endif %}
                             </div>
                         </div>
                     </div>
@@ -340,7 +502,7 @@
                     <div class="form-section">
                         <div class="form-section-title">Date</div>
                         <div class="form-group">
-                            <label class="form-label" for="date">Transaction Date *</label>
+                            <label class="form-label" for="date">Transaction Date <span class="required-star">*</span></label>
                             <input type="date" 
                                    id="date" 
                                    name="date" 
@@ -348,6 +510,9 @@
                                    value="{{ record.date }}"
                                    {% if record_type == 'firefly' %}readonly{% endif %}
                                    required>
+                            {% if confidence.date %}
+                            <div class="form-help">Confidence: {{ confidence.date|floatformat:0 }}%</div>
+                            {% endif %}
                         </div>
                     </div>
                     
@@ -355,7 +520,7 @@
                     <div class="form-section">
                         <div class="form-section-title">Description</div>
                         <div class="form-group">
-                            <label class="form-label" for="description">Description *</label>
+                            <label class="form-label" for="description">Description <span class="required-star">*</span></label>
                             <input type="text" 
                                    id="description" 
                                    name="description" 
@@ -363,6 +528,9 @@
                                    value="{{ record.description }}"
                                    {% if record_type == 'firefly' %}readonly{% endif %}
                                    required>
+                            {% if confidence.description %}
+                            <div class="form-help">Confidence: {{ confidence.description|floatformat:0 }}%</div>
+                            {% endif %}
                         </div>
                     </div>
                     
@@ -371,16 +539,21 @@
                         <div class="form-section-title">Accounts</div>
                         <div class="form-row">
                             <div class="form-group">
-                                <label class="form-label" for="source_account">Source Account</label>
+                                <label class="form-label" for="source_account">Source Account <span class="required-star">*</span></label>
                                 {% if record_type == 'paperless' %}
-                                <select id="source_account" name="source_account" class="form-input">
-                                    <option value="">-- Select --</option>
+                                <select id="source_account" name="source_account" class="form-input" required>
+                                    <option value="">-- Select Source Account --</option>
                                     {% for account in firefly_accounts %}
                                     <option value="{{ account.name }}" {% if account.name == record.source_account %}selected{% endif %}>
-                                        {{ account.name }}
+                                        {{ account.name }} ({{ account.currency_code }})
                                     </option>
                                     {% endfor %}
                                 </select>
+                                {% if not firefly_accounts %}
+                                <div class="form-help" style="color: #dc2626;">⚠️ Could not load Firefly accounts. Check your API settings.</div>
+                                {% else %}
+                                <div class="form-help">The bank account to debit (required for transactions)</div>
+                                {% endif %}
                                 {% else %}
                                 <input type="text" class="form-input" value="{{ record.source_account }}" readonly>
                                 {% endif %}
@@ -392,7 +565,11 @@
                                        name="destination_account" 
                                        class="form-input" 
                                        value="{{ record.vendor|default:record.destination_account|default:'' }}"
+                                       placeholder="e.g., Supermarket"
                                        {% if record_type == 'firefly' %}readonly{% endif %}>
+                                {% if confidence.vendor %}
+                                <div class="form-help">Confidence: {{ confidence.vendor|floatformat:0 }}%</div>
+                                {% endif %}
                             </div>
                         </div>
                     </div>
@@ -436,21 +613,67 @@
                     <div class="form-section">
                         <div class="form-section-title">Transaction Type</div>
                         <div class="form-group">
-                            <select id="transaction_type" name="transaction_type" class="form-input">
+                            <select id="transaction_type" name="transaction_type" class="form-input" required>
                                 <option value="withdrawal" {% if record.transaction_type == 'withdrawal' or record.transaction_type == 'WITHDRAWAL' %}selected{% endif %}>Withdrawal (Expense)</option>
                                 <option value="deposit" {% if record.transaction_type == 'deposit' or record.transaction_type == 'DEPOSIT' %}selected{% endif %}>Deposit (Income)</option>
                                 <option value="transfer" {% if record.transaction_type == 'transfer' or record.transaction_type == 'TRANSFER' %}selected{% endif %}>Transfer</option>
                             </select>
                         </div>
                     </div>
+                    
+                    <!-- Invoice Number -->
+                    <div class="form-section">
+                        <div class="form-section-title">Reference</div>
+                        <div class="form-group">
+                            <label class="form-label" for="invoice_number">Invoice / Receipt Number</label>
+                            <input type="text" 
+                                   id="invoice_number" 
+                                   name="invoice_number" 
+                                   class="form-input" 
+                                   value="{{ record.invoice_number|default:'' }}"
+                                   placeholder="e.g., INV-2024-001">
+                            {% if confidence.invoice_number %}
+                            <div class="form-help">Confidence: {{ confidence.invoice_number|floatformat:0 }}%</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    
+                    <!-- Split Transaction / Line Items -->
+                    <div class="form-section">
+                        <div class="form-section-title">
+                            Split Transaction
+                            <label style="font-weight: normal; font-size: 0.75rem; margin-left: 0.5rem; text-transform: none;">
+                                <input type="checkbox" id="enable_split" onchange="toggleSplitMode(this.checked)">
+                                Enable split booking
+                            </label>
+                        </div>
+                        <div id="split-container" style="display: none;">
+                            <div class="form-help mb-3">
+                                Split this transaction across multiple lines with different categories. 
+                                The sum must equal the total amount above.
+                            </div>
+                            <div id="line-items-container">
+                                <!-- Line items will be added dynamically -->
+                            </div>
+                            <div class="flex gap-2 mt-2">
+                                <button type="button" class="btn btn-sm btn-outline" onclick="addLineItem()">
+                                    + Add Line
+                                </button>
+                                <span id="split-total" class="form-help" style="margin-left: auto; font-weight: 600;"></span>
+                            </div>
+                        </div>
+                        <input type="hidden" id="line_items_json" name="line_items_json" value="">
+                    </div>
                     {% endif %}
                 </div>
                 
                 {% if record_type == 'paperless' %}
                 <div class="action-buttons">
-                    <button type="submit" class="btn btn-success">💾 Save & Approve</button>
+                    <button type="submit" class="btn btn-success" title="Save your edits and accept this transaction">💾 Save & Accept</button>
+                    <button type="submit" formaction="{% url 'accept' record.extraction_id %}" formnovalidate class="btn btn-primary" title="Accept AI-extracted data without changes">✓ Accept As-Is</button>
                     <a href="{% url 'reject' record.extraction_id %}" class="btn btn-danger" 
-                       onclick="return confirm('Reject this extraction?')">❌ Reject</a>
+                       onclick="return confirm('Reject this extraction?')" title="Reject this document">❌ Reject</a>
+                    <button type="submit" formaction="{% url 'skip' record.extraction_id %}" formnovalidate class="btn btn-secondary" title="Skip for now - review later">Skip →</button>
                     {% if record.review_decision %}
                     <a href="{% url 'reset_extraction' record.extraction_id %}" class="btn btn-outline">🔄 Reset</a>
                     {% endif %}
@@ -460,8 +683,109 @@
         </form>
         
         {% if record_type == 'paperless' %}
-        <!-- Document Preview Link -->
+        <!-- AI Settings -->
+        {% if llm_globally_enabled %}
         <div class="card mt-4">
+            <div class="card-header">
+                <h2>🤖 AI Settings</h2>
+            </div>
+            <div class="card-body">
+                <div class="form-row" style="align-items: center; gap: 1rem;">
+                    <div class="form-group" style="flex: 1;">
+                        <label class="form-label" style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                            <input type="checkbox" 
+                                   id="llm_opt_out_checkbox"
+                                   {% if not llm_opt_out %}checked{% endif %}
+                                   onchange="toggleLlmOptOut(this.checked)"
+                                   style="width: 1.25rem; height: 1.25rem;">
+                            <span>Use AI suggestions for this document</span>
+                        </label>
+                        <div class="form-help">
+                            When enabled, AI will assist with category suggestions. Disable to rely only on rule-based extraction.
+                        </div>
+                    </div>
+                    <div>
+                        <button type="button" 
+                                class="btn btn-outline"
+                                onclick="rerunInterpretation()"
+                                title="Re-run AI interpretation for this document">
+                            🔄 Re-run Interpretation
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+        
+        <!-- Confidence Details -->
+        {% if confidence %}
+        <div class="card mt-4">
+            <div class="card-header">
+                <h2>Confidence Scores</h2>
+                <span class="text-mono">{{ confidence.overall|floatformat:0 }}% overall</span>
+            </div>
+            <div class="card-body">
+                <div class="confidence-bar" style="height: 0.75rem; margin-bottom: 1rem;">
+                    <div class="confidence-bar-fill {% if confidence.overall >= 85 %}confidence-high{% elif confidence.overall >= 60 %}confidence-medium{% else %}confidence-low{% endif %}"
+                         style="width: {{ confidence.overall }}%"></div>
+                </div>
+                <div class="confidence-detail">
+                    <div class="confidence-item">
+                        <div class="confidence-item-label">Amount</div>
+                        <div class="confidence-item-value">{{ confidence.amount|floatformat:0 }}%</div>
+                    </div>
+                    <div class="confidence-item">
+                        <div class="confidence-item-label">Date</div>
+                        <div class="confidence-item-value">{{ confidence.date|floatformat:0 }}%</div>
+                    </div>
+                    <div class="confidence-item">
+                        <div class="confidence-item-label">Currency</div>
+                        <div class="confidence-item-value">{{ confidence.currency|floatformat:0 }}%</div>
+                    </div>
+                    <div class="confidence-item">
+                        <div class="confidence-item-label">Vendor</div>
+                        <div class="confidence-item-value">{{ confidence.vendor|floatformat:0 }}%</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+        
+        <!-- Provenance -->
+        {% if provenance %}
+        <div class="card mt-4">
+            <div class="card-header">
+                <h2>Provenance</h2>
+            </div>
+            <div class="card-body">
+                <dl class="provenance-info">
+                    <dt>Source:</dt>
+                    <dd>{{ provenance.source_system }}</dd>
+                    
+                    <dt>Strategy:</dt>
+                    <dd>{{ provenance.extraction_strategy }}</dd>
+                    
+                    <dt>Parser:</dt>
+                    <dd>v{{ provenance.parser_version }}</dd>
+                    
+                    <dt>Parsed:</dt>
+                    <dd>{{ provenance.parsed_at }}</dd>
+                </dl>
+                
+                {% if record.raw_text %}
+                <details class="mt-4">
+                    <summary style="cursor: pointer; font-size: 0.875rem; color: var(--gray-500);">
+                        Show Raw OCR Text
+                    </summary>
+                    <div class="raw-text mt-2">{{ record.raw_text|truncatechars:2000 }}</div>
+                </details>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+        
+        <!-- Document Links (visible on small screens) -->
+        <div class="card mt-4 viewer-toggle-card" style="display: none;">
             <div class="card-body">
                 <a href="{% url 'document' record.id %}" target="_blank" class="btn btn-outline">
                     📄 View Original Document
@@ -581,11 +905,228 @@ const recordType = '{{ record_type }}';
 const recordId = {{ record.id }};
 {% if record_type == 'paperless' %}
 const documentId = {{ record.id }};
+const extractionId = {{ record.extraction_id|default:"null" }};
 {% else %}
 const fireflyId = {{ record.id }};
 {% endif %}
 
 let selectedSuggestion = null;
+
+// Document viewer toggle
+function toggleDocumentViewer() {
+    const viewer = document.getElementById('document-viewer');
+    if (viewer) {
+        viewer.classList.toggle('collapsed');
+    }
+}
+
+// Split transaction management
+let lineItems = [];
+let lineItemCounter = 0;
+
+function toggleSplitMode(enabled) {
+    const container = document.getElementById('split-container');
+    if (!container) return;
+    container.style.display = enabled ? 'block' : 'none';
+    
+    if (enabled && lineItems.length === 0) {
+        // Add first line item with the total amount
+        addLineItem(parseFloat(document.getElementById('amount').value) || 0);
+    }
+    
+    updateLineItemsJson();
+}
+
+function addLineItem(amount = 0, description = '', category = '') {
+    const id = lineItemCounter++;
+    lineItems.push({ id, amount, description, category });
+    renderLineItems();
+}
+
+function removeLineItem(id) {
+    lineItems = lineItems.filter(item => item.id !== id);
+    if (lineItems.length === 0) {
+        const checkbox = document.getElementById('enable_split');
+        if (checkbox) checkbox.checked = false;
+        toggleSplitMode(false);
+    } else {
+        renderLineItems();
+    }
+}
+
+function updateLineItem(id, field, value) {
+    const item = lineItems.find(item => item.id === id);
+    if (item) {
+        if (field === 'amount') {
+            item.amount = parseFloat(value) || 0;
+        } else {
+            item[field] = value;
+        }
+    }
+    updateSplitTotal();
+    updateLineItemsJson();
+}
+
+function renderLineItems() {
+    const container = document.getElementById('line-items-container');
+    if (!container) return;
+    
+    const categories = {{ firefly_categories_json|safe|default:"[]" }};
+    
+    container.innerHTML = lineItems.map((item, idx) => `
+        <div class="line-item-row" style="display: grid; grid-template-columns: 1fr 2fr 2fr auto; gap: 0.5rem; margin-bottom: 0.5rem; padding: 0.5rem; background: white; border: 1px solid var(--gray-200); border-radius: 0.25rem;">
+            <div>
+                <input type="number" 
+                       value="${item.amount}" 
+                       step="0.01" 
+                       class="form-input" 
+                       placeholder="Amount"
+                       onchange="updateLineItem(${item.id}, 'amount', this.value)"
+                       style="font-size: 0.875rem;">
+            </div>
+            <div>
+                <input type="text" 
+                       value="${item.description}" 
+                       class="form-input" 
+                       placeholder="Description"
+                       onchange="updateLineItem(${item.id}, 'description', this.value)"
+                       style="font-size: 0.875rem;">
+            </div>
+            <div>
+                <select class="form-input" 
+                        onchange="updateLineItem(${item.id}, 'category', this.value)"
+                        style="font-size: 0.875rem;">
+                    <option value="">-- Category --</option>
+                    ${categories.map(cat => `<option value="${cat.name}" ${cat.name === item.category ? 'selected' : ''}>${cat.name}</option>`).join('')}
+                </select>
+            </div>
+            <button type="button" 
+                    class="btn btn-sm btn-outline" 
+                    onclick="removeLineItem(${item.id})"
+                    style="color: #dc2626;"
+                    ${lineItems.length <= 1 ? 'disabled' : ''}>
+                ✕
+            </button>
+        </div>
+    `).join('');
+    
+    updateSplitTotal();
+    updateLineItemsJson();
+}
+
+function updateSplitTotal() {
+    const total = lineItems.reduce((sum, item) => sum + (item.amount || 0), 0);
+    const expectedEl = document.getElementById('amount');
+    const expected = expectedEl ? parseFloat(expectedEl.value) || 0 : 0;
+    const diff = Math.abs(total - expected);
+    
+    const totalEl = document.getElementById('split-total');
+    if (!totalEl) return;
+    
+    if (diff < 0.01) {
+        totalEl.innerHTML = `Total: ${total.toFixed(2)} ✓`;
+        totalEl.style.color = 'var(--success)';
+    } else {
+        totalEl.innerHTML = `Total: ${total.toFixed(2)} (expected: ${expected.toFixed(2)}, diff: ${diff.toFixed(2)})`;
+        totalEl.style.color = 'var(--danger)';
+    }
+}
+
+function updateLineItemsJson() {
+    const checkbox = document.getElementById('enable_split');
+    const enabled = checkbox ? checkbox.checked : false;
+    const json = enabled && lineItems.length > 0 ? JSON.stringify(lineItems) : '';
+    const jsonField = document.getElementById('line_items_json');
+    if (jsonField) jsonField.value = json;
+}
+
+// Update split total when main amount changes
+const amountField = document.getElementById('amount');
+if (amountField) {
+    amountField.addEventListener('change', updateSplitTotal);
+}
+
+// LLM opt-out toggle
+function toggleLlmOptOut(enableAi) {
+    const optOut = !enableAi;
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    
+    fetch('{% url "toggle_llm_opt_out" record.extraction_id|default:0 %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken
+        },
+        body: JSON.stringify({ opt_out: optOut })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            const checkbox = document.getElementById('llm_opt_out_checkbox');
+            const originalLabel = checkbox.nextElementSibling.textContent;
+            checkbox.nextElementSibling.textContent = data.message;
+            setTimeout(() => {
+                checkbox.nextElementSibling.textContent = originalLabel;
+            }, 2000);
+        } else {
+            alert('Failed to update setting: ' + data.error);
+            document.getElementById('llm_opt_out_checkbox').checked = enableAi;
+        }
+    })
+    .catch(error => {
+        alert('Network error: ' + error);
+        document.getElementById('llm_opt_out_checkbox').checked = enableAi;
+    });
+}
+
+// Re-run interpretation
+function rerunInterpretation() {
+    {% if not llm_globally_enabled %}
+    alert('AI/Ollama is not enabled. Please enable it in Settings to use this feature.');
+    return;
+    {% endif %}
+    
+    if (!confirm('Re-run AI interpretation for this document? This will refresh the page with updated suggestions.')) {
+        return;
+    }
+    
+    const btn = event.target;
+    const originalText = btn.textContent;
+    btn.textContent = '⏳ Processing...';
+    btn.disabled = true;
+    
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    
+    fetch('{% url "rerun_interpretation" record.extraction_id|default:0 %}', {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': csrfToken,
+            'X-Requested-With': 'XMLHttpRequest',
+            'Accept': 'application/json'
+        }
+    })
+    .then(response => {
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            throw new Error('Server returned non-JSON response. Please try again.');
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (data.success) {
+            window.location.reload();
+        } else {
+            alert('Failed to re-run interpretation: ' + (data.error || 'Unknown error'));
+            btn.textContent = originalText;
+            btn.disabled = false;
+        }
+    })
+    .catch(error => {
+        alert('Network error: ' + error.message);
+        btn.textContent = originalText;
+        btn.disabled = false;
+    });
+}
 
 function selectSuggestion(element, id, type) {
     // Remove selection from all

@@ -171,7 +171,8 @@ class MatchingEngine:
             total_score = sum(s.weighted_score for s in signals)
 
             # Only include if score is above minimum threshold
-            if total_score >= 0.30:  # Minimum viable match
+            # Lower threshold (0.20) to show more suggestions for user review
+            if total_score >= 0.20:  # Minimum viable match - show in suggestions
                 results.append(
                     MatchResult(
                         firefly_id=tx["firefly_id"],
@@ -287,6 +288,22 @@ class MatchingEngine:
                     weight=self.WEIGHT_AMOUNT,
                     detail=f"~5%: {extracted} vs {transaction}",
                 )
+            # Within 10% tolerance - still useful for manual review
+            if diff_pct <= 0.10:
+                return MatchScore(
+                    signal="amount",
+                    score=0.4,
+                    weight=self.WEIGHT_AMOUNT,
+                    detail=f"~10%: {extracted} vs {transaction}",
+                )
+            # Within 20% - could be rounding differences or fees
+            if diff_pct <= 0.20:
+                return MatchScore(
+                    signal="amount",
+                    score=0.2,
+                    weight=self.WEIGHT_AMOUNT,
+                    detail=f"~20%: {extracted} vs {transaction}",
+                )
 
         return MatchScore(
             signal="amount",
@@ -336,6 +353,24 @@ class MatchingEngine:
                 score=max(score, 0.3),
                 weight=self.WEIGHT_DATE,
                 detail=f"{days_diff} days",
+            )
+
+        # Beyond tolerance but within 2x tolerance - still show as possibility
+        if days_diff <= tolerance * 2:
+            return MatchScore(
+                signal="date",
+                score=0.2,
+                weight=self.WEIGHT_DATE,
+                detail=f"{days_diff} days (extended)",
+            )
+
+        # Up to 30 days - could be month end processing
+        if days_diff <= 30:
+            return MatchScore(
+                signal="date",
+                score=0.1,
+                weight=self.WEIGHT_DATE,
+                detail=f"{days_diff} days (month)",
             )
 
         return MatchScore(

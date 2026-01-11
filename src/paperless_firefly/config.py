@@ -73,10 +73,10 @@ class ReconciliationConfig:
     date_tolerance_days: int = 7
     # Default sync window for fetching Firefly transactions (days back from today)
     sync_days: int = 90
-    # Minimum score to auto-confirm match
-    auto_match_threshold: float = 0.90
-    # Minimum score to show in proposals
-    proposal_threshold: float = 0.60
+    # Minimum score to auto-confirm match (lowered from 0.90 to allow more auto-linking)
+    auto_match_threshold: float = 0.75
+    # Minimum score to show in proposals (lowered from 0.60 to show more suggestions)
+    proposal_threshold: float = 0.30
     # Bank-first mode: require existing tx or explicit manual confirmation
     bank_first_mode: bool = True
     # Allow creation of new transactions only with explicit confirmation

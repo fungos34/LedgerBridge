@@ -135,9 +135,9 @@ class TestMatchingEngine:
         assert "3 days" in score.detail
 
     def test_score_date_outside_tolerance(self, engine: MatchingEngine) -> None:
-        """Test date outside tolerance gives zero score."""
+        """Test date far outside tolerance gives zero score."""
         date1 = datetime(2025, 1, 15)
-        date2 = datetime(2025, 1, 30)  # 15 days apart, > 7 day tolerance
+        date2 = datetime(2025, 3, 1)  # 45 days apart, well beyond any tolerance
         score = engine._score_date(date1, date2)
         assert score.score == 0.0
 

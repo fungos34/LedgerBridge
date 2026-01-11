@@ -2499,10 +2499,12 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
     Sync documents from Paperless into local state for reconciliation.
 
     Fetches documents matching the configured filter tags and
-    runs extraction on new ones.
+    runs full extraction (OCR, e-invoice, etc.) on new ones.
     """
 
+    from ...extractors.router import ExtractorRouter
     from ...paperless_client import PaperlessClient
+    from ...schemas.dedupe import compute_file_hash
 
     store = _get_store()
 
@@ -2516,13 +2518,23 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
             token=settings.PAPERLESS_TOKEN,
         )
 
+        # Create extractor router for full extraction
+        router = ExtractorRouter()
+
+        # Get configuration
+        from ...config import Config, load_config
+        config = load_config(_get_config_path())
+
         # Fetch documents with matching tags
         documents = paperless.list_documents(
             tags=tags.split(",") if tags else None,
         )
 
         synced = 0
+        skipped = 0
+        errors = 0
         doc_list = list(documents)[:50]  # Convert generator and limit to 50 per sync
+        
         for doc in doc_list:
             doc_id = doc.id
             if not doc_id:
@@ -2530,48 +2542,92 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
 
             # Skip if already processed
             if store.get_extraction_by_document(doc_id):
+                skipped += 1
                 continue
 
-            # Store document record
-            store.upsert_document(
-                document_id=doc_id,
-                source_hash=f"paperless-{doc_id}",
-                title=doc.title,
-                tags=doc.tags,
-            )
+            try:
+                # Download original file for extraction
+                file_bytes, filename = paperless.download_original(doc_id)
+                source_hash = compute_file_hash(file_bytes)
 
-            # Run extraction (simplified - just store basic info)
-            extraction_data = {
-                "paperless_title": doc.title,
-                "paperless_id": doc_id,
-                "proposal": {
-                    "description": doc.title or "",
-                    "date": doc.created,
-                },
-            }
+                # Store document record
+                store.upsert_document(
+                    document_id=doc_id,
+                    source_hash=source_hash,
+                    title=doc.title,
+                    document_type=getattr(doc, 'document_type', None),
+                    correspondent=getattr(doc, 'correspondent', None),
+                    tags=doc.tags,
+                )
 
-            # Generate external_id with proper arguments
-            # Use document hash as source_hash, default amount for sync
-            from hashlib import sha256
+                # Run full extraction (OCR, e-invoice parsing, etc.)
+                extraction = router.extract(
+                    document=doc,
+                    file_bytes=file_bytes,
+                    source_hash=source_hash,
+                    paperless_base_url=settings.PAPERLESS_BASE_URL,
+                    default_source_account=config.firefly.default_source_account if hasattr(config.firefly, 'default_source_account') else None,
+                )
 
-            doc_hash = sha256(f"paperless-{doc_id}-{doc.title or ''}".encode()).hexdigest()
-            external_id = generate_external_id(
-                document_id=doc_id,
-                source_hash=doc_hash,
-                amount="0.00",  # Placeholder - will be updated on extraction
-                date=doc.created or datetime.now().strftime("%Y-%m-%d"),
-            )
+                # Save extraction with full data
+                store.save_extraction(
+                    document_id=doc_id,
+                    external_id=extraction.proposal.external_id,
+                    extraction_json=json.dumps(extraction.to_dict()),
+                    overall_confidence=extraction.confidence.overall,
+                    review_state=extraction.confidence.review_state.value,
+                )
+                synced += 1
+                logger.info(f"Extracted doc {doc_id}: {extraction.proposal.amount} {extraction.proposal.currency} - {extraction.proposal.date}")
+                
+            except Exception as e:
+                logger.exception(f"Failed to extract doc {doc_id}: {e}")
+                errors += 1
+                
+                # Still save a basic record so we don't try again
+                try:
+                    from hashlib import sha256
+                    doc_hash = sha256(f"paperless-{doc_id}-{doc.title or ''}".encode()).hexdigest()
+                    external_id = generate_external_id(
+                        document_id=doc_id,
+                        source_hash=doc_hash,
+                        amount="0.00",
+                        date=doc.created or datetime.now().strftime("%Y-%m-%d"),
+                    )
+                    
+                    basic_data = {
+                        "paperless_title": doc.title,
+                        "paperless_id": doc_id,
+                        "extraction_error": str(e),
+                        "proposal": {
+                            "description": doc.title or "",
+                            "date": doc.created,
+                        },
+                    }
+                    
+                    store.upsert_document(
+                        document_id=doc_id,
+                        source_hash=doc_hash,
+                        title=doc.title,
+                        tags=doc.tags,
+                    )
+                    
+                    store.save_extraction(
+                        document_id=doc_id,
+                        external_id=external_id,
+                        extraction_json=json.dumps(basic_data),
+                        overall_confidence=0.1,  # Low confidence due to extraction error
+                        review_state="MANUAL",  # Requires manual review
+                    )
+                except Exception as inner_e:
+                    logger.error(f"Failed to save basic extraction for doc {doc_id}: {inner_e}")
 
-            store.save_extraction(
-                document_id=doc_id,
-                external_id=external_id,
-                extraction_json=json.dumps(extraction_data),
-                overall_confidence=0.5,
-                review_state="PENDING",
-            )
-            synced += 1
-
-        messages.success(request, f"Synced {synced} documents from Paperless")
+        msg = f"Synced {synced} documents from Paperless"
+        if skipped:
+            msg += f", {skipped} already processed"
+        if errors:
+            msg += f", {errors} extraction errors"
+        messages.success(request, msg)
 
     except Exception as e:
         logger.exception(f"Error syncing Paperless: {e}")
@@ -3521,9 +3577,13 @@ def _get_top_match_suggestions(
                                 elif tx_amt > 0:
                                     diff = abs(tx_amt - ext_amt) / tx_amt
                                     if diff < 0.01:  # 1% tolerance
-                                        amount_score = 0.9
+                                        amount_score = 0.95
                                     elif diff < 0.05:  # 5% tolerance
-                                        amount_score = 0.5
+                                        amount_score = 0.8
+                                    elif diff < 0.10:  # 10% tolerance
+                                        amount_score = 0.6
+                                    elif diff < 0.20:  # 20% tolerance
+                                        amount_score = 0.4
                             except Exception:
                                 pass
 
@@ -3540,15 +3600,19 @@ def _get_top_match_suggestions(
                                 if diff_days == 0:
                                     date_score = 1.0
                                 elif diff_days <= 3:
-                                    date_score = 0.8
+                                    date_score = 0.9
                                 elif diff_days <= 7:
+                                    date_score = 0.7
+                                elif diff_days <= 14:
                                     date_score = 0.5
+                                elif diff_days <= 30:
+                                    date_score = 0.3
                             except Exception:
                                 pass
 
                         total_score = (amount_score * 0.6) + (date_score * 0.4)
 
-                        if total_score >= 0.3:  # Minimum threshold
+                        if total_score >= 0.2:  # Lowered minimum threshold
                             suggestions.append(
                                 {
                                     "id": row["document_id"],
@@ -3648,6 +3712,17 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
                     record.get("review_state") == "AUTO"
                     or record.get("review_decision") in ("ACCEPTED", "EDITED")
                 )
+                
+                # Get match count (number of potential matches)
+                record["match_count"] = 0
+                if record["needs_linking"]:
+                    try:
+                        suggestions = _get_top_match_suggestions(
+                            store, "paperless", record["document_id"], max_results=5
+                        )
+                        record["match_count"] = len(suggestions)
+                    except Exception:
+                        pass
             except (json.JSONDecodeError, TypeError):
                 record["title"] = f"Document #{record['document_id']}"
                 record["needs_linking"] = True
@@ -3870,6 +3945,57 @@ def unified_review_detail(request: HttpRequest, record_type: str, record_id: int
         elif linkage.get("link_type") == "ORPHAN":
             link_status = "orphan"
 
+    # Build confidence scores for display (per-field)
+    confidence = None
+    if record_type == "paperless" and extraction_data:
+        conf = extraction_data.get("confidence", {})
+        confidence = {
+            "overall": record_data.get("confidence", 0),
+            "amount": conf.get("amount", 0) * 100 if isinstance(conf.get("amount"), float) else conf.get("amount", 0),
+            "date": conf.get("date", 0) * 100 if isinstance(conf.get("date"), float) else conf.get("date", 0),
+            "currency": conf.get("currency", 0) * 100 if isinstance(conf.get("currency"), float) else conf.get("currency", 0),
+            "description": conf.get("description", 0) * 100 if isinstance(conf.get("description"), float) else conf.get("description", 0),
+            "vendor": conf.get("vendor", 0) * 100 if isinstance(conf.get("vendor"), float) else conf.get("vendor", 0),
+            "invoice_number": conf.get("invoice_number", 0) * 100 if isinstance(conf.get("invoice_number"), float) else conf.get("invoice_number", 0),
+        }
+
+    # Provenance for display
+    provenance = extraction_data.get("provenance") if extraction_data else None
+
+    # JSON-serialize categories for JavaScript
+    firefly_categories_json = "[]"
+    try:
+        firefly_categories_json = json.dumps(
+            [{"id": getattr(cat, 'id', idx), "name": cat.name} for idx, cat in enumerate(firefly_categories)]
+        )
+    except Exception:
+        pass
+
+    # Get navigation (prev/next IDs)
+    prev_id = None
+    next_id = None
+    current_position = 1
+    pending_count = 1
+    try:
+        # Get list of pending items for navigation
+        if record_type == "paperless":
+            conn = store._get_connection()
+            rows = conn.execute(
+                "SELECT document_id FROM extractions WHERE review_state NOT IN ('IMPORTED') ORDER BY created_at DESC"
+            ).fetchall()
+            conn.close()
+            doc_ids = [row["document_id"] for row in rows]
+            pending_count = len(doc_ids)
+            if record_id in doc_ids:
+                idx = doc_ids.index(record_id)
+                current_position = idx + 1
+                if idx > 0:
+                    prev_id = doc_ids[idx - 1]
+                if idx < len(doc_ids) - 1:
+                    next_id = doc_ids[idx + 1]
+    except Exception:
+        pass
+
     context = {
         "record": record_data,
         "record_type": record_type,
@@ -3882,8 +4008,16 @@ def unified_review_detail(request: HttpRequest, record_type: str, record_id: int
         "suggestions": suggestions,
         "firefly_accounts": firefly_accounts,
         "firefly_categories": firefly_categories,
+        "firefly_categories_json": firefly_categories_json,
         "llm_suggestion": llm_suggestion,
         "llm_globally_enabled": _is_llm_globally_enabled(),
+        "llm_opt_out": record_data.get("llm_opt_out", False),
+        "confidence": confidence,
+        "provenance": provenance,
+        "prev_id": prev_id,
+        "next_id": next_id,
+        "pending_count": pending_count,
+        "current_position": current_position,
         **_get_external_urls(request.user if hasattr(request, "user") else None),
     }
 

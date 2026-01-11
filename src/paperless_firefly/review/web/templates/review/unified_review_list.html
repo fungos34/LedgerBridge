@@ -232,6 +232,145 @@
     .help-banner li {
         margin-bottom: 0.25rem;
     }
+    
+    /* Quick Link Dropdown */
+    .link-dropdown {
+        position: relative;
+        display: inline-block;
+    }
+    
+    .link-dropdown-btn {
+        background: #f3f4f6;
+        color: #374151;
+        padding: 0.375rem 0.75rem;
+        border-radius: 0.375rem;
+        font-size: 0.75rem;
+        font-weight: 500;
+        border: 1px solid #d1d5db;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+    }
+    
+    .link-dropdown-btn:hover {
+        background: #e5e7eb;
+    }
+    
+    .link-dropdown-menu {
+        display: none;
+        position: absolute;
+        right: 0;
+        top: 100%;
+        min-width: 280px;
+        background: white;
+        border-radius: 0.5rem;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+        z-index: 100;
+        padding: 0.5rem;
+        margin-top: 0.25rem;
+    }
+    
+    .link-dropdown.open .link-dropdown-menu {
+        display: block;
+    }
+    
+    .link-suggestion {
+        padding: 0.5rem;
+        border-radius: 0.375rem;
+        cursor: pointer;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.5rem;
+        transition: background 0.15s;
+    }
+    
+    .link-suggestion:hover {
+        background: #f3f4f6;
+    }
+    
+    .link-suggestion-info {
+        flex: 1;
+        min-width: 0;
+    }
+    
+    .link-suggestion-title {
+        font-size: 0.75rem;
+        font-weight: 500;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    
+    .link-suggestion-meta {
+        font-size: 0.625rem;
+        color: var(--gray-500);
+    }
+    
+    .link-suggestion-score {
+        background: var(--primary);
+        color: white;
+        padding: 0.125rem 0.375rem;
+        border-radius: 9999px;
+        font-size: 0.625rem;
+        font-weight: 600;
+    }
+    
+    .no-suggestions {
+        padding: 0.75rem;
+        text-align: center;
+        font-size: 0.75rem;
+        color: var(--gray-500);
+    }
+    
+    .link-suggestion-actions {
+        display: flex;
+        gap: 0.25rem;
+    }
+    
+    .btn-quick-link {
+        background: #059669;
+        color: white;
+        padding: 0.25rem 0.5rem;
+        border-radius: 0.25rem;
+        font-size: 0.625rem;
+        font-weight: 500;
+        cursor: pointer;
+        border: none;
+    }
+    
+    .btn-quick-link:hover {
+        background: #047857;
+    }
+    
+    .btn-orphan {
+        background: #dc2626;
+        color: white;
+        padding: 0.25rem 0.5rem;
+        border-radius: 0.25rem;
+        font-size: 0.625rem;
+        font-weight: 500;
+        cursor: pointer;
+        border: none;
+    }
+    
+    .btn-orphan:hover {
+        background: #b91c1c;
+    }
+    
+    .match-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.125rem;
+        padding: 0.125rem 0.5rem;
+        background: #dcfce7;
+        color: #166534;
+        border-radius: 9999px;
+        font-size: 0.625rem;
+        font-weight: 500;
+        margin-left: 0.5rem;
+    }
 </style>
 {% endblock %}
 
@@ -279,7 +418,12 @@
                 {% for record in paperless_records %}
                 <li class="record-item {% if record.needs_linking or record.needs_review %}needs-action{% elif record.is_linked %}linked{% elif record.is_orphan %}orphan{% endif %}">
                     <div class="record-info">
-                        <div class="record-title" title="{{ record.title }}">{{ record.title|truncatechars:30 }}</div>
+                        <div class="record-title" title="{{ record.title }}">
+                            {{ record.title|truncatechars:30 }}
+                            {% if record.match_count > 0 %}
+                            <span class="match-badge">{{ record.match_count }} match{% if record.match_count > 1 %}es{% endif %}</span>
+                            {% endif %}
+                        </div>
                         <div class="record-meta">
                             <span class="record-amount">{{ record.currency }} {{ record.amount|default:"—" }}</span>
                             <span>{{ record.date|default:"No date" }}</span>
@@ -303,6 +447,24 @@
                         {% endif %}
                     </div>
                     <div class="record-actions">
+                        {% if not record.is_linked and not record.is_orphan %}
+                        <div class="link-dropdown" data-document-id="{{ record.document_id }}">
+                            <button type="button" class="link-dropdown-btn" onclick="toggleLinkDropdown(this)">
+                                🔗 Link ▼
+                            </button>
+                            <div class="link-dropdown-menu">
+                                <div class="link-dropdown-content">
+                                    <div style="text-align: center; padding: 0.5rem;">
+                                        <small>Loading suggestions...</small>
+                                    </div>
+                                </div>
+                                <hr style="margin: 0.5rem 0; border: none; border-top: 1px solid #e5e7eb;">
+                                <button type="button" class="btn-orphan" style="width: 100%;" onclick="markAsOrphan({{ record.document_id }})">
+                                    📍 Mark as Orphan (no receipt)
+                                </button>
+                            </div>
+                        </div>
+                        {% endif %}
                         <a href="{% url 'unified_review_detail' 'paperless' record.document_id %}" class="btn-review">
                             📝 Review
                         </a>
@@ -390,4 +552,117 @@
         </div>
     </div>
 </div>
+
+<script>
+// Close dropdowns when clicking outside
+document.addEventListener('click', function(e) {
+    if (!e.target.closest('.link-dropdown')) {
+        document.querySelectorAll('.link-dropdown.open').forEach(el => el.classList.remove('open'));
+    }
+});
+
+function toggleLinkDropdown(btn) {
+    const dropdown = btn.closest('.link-dropdown');
+    const wasOpen = dropdown.classList.contains('open');
+    
+    // Close all other dropdowns
+    document.querySelectorAll('.link-dropdown.open').forEach(el => el.classList.remove('open'));
+    
+    if (!wasOpen) {
+        dropdown.classList.add('open');
+        loadSuggestions(dropdown);
+    }
+}
+
+function loadSuggestions(dropdown) {
+    const documentId = dropdown.dataset.documentId;
+    const contentEl = dropdown.querySelector('.link-dropdown-content');
+    
+    fetch(`/review/api/link-suggestions/paperless/${documentId}/`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.suggestions && data.suggestions.length > 0) {
+                contentEl.innerHTML = data.suggestions.map(s => `
+                    <div class="link-suggestion">
+                        <div class="link-suggestion-info">
+                            <div class="link-suggestion-title">${s.description || 'Transaction'}</div>
+                            <div class="link-suggestion-meta">${s.amount || '?'} • ${s.date || '?'}</div>
+                        </div>
+                        <span class="link-suggestion-score">${s.score}%</span>
+                        <div class="link-suggestion-actions">
+                            <button type="button" class="btn-quick-link" onclick="quickLink(${documentId}, ${s.id})">
+                                Link
+                            </button>
+                        </div>
+                    </div>
+                `).join('');
+            } else {
+                contentEl.innerHTML = '<div class="no-suggestions">No matching transactions found</div>';
+            }
+        })
+        .catch(error => {
+            console.error('Error loading suggestions:', error);
+            contentEl.innerHTML = '<div class="no-suggestions">Error loading suggestions</div>';
+        });
+}
+
+function quickLink(paperlessId, fireflyId) {
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    
+    fetch('{% url "api_quick_link" %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken
+        },
+        body: JSON.stringify({
+            paperless_id: paperlessId,
+            firefly_id: fireflyId
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Reload the page to show updated status
+            location.reload();
+        } else {
+            alert('Error: ' + data.error);
+        }
+    })
+    .catch(error => {
+        alert('Error creating link: ' + error);
+    });
+}
+
+function markAsOrphan(paperlessId) {
+    if (!confirm('Mark this document as orphan (no matching transaction)?')) {
+        return;
+    }
+    
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    
+    fetch('{% url "api_quick_link" %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken
+        },
+        body: JSON.stringify({
+            paperless_id: paperlessId,
+            mark_orphan: true
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert('Error: ' + data.error);
+        }
+    })
+    .catch(error => {
+        alert('Error marking as orphan: ' + error);
+    });
+}
+</script>
 {% endblock %}
