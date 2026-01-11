@@ -295,6 +295,7 @@
 <script>
 // Poll for sync status
 let syncPollInterval = null;
+let hasReloaded = false;  // Prevent infinite reload
 
 function checkSyncStatus() {
     fetch('{% url "api_sync_status" %}')
@@ -308,18 +309,26 @@ function checkSyncStatus() {
                 statusDiv.innerHTML = '<span class="text-primary">⏳ ' + data.progress + '</span>';
                 syncBtn.disabled = true;
                 syncBtn.textContent = '⏳ Syncing...';
+                hasReloaded = false;  // Reset when sync starts
             } else {
                 if (data.error) {
                     statusDiv.style.display = 'block';
                     statusDiv.innerHTML = '<span style="color: var(--danger);">❌ Error: ' + data.error + '</span>';
-                } else if (data.result) {
+                } else if (data.result && !hasReloaded) {
                     statusDiv.style.display = 'block';
                     statusDiv.innerHTML = '<span style="color: var(--success);">✓ ' + data.result + '</span>';
-                    // Reload after success to show updated stats
+                    // Reload ONCE after success to show updated stats
+                    hasReloaded = true;
+                    if (syncPollInterval) {
+                        clearInterval(syncPollInterval);
+                        syncPollInterval = null;
+                    }
                     setTimeout(() => window.location.reload(), 2000);
+                    return;
                 }
                 syncBtn.disabled = false;
                 syncBtn.textContent = '🔄 Sync from Firefly';
+                // Stop polling when not running
                 if (syncPollInterval) {
                     clearInterval(syncPollInterval);
                     syncPollInterval = null;
@@ -331,10 +340,25 @@ function checkSyncStatus() {
         });
 }
 
-// Start polling on page load
+// Start polling on page load - but only if there's an active sync
 document.addEventListener('DOMContentLoaded', function() {
+    // Initial check
     checkSyncStatus();
-    syncPollInterval = setInterval(checkSyncStatus, 2000);
+    // Only start polling if a sync is detected as running
+    fetch('{% url "api_sync_status" %}')
+        .then(response => response.json())
+        .then(data => {
+            if (data.running) {
+                syncPollInterval = setInterval(checkSyncStatus, 2000);
+            }
+        });
+});
+
+// Also poll when sync button is clicked
+document.getElementById('syncBtn')?.closest('form')?.addEventListener('submit', function() {
+    setTimeout(() => {
+        syncPollInterval = setInterval(checkSyncStatus, 2000);
+    }, 500);
 });
 </script>
 {% endblock %}

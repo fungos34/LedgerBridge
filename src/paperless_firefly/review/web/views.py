@@ -2482,11 +2482,15 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
                 },
             }
 
+            # Generate external_id with proper arguments
+            # Use document hash as source_hash, default amount for sync
+            from hashlib import sha256
+            doc_hash = sha256(f"paperless-{doc_id}-{doc.title or ''}".encode()).hexdigest()
             external_id = generate_external_id(
-                {
-                    "paperless_id": doc_id,
-                    "title": doc.title,
-                }
+                document_id=doc_id,
+                source_hash=doc_hash,
+                amount="0.00",  # Placeholder - will be updated on extraction
+                date=doc.created or datetime.now().strftime("%Y-%m-%d"),
             )
 
             store.save_extraction(
@@ -3006,9 +3010,11 @@ def sync_firefly_transactions(request: HttpRequest) -> HttpResponse:
 
             _firefly_sync_status["progress"] = f"Caching {len(transactions)} transactions..."
 
-            # Store in cache
+            # Store in cache and collect IDs for soft-delete check
             synced = 0
+            current_firefly_ids: set[int] = set()
             for tx in transactions:
+                current_firefly_ids.add(tx.id)
                 store.upsert_firefly_cache(
                     firefly_id=tx.id,
                     type_=tx.type,
@@ -3025,8 +3031,15 @@ def sync_firefly_transactions(request: HttpRequest) -> HttpResponse:
                 )
                 synced += 1
 
+            # Soft delete transactions that are no longer in Firefly
+            _firefly_sync_status["progress"] = "Checking for deleted transactions..."
+            deleted_count = store.soft_delete_missing_firefly_transactions(current_firefly_ids)
+
             _firefly_sync_status["synced_count"] = synced
-            _firefly_sync_status["result"] = f"Successfully synced {synced} transactions"
+            result_msg = f"Successfully synced {synced} transactions"
+            if deleted_count > 0:
+                result_msg += f", soft-deleted {deleted_count} removed from Firefly"
+            _firefly_sync_status["result"] = result_msg
             _firefly_sync_status["progress"] = "Done"
 
         except Exception as e:
@@ -3040,7 +3053,7 @@ def sync_firefly_transactions(request: HttpRequest) -> HttpResponse:
     thread.start()
 
     messages.info(request, "Firefly sync started in background. Refresh to see progress.")
-    return redirect("reconciliation_list")
+    return redirect("reconciliation_dashboard")
 
 
 @login_required
@@ -3082,11 +3095,17 @@ def _get_reconciliation_stats(store: StateStore) -> dict:
         ).fetchone()
         auto_count = auto_matched["count"] if auto_matched else 0
 
-        # Unmatched transactions (in cache with UNMATCHED status)
+        # Unmatched transactions (in cache with UNMATCHED status, excluding soft-deleted)
         unmatched = conn.execute(
-            "SELECT COUNT(*) as count FROM firefly_cache WHERE match_status = 'UNMATCHED'"
+            "SELECT COUNT(*) as count FROM firefly_cache WHERE match_status = 'UNMATCHED' AND deleted_at IS NULL"
         ).fetchone()
         unmatched_count = unmatched["count"] if unmatched else 0
+
+        # Soft-deleted count for information
+        soft_deleted = conn.execute(
+            "SELECT COUNT(*) as count FROM firefly_cache WHERE deleted_at IS NOT NULL"
+        ).fetchone()
+        soft_deleted_count = soft_deleted["count"] if soft_deleted else 0
 
         return {
             "pending": pending_count,
@@ -3094,6 +3113,7 @@ def _get_reconciliation_stats(store: StateStore) -> dict:
             "rejected": rejected_count,
             "auto_matched": auto_count,
             "unlinked": unmatched_count,  # Keep "unlinked" key for template compatibility
+            "soft_deleted": soft_deleted_count,
         }
     finally:
         conn.close()

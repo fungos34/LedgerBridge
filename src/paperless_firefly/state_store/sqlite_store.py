@@ -893,12 +893,12 @@ class StateStore:
             )
 
     def get_unmatched_firefly_transactions(self) -> list[dict[str, Any]]:
-        """Get cached Firefly transactions that are not yet matched."""
+        """Get cached Firefly transactions that are not yet matched (excludes soft-deleted)."""
         with self._transaction() as conn:
             rows = conn.execute(
                 """
                 SELECT * FROM firefly_cache
-                WHERE match_status = 'UNMATCHED'
+                WHERE match_status = 'UNMATCHED' AND deleted_at IS NULL
                 ORDER BY date DESC
             """
             ).fetchall()
@@ -929,6 +929,69 @@ class StateStore:
                 "SELECT * FROM firefly_cache WHERE firefly_id = ?", (firefly_id,)
             ).fetchone()
             return dict(row) if row else None
+
+    def soft_delete_firefly_cache(self, firefly_id: int) -> bool:
+        """
+        Soft delete a Firefly cache entry by setting deleted_at timestamp.
+        
+        This preserves audit trail while marking the record as removed from Firefly.
+        Returns True if a record was updated, False if not found.
+        """
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        with self._transaction() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE firefly_cache
+                SET deleted_at = ?
+                WHERE firefly_id = ? AND deleted_at IS NULL
+            """,
+                (now, firefly_id),
+            )
+            return cursor.rowcount > 0
+
+    def soft_delete_missing_firefly_transactions(self, current_firefly_ids: set[int]) -> int:
+        """
+        Soft delete cached entries that are no longer in Firefly.
+        
+        Args:
+            current_firefly_ids: Set of firefly_ids that currently exist in Firefly
+            
+        Returns:
+            Count of soft-deleted records
+        """
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        with self._transaction() as conn:
+            # Get all non-deleted cached IDs
+            rows = conn.execute(
+                "SELECT firefly_id FROM firefly_cache WHERE deleted_at IS NULL"
+            ).fetchall()
+            cached_ids = {row["firefly_id"] for row in rows}
+            
+            # Find IDs that were in cache but not in current Firefly
+            deleted_ids = cached_ids - current_firefly_ids
+            
+            if not deleted_ids:
+                return 0
+            
+            # Soft delete them
+            placeholders = ",".join("?" * len(deleted_ids))
+            cursor = conn.execute(
+                f"""
+                UPDATE firefly_cache
+                SET deleted_at = ?
+                WHERE firefly_id IN ({placeholders}) AND deleted_at IS NULL
+            """,
+                [now, *deleted_ids],
+            )
+            return cursor.rowcount
+
+    def get_active_firefly_cache_count(self) -> int:
+        """Get count of non-deleted cached Firefly transactions."""
+        with self._transaction() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) as count FROM firefly_cache WHERE deleted_at IS NULL"
+            ).fetchone()
+            return row["count"] if row else 0
 
     def clear_firefly_cache(self) -> int:
         """Clear all cached Firefly transactions. Returns count of deleted rows."""

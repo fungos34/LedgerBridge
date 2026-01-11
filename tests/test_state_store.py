@@ -568,3 +568,139 @@ class TestStatistics:
 
         assert stats["documents_processed"] == 2
         assert stats["extractions_total"] == 1
+
+
+class TestFireflyCacheSoftDelete:
+    """Tests for soft delete functionality in Firefly cache."""
+
+    @pytest.fixture
+    def store(self, temp_db):
+        return StateStore(temp_db)
+
+    def test_soft_delete_firefly_cache_entry(self, store):
+        """Test soft delete marks record instead of removing it."""
+        # Insert a cache entry
+        store.upsert_firefly_cache(
+            firefly_id=123,
+            type_="withdrawal",
+            date="2024-01-15",
+            amount="50.00",
+            description="Test transaction",
+        )
+
+        # Verify it exists
+        entry = store.get_firefly_cache_entry(123)
+        assert entry is not None
+        assert entry["deleted_at"] is None
+
+        # Soft delete
+        result = store.soft_delete_firefly_cache(123)
+        assert result is True
+
+        # Entry still exists but is marked deleted
+        entry = store.get_firefly_cache_entry(123)
+        assert entry is not None
+        assert entry["deleted_at"] is not None
+
+    def test_soft_delete_nonexistent_entry(self, store):
+        """Soft deleting nonexistent entry returns False."""
+        result = store.soft_delete_firefly_cache(999)
+        assert result is False
+
+    def test_soft_delete_missing_transactions(self, store):
+        """Test bulk soft delete of transactions no longer in Firefly."""
+        # Insert multiple cache entries
+        for i in range(1, 6):
+            store.upsert_firefly_cache(
+                firefly_id=i,
+                type_="withdrawal",
+                date="2024-01-15",
+                amount=f"{i * 10}.00",
+                description=f"Transaction {i}",
+            )
+
+        # Current Firefly only has IDs 1, 3, 5
+        current_ids = {1, 3, 5}
+
+        # Soft delete missing (IDs 2 and 4)
+        deleted_count = store.soft_delete_missing_firefly_transactions(current_ids)
+        assert deleted_count == 2
+
+        # Verify 1, 3, 5 are not deleted
+        for fid in [1, 3, 5]:
+            entry = store.get_firefly_cache_entry(fid)
+            assert entry["deleted_at"] is None
+
+        # Verify 2, 4 are soft deleted
+        for fid in [2, 4]:
+            entry = store.get_firefly_cache_entry(fid)
+            assert entry["deleted_at"] is not None
+
+    def test_get_unmatched_excludes_soft_deleted(self, store):
+        """Unmatched query excludes soft-deleted entries."""
+        # Insert entries
+        store.upsert_firefly_cache(
+            firefly_id=1,
+            type_="withdrawal",
+            date="2024-01-15",
+            amount="10.00",
+        )
+        store.upsert_firefly_cache(
+            firefly_id=2,
+            type_="withdrawal",
+            date="2024-01-16",
+            amount="20.00",
+        )
+
+        # Both should be unmatched initially
+        unmatched = store.get_unmatched_firefly_transactions()
+        assert len(unmatched) == 2
+
+        # Soft delete one
+        store.soft_delete_firefly_cache(1)
+
+        # Only one should remain in unmatched
+        unmatched = store.get_unmatched_firefly_transactions()
+        assert len(unmatched) == 1
+        assert unmatched[0]["firefly_id"] == 2
+
+    def test_get_active_firefly_cache_count(self, store):
+        """Test counting non-deleted cache entries."""
+        # Insert 5 entries
+        for i in range(1, 6):
+            store.upsert_firefly_cache(
+                firefly_id=i,
+                type_="withdrawal",
+                date="2024-01-15",
+                amount=f"{i * 10}.00",
+            )
+
+        assert store.get_active_firefly_cache_count() == 5
+
+        # Soft delete 2 entries
+        store.soft_delete_firefly_cache(1)
+        store.soft_delete_firefly_cache(2)
+
+        assert store.get_active_firefly_cache_count() == 3
+
+    def test_double_soft_delete_is_noop(self, store):
+        """Soft deleting already deleted entry doesn't change timestamp."""
+        store.upsert_firefly_cache(
+            firefly_id=123,
+            type_="withdrawal",
+            date="2024-01-15",
+            amount="50.00",
+        )
+
+        # First soft delete
+        store.soft_delete_firefly_cache(123)
+        entry = store.get_firefly_cache_entry(123)
+        first_deleted_at = entry["deleted_at"]
+
+        # Second soft delete should return False (no update)
+        result = store.soft_delete_firefly_cache(123)
+        assert result is False
+
+        # Timestamp unchanged
+        entry = store.get_firefly_cache_entry(123)
+        assert entry["deleted_at"] == first_deleted_at
