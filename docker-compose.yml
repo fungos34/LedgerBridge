@@ -77,6 +77,11 @@ services:
       - HOST=0.0.0.0
       - PORT=8080
 
+      # Gunicorn production server settings (optional overrides)
+      - GUNICORN_WORKERS=${GUNICORN_WORKERS:-4}
+      - GUNICORN_THREADS=${GUNICORN_THREADS:-2}
+      - GUNICORN_TIMEOUT=${GUNICORN_TIMEOUT:-120}
+
       - PYTHONPATH=/app/src
 
     volumes:

@@ -25,6 +25,7 @@ dependencies = [
     "lxml>=4.9.0",  # XML parsing for e-invoices
     "httpx>=0.25.0",  # Async HTTP client for LLM API
     "whitenoise>=6.6.0",  # Static file serving for Django
+    "gunicorn>=21.0.0",  # Production WSGI server
 ]
 
 [project.optional-dependencies]

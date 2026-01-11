@@ -208,7 +208,29 @@ run_server() {
     log_info "  Paperless: ${PAPERLESS_URL}"
     log_info "  Firefly: ${FIREFLY_URL}"
     
-    exec paperless-firefly -c "$CONFIG_PATH" review --host "$HOST" --port "$PORT"
+    # Use gunicorn in production (Docker), fallback to dev server for local dev
+    if [ "${USE_DEV_SERVER:-false}" = "true" ]; then
+        log_warn "Using Django development server (not recommended for production)"
+        exec paperless-firefly -c "$CONFIG_PATH" review --host "$HOST" --port "$PORT"
+    else
+        log_info "Using Gunicorn (production WSGI server)"
+        log_info "  Workers: ${GUNICORN_WORKERS:-4}"
+        log_info "  Threads: ${GUNICORN_THREADS:-2}"
+        log_info "  Timeout: ${GUNICORN_TIMEOUT:-120}s"
+        
+        # Run with gunicorn for production
+        exec gunicorn \
+            --bind "${HOST}:${PORT}" \
+            --workers "${GUNICORN_WORKERS:-4}" \
+            --threads "${GUNICORN_THREADS:-2}" \
+            --timeout "${GUNICORN_TIMEOUT:-120}" \
+            --access-logfile - \
+            --error-logfile - \
+            --log-level info \
+            --worker-class sync \
+            --worker-tmp-dir /dev/shm \
+            paperless_firefly.review.web.app:application
+    fi
 }
 
 # Run document extraction

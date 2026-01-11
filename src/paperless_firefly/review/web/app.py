@@ -3,6 +3,8 @@ Django application initialization.
 """
 
 import os
+import sys
+from pathlib import Path
 
 
 def get_wsgi_application(config_path: str = None, state_db_path: str = None):
@@ -32,6 +34,11 @@ def get_wsgi_application(config_path: str = None, state_db_path: str = None):
     from django.core.wsgi import get_wsgi_application as django_wsgi
 
     return django_wsgi()
+
+
+# Create the WSGI application for Gunicorn
+# This is the entry point that gunicorn uses
+application = get_wsgi_application()
 
 
 def run_server(
