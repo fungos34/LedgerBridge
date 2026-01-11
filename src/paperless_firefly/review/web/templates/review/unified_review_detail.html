@@ -119,13 +119,39 @@
         padding: 0.25rem 0.5rem;
         font-size: 0.75rem;
         cursor: pointer;
-        display: none;
+        display: inline-block;
     }
     
-    @media (max-width: 1400px) {
-        .viewer-toggle {
-            display: inline-block;
-        }
+    .viewer-toggle:hover {
+        background: var(--gray-200);
+    }
+    
+    .document-error {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        padding: 2rem;
+        text-align: center;
+        color: var(--gray-500);
+        background: var(--gray-50);
+        border-radius: 0.375rem;
+    }
+    
+    .document-error-icon {
+        font-size: 3rem;
+        margin-bottom: 1rem;
+    }
+    
+    .document-error-title {
+        font-weight: 600;
+        color: var(--gray-700);
+        margin-bottom: 0.5rem;
+    }
+    
+    .document-error-message {
+        font-size: 0.875rem;
     }
     
     /* Confidence Details */
@@ -433,8 +459,8 @@
         <div class="card-header">
             <h2>📄 Document Preview</h2>
             <div class="flex gap-2">
-                <button type="button" class="viewer-toggle" onclick="toggleDocumentViewer()" title="Toggle document preview">
-                    📄 Toggle
+                <button type="button" class="viewer-toggle" onclick="toggleDocumentViewer()" title="Toggle document preview" id="viewer-toggle-btn">
+                    ▼ Hide
                 </button>
                 <a href="{% url 'document' record.id %}?download=1" class="btn btn-sm btn-outline" download>
                     ⬇ Download
@@ -444,10 +470,23 @@
                 </a>
             </div>
         </div>
-        <div class="card-body" style="height: calc(100% - 60px); padding: 0;">
+        <div class="card-body" style="height: calc(100% - 60px); padding: 0;" id="document-body">
+            <div class="document-error" id="document-error" style="display: none;">
+                <div class="document-error-icon">📄❌</div>
+                <div class="document-error-title">Document Not Available</div>
+                <div class="document-error-message">
+                    The document may have been removed from Paperless or is temporarily unavailable.
+                    <br><br>
+                    <a href="{{ paperless_url }}/documents/{{ record.id }}/" target="_blank" class="btn btn-sm btn-primary">
+                        Check in Paperless ↗
+                    </a>
+                </div>
+            </div>
             <iframe src="{% url 'document' record.id %}" 
                     title="Document Preview"
                     id="document-iframe"
+                    onload="handleIframeLoad()"
+                    onerror="handleIframeError()"
                     style="width: 100%; height: 100%; border: none;"></iframe>
         </div>
     </div>
@@ -751,33 +790,73 @@
         </div>
         {% endif %}
         
-        <!-- Provenance -->
-        {% if provenance %}
+        <!-- Extraction Audit / Provenance -->
+        {% if provenance or record.raw_text %}
         <div class="card mt-4">
             <div class="card-header">
-                <h2>Provenance</h2>
+                <h2>🔍 Extraction Audit</h2>
             </div>
             <div class="card-body">
+                {% if provenance %}
                 <dl class="provenance-info">
                     <dt>Source:</dt>
-                    <dd>{{ provenance.source_system }}</dd>
+                    <dd>{{ provenance.source_system|default:"paperless" }}</dd>
                     
                     <dt>Strategy:</dt>
-                    <dd>{{ provenance.extraction_strategy }}</dd>
+                    <dd>{{ provenance.extraction_strategy|default:"ocr_heuristic" }}</dd>
                     
                     <dt>Parser:</dt>
-                    <dd>v{{ provenance.parser_version }}</dd>
+                    <dd>v{{ provenance.parser_version|default:"unknown" }}</dd>
                     
                     <dt>Parsed:</dt>
-                    <dd>{{ provenance.parsed_at }}</dd>
+                    <dd>{{ provenance.parsed_at|default:"unknown" }}</dd>
+                    
+                    {% if record.source_hash %}
+                    <dt>Source Hash:</dt>
+                    <dd><code style="font-size: 0.7rem;">{{ record.source_hash|truncatechars:20 }}</code></dd>
+                    {% endif %}
                 </dl>
+                {% endif %}
+                
+                <!-- Per-field confidence details -->
+                {% if confidence %}
+                <div class="mt-4">
+                    <h4 style="font-size: 0.875rem; margin-bottom: 0.5rem;">Field Confidence Scores</h4>
+                    <div class="confidence-detail">
+                        <div class="confidence-item">
+                            <div class="confidence-item-label">Amount</div>
+                            <div class="confidence-item-value {% if confidence.amount >= 80 %}text-success{% elif confidence.amount >= 50 %}text-warning{% else %}text-danger{% endif %}">
+                                {{ confidence.amount|floatformat:0 }}%
+                            </div>
+                        </div>
+                        <div class="confidence-item">
+                            <div class="confidence-item-label">Date</div>
+                            <div class="confidence-item-value {% if confidence.date >= 80 %}text-success{% elif confidence.date >= 50 %}text-warning{% else %}text-danger{% endif %}">
+                                {{ confidence.date|floatformat:0 }}%
+                            </div>
+                        </div>
+                        <div class="confidence-item">
+                            <div class="confidence-item-label">Vendor</div>
+                            <div class="confidence-item-value {% if confidence.vendor >= 80 %}text-success{% elif confidence.vendor >= 50 %}text-warning{% else %}text-danger{% endif %}">
+                                {{ confidence.vendor|floatformat:0 }}%
+                            </div>
+                        </div>
+                        <div class="confidence-item">
+                            <div class="confidence-item-label">Description</div>
+                            <div class="confidence-item-value {% if confidence.description >= 80 %}text-success{% elif confidence.description >= 50 %}text-warning{% else %}text-danger{% endif %}">
+                                {{ confidence.description|floatformat:0 }}%
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
                 
                 {% if record.raw_text %}
                 <details class="mt-4">
                     <summary style="cursor: pointer; font-size: 0.875rem; color: var(--gray-500);">
-                        Show Raw OCR Text
+                        📝 Show Raw OCR Text (Source Data)
                     </summary>
-                    <div class="raw-text mt-2">{{ record.raw_text|truncatechars:2000 }}</div>
+                    <div class="raw-text mt-2">{{ record.raw_text|truncatechars:3000 }}</div>
                 </details>
                 {% endif %}
             </div>
@@ -915,10 +994,75 @@ let selectedSuggestion = null;
 // Document viewer toggle
 function toggleDocumentViewer() {
     const viewer = document.getElementById('document-viewer');
+    const btn = document.getElementById('viewer-toggle-btn');
     if (viewer) {
         viewer.classList.toggle('collapsed');
+        const isCollapsed = viewer.classList.contains('collapsed');
+        if (btn) {
+            btn.textContent = isCollapsed ? '▶ Show' : '▼ Hide';
+        }
+        // Remember preference in localStorage
+        localStorage.setItem('documentViewerCollapsed', isCollapsed);
     }
 }
+
+// Iframe load/error handling
+function handleIframeLoad() {
+    const iframe = document.getElementById('document-iframe');
+    const errorDiv = document.getElementById('document-error');
+    
+    // Try to detect load errors (cross-origin restrictions may prevent this)
+    try {
+        // Check if iframe loaded with content
+        if (iframe && iframe.contentWindow) {
+            // Hide error, show iframe
+            if (errorDiv) errorDiv.style.display = 'none';
+            iframe.style.display = 'block';
+        }
+    } catch (e) {
+        // Cross-origin - can't check, assume loaded OK
+        console.log('Cannot check iframe content (cross-origin)');
+    }
+}
+
+function handleIframeError() {
+    const iframe = document.getElementById('document-iframe');
+    const errorDiv = document.getElementById('document-error');
+    
+    // Show error message, hide iframe
+    if (iframe) iframe.style.display = 'none';
+    if (errorDiv) errorDiv.style.display = 'flex';
+}
+
+// Check for HTTP errors from document endpoint
+function checkDocumentAvailability() {
+    {% if record_type == 'paperless' %}
+    fetch('{% url "document" record.id %}', { method: 'HEAD' })
+        .then(response => {
+            if (!response.ok) {
+                handleIframeError();
+            }
+        })
+        .catch(() => {
+            handleIframeError();
+        });
+    {% endif %}
+}
+
+// Initialize document viewer state from localStorage
+document.addEventListener('DOMContentLoaded', function() {
+    const viewer = document.getElementById('document-viewer');
+    const btn = document.getElementById('viewer-toggle-btn');
+    const savedState = localStorage.getItem('documentViewerCollapsed');
+    
+    if (viewer && savedState === 'true') {
+        viewer.classList.add('collapsed');
+        if (btn) btn.textContent = '▶ Show';
+    }
+    
+    // Check document availability after short delay
+    setTimeout(checkDocumentAvailability, 500);
+});
 
 // Split transaction management
 let lineItems = [];

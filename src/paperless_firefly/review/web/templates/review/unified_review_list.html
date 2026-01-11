@@ -578,7 +578,7 @@ function loadSuggestions(dropdown) {
     const documentId = dropdown.dataset.documentId;
     const contentEl = dropdown.querySelector('.link-dropdown-content');
     
-    fetch(`/review/api/link-suggestions/paperless/${documentId}/`)
+    fetch(`/api/link-suggestions/paperless/${documentId}/`)
         .then(response => response.json())
         .then(data => {
             if (data.suggestions && data.suggestions.length > 0) {

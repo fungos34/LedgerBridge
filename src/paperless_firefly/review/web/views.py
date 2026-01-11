@@ -61,6 +61,29 @@ def _get_config_path():
     return config_path
 
 
+def _format_date(value: str | None) -> str:
+    """Format a date string for display.
+
+    Handles ISO datetime strings (e.g., 2025-01-15T00:00:00+00:00) and extracts
+    just the date portion (YYYY-MM-DD) for clean display.
+
+    Args:
+        value: Date string (ISO format or simple date).
+
+    Returns:
+        Formatted date string (YYYY-MM-DD) or original value if parsing fails.
+    """
+    if not value:
+        return ""
+    try:
+        # Extract date portion from ISO datetime (first 10 chars)
+        if len(value) >= 10 and value[4] == "-" and value[7] == "-":
+            return value[:10]
+    except (TypeError, IndexError):
+        pass
+    return str(value)
+
+
 # Global store instance for singleton pattern
 _store_instance: StateStore | None = None
 _store_lock = threading.Lock()
@@ -647,7 +670,7 @@ def review_detail(request: HttpRequest, extraction_id: int) -> HttpResponse:
     # Per SPARK_EVALUATION_REPORT.md - attempt to match reviewed document to existing Firefly entries
     matching_transactions = []
     try:
-        from ...config import Config
+        from ...config import load_config
         from ...matching.engine import MatchingEngine
 
         # Build extraction dict from FinanceExtraction for the matching engine
@@ -660,7 +683,7 @@ def review_detail(request: HttpRequest, extraction_id: int) -> HttpResponse:
         }
 
         # Get config for matching engine
-        config = Config.load(settings.CONFIG_PATH if hasattr(settings, "CONFIG_PATH") else None)
+        config = load_config(_get_config_path())
         engine = MatchingEngine(store, config)
 
         # Find matches using the matching engine
@@ -2523,6 +2546,7 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
 
         # Get configuration
         from ...config import Config, load_config
+
         config = load_config(_get_config_path())
 
         # Fetch documents with matching tags
@@ -2534,7 +2558,7 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
         skipped = 0
         errors = 0
         doc_list = list(documents)[:50]  # Convert generator and limit to 50 per sync
-        
+
         for doc in doc_list:
             doc_id = doc.id
             if not doc_id:
@@ -2555,8 +2579,8 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
                     document_id=doc_id,
                     source_hash=source_hash,
                     title=doc.title,
-                    document_type=getattr(doc, 'document_type', None),
-                    correspondent=getattr(doc, 'correspondent', None),
+                    document_type=getattr(doc, "document_type", None),
+                    correspondent=getattr(doc, "correspondent", None),
                     tags=doc.tags,
                 )
 
@@ -2566,7 +2590,9 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
                     file_bytes=file_bytes,
                     source_hash=source_hash,
                     paperless_base_url=settings.PAPERLESS_BASE_URL,
-                    default_source_account=config.firefly.default_source_account if hasattr(config.firefly, 'default_source_account') else None,
+                    default_source_account=config.firefly.default_source_account
+                    if hasattr(config.firefly, "default_source_account")
+                    else None,
                 )
 
                 # Save extraction with full data
@@ -2578,15 +2604,18 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
                     review_state=extraction.confidence.review_state.value,
                 )
                 synced += 1
-                logger.info(f"Extracted doc {doc_id}: {extraction.proposal.amount} {extraction.proposal.currency} - {extraction.proposal.date}")
-                
+                logger.info(
+                    f"Extracted doc {doc_id}: {extraction.proposal.amount} {extraction.proposal.currency} - {extraction.proposal.date}"
+                )
+
             except Exception as e:
                 logger.exception(f"Failed to extract doc {doc_id}: {e}")
                 errors += 1
-                
+
                 # Still save a basic record so we don't try again
                 try:
                     from hashlib import sha256
+
                     doc_hash = sha256(f"paperless-{doc_id}-{doc.title or ''}".encode()).hexdigest()
                     external_id = generate_external_id(
                         document_id=doc_id,
@@ -2594,7 +2623,7 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
                         amount="0.00",
                         date=doc.created or datetime.now().strftime("%Y-%m-%d"),
                     )
-                    
+
                     basic_data = {
                         "paperless_title": doc.title,
                         "paperless_id": doc_id,
@@ -2604,14 +2633,14 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
                             "date": doc.created,
                         },
                     }
-                    
+
                     store.upsert_document(
                         document_id=doc_id,
                         source_hash=doc_hash,
                         title=doc.title,
                         tags=doc.tags,
                     )
-                    
+
                     store.save_extraction(
                         document_id=doc_id,
                         external_id=external_id,
@@ -3472,9 +3501,9 @@ def _get_top_match_suggestions(
     suggestions = []
 
     try:
-        from ...config import Config
+        from ...config import load_config
 
-        config = Config.load(_get_config_path())
+        config = load_config(_get_config_path())
         engine = MatchingEngine(store, config)
 
         if record_type == "paperless":
@@ -3507,7 +3536,7 @@ def _get_top_match_suggestions(
                                 "type": "firefly",
                                 "score": round(match.total_score * 100, 1),
                                 "amount": cached_tx.get("amount"),
-                                "date": cached_tx.get("date"),
+                                "date": _format_date(cached_tx.get("date")),
                                 "description": cached_tx.get("description"),
                                 # FIX: Use consistent key names (both vendor AND destination_account)
                                 "vendor": cached_tx.get("destination_account"),
@@ -3712,7 +3741,7 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
                     record.get("review_state") == "AUTO"
                     or record.get("review_decision") in ("ACCEPTED", "EDITED")
                 )
-                
+
                 # Get match count (number of potential matches)
                 record["match_count"] = 0
                 if record["needs_linking"]:
@@ -3757,6 +3786,8 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
 
         for row in rows:
             record = dict(row)
+            # Format date for display (extract YYYY-MM-DD from ISO datetime)
+            record["date"] = _format_date(record.get("date"))
             record["is_linked"] = (
                 record.get("match_status") in ("MATCHED", "CONFIRMED")
                 or record.get("linked_extraction_id") is not None
@@ -3852,6 +3883,9 @@ def unified_review_detail(request: HttpRequest, record_type: str, record_id: int
             "review_state": extraction_record.review_state,
             "review_decision": extraction_record.review_decision,
             "llm_opt_out": extraction_record.llm_opt_out,
+            # Audit/extraction data
+            "raw_text": extraction_data.get("raw_text", ""),
+            "source_hash": extraction_data.get("source_hash", ""),
         }
 
         # Get linkage status
@@ -3877,7 +3911,7 @@ def unified_review_detail(request: HttpRequest, record_type: str, record_id: int
             "title": tx.get("description", f"Transaction #{record_id}"),
             "amount": tx.get("amount"),
             "currency": "EUR",  # From Firefly
-            "date": tx.get("date"),
+            "date": _format_date(tx.get("date")),
             "description": tx.get("description"),
             "vendor": tx.get("destination_account") or tx.get("source_account"),
             "source_account": tx.get("source_account"),
@@ -3931,6 +3965,10 @@ def unified_review_detail(request: HttpRequest, record_type: str, record_id: int
             # Get linked record info
             if record_type == "paperless" and linkage.get("firefly_id"):
                 linked_record = store.get_firefly_cache_entry(linkage["firefly_id"])
+                if linked_record:
+                    # Format date for display
+                    linked_record = dict(linked_record)
+                    linked_record["date"] = _format_date(linked_record.get("date"))
             elif record_type == "firefly" and linkage.get("extraction_id"):
                 linked_ext = store.get_extraction_by_document(linkage.get("document_id", 0))
                 if linked_ext:
@@ -3951,12 +3989,24 @@ def unified_review_detail(request: HttpRequest, record_type: str, record_id: int
         conf = extraction_data.get("confidence", {})
         confidence = {
             "overall": record_data.get("confidence", 0),
-            "amount": conf.get("amount", 0) * 100 if isinstance(conf.get("amount"), float) else conf.get("amount", 0),
-            "date": conf.get("date", 0) * 100 if isinstance(conf.get("date"), float) else conf.get("date", 0),
-            "currency": conf.get("currency", 0) * 100 if isinstance(conf.get("currency"), float) else conf.get("currency", 0),
-            "description": conf.get("description", 0) * 100 if isinstance(conf.get("description"), float) else conf.get("description", 0),
-            "vendor": conf.get("vendor", 0) * 100 if isinstance(conf.get("vendor"), float) else conf.get("vendor", 0),
-            "invoice_number": conf.get("invoice_number", 0) * 100 if isinstance(conf.get("invoice_number"), float) else conf.get("invoice_number", 0),
+            "amount": conf.get("amount", 0) * 100
+            if isinstance(conf.get("amount"), float)
+            else conf.get("amount", 0),
+            "date": conf.get("date", 0) * 100
+            if isinstance(conf.get("date"), float)
+            else conf.get("date", 0),
+            "currency": conf.get("currency", 0) * 100
+            if isinstance(conf.get("currency"), float)
+            else conf.get("currency", 0),
+            "description": conf.get("description", 0) * 100
+            if isinstance(conf.get("description"), float)
+            else conf.get("description", 0),
+            "vendor": conf.get("vendor", 0) * 100
+            if isinstance(conf.get("vendor"), float)
+            else conf.get("vendor", 0),
+            "invoice_number": conf.get("invoice_number", 0) * 100
+            if isinstance(conf.get("invoice_number"), float)
+            else conf.get("invoice_number", 0),
         }
 
     # Provenance for display
@@ -3966,7 +4016,10 @@ def unified_review_detail(request: HttpRequest, record_type: str, record_id: int
     firefly_categories_json = "[]"
     try:
         firefly_categories_json = json.dumps(
-            [{"id": getattr(cat, 'id', idx), "name": cat.name} for idx, cat in enumerate(firefly_categories)]
+            [
+                {"id": getattr(cat, "id", idx), "name": cat.name}
+                for idx, cat in enumerate(firefly_categories)
+            ]
         )
     except Exception:
         pass
