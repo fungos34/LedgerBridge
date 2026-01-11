@@ -70,11 +70,12 @@
                 {% csrf_token %}
                 <input type="hidden" name="tag" value="finance/inbox">
                 <input type="hidden" name="limit" value="10">
-                <button type="submit" class="btn btn-secondary" {% if extraction_status.running %}disabled{% endif %}>
+                <input type="hidden" name="sync_firefly" value="true">
+                <button type="submit" class="btn btn-secondary" {% if extraction_status.running %}disabled{% endif %} title="Extract documents from Paperless and sync Firefly transactions">
                     {% if extraction_status.running %}
                     <span class="spinner">⏳</span> Extracting...
                     {% else %}
-                    🔄 Extract from Paperless
+                    🔄 Extract &amp; Sync
                     {% endif %}
                 </button>
             </form>

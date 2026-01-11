@@ -99,6 +99,18 @@ call_command('migrate', '--run-syncdb', verbosity=0)
 print('Django migrations complete')
 "
     
+    # Collect static files for Django admin
+    log_info "Collecting static files..."
+    python -c "
+import django
+import os
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'paperless_firefly.review.web.settings')
+django.setup()
+from django.core.management import call_command
+call_command('collectstatic', '--noinput', verbosity=0)
+print('Static files collected')
+"
+    
     # Create default admin user if not exists
     if [ -n "$ADMIN_USERNAME" ] && [ -n "$ADMIN_PASSWORD" ]; then
         log_info "Creating admin user..."

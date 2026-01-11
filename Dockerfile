@@ -44,7 +44,7 @@ COPY manage.py ./
 COPY docker/entrypoint.sh /entrypoint.sh
 
 # Create directories for data persistence
-RUN mkdir -p /app/data /app/config && \
+RUN mkdir -p /app/data /app/config /app/staticfiles && \
     chown -R paperless:paperless /app
 
 # Make entrypoint executable
@@ -56,6 +56,7 @@ ENV PYTHONUNBUFFERED=1 \
     STATE_DB_PATH=/app/data/state.db \
     CONFIG_PATH=/app/config/config.yaml \
     DJANGO_SETTINGS_MODULE=paperless_firefly.review.web.settings \
+    STATIC_ROOT=/app/staticfiles \
     # Server settings
     HOST=0.0.0.0 \
     PORT=8080

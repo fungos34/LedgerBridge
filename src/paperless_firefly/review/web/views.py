@@ -1508,7 +1508,7 @@ def dismiss_failed_import(request: HttpRequest, external_id: str) -> HttpRespons
 @login_required
 @require_http_methods(["POST"])
 def run_extract(request: HttpRequest) -> HttpResponse:
-    """Trigger extraction from Paperless."""
+    """Trigger extraction from Paperless and sync Firefly transactions."""
     global _extraction_status
 
     if _extraction_status["running"]:
@@ -1517,6 +1517,7 @@ def run_extract(request: HttpRequest) -> HttpResponse:
 
     tag = request.POST.get("tag", "finance/inbox")
     limit = int(request.POST.get("limit", 10))
+    sync_firefly = request.POST.get("sync_firefly", "true").lower() in ("true", "1", "yes", "on")
 
     def do_extract():
         global _extraction_status
@@ -1529,6 +1530,7 @@ def run_extract(request: HttpRequest) -> HttpResponse:
         }
 
         try:
+            from datetime import date, timedelta
             from pathlib import Path
 
             from ...config import load_config
@@ -1543,7 +1545,51 @@ def run_extract(request: HttpRequest) -> HttpResponse:
             _extraction_status["progress"] = f"Extracting documents with tag '{tag}'..."
             result = cmd_extract(config, doc_id=None, tag=tag, limit=limit)
 
-            _extraction_status["result"] = f"Extraction completed with exit code {result}"
+            # Also sync Firefly transactions if requested
+            if sync_firefly:
+                _extraction_status["progress"] = "Syncing Firefly III transactions..."
+                try:
+                    firefly = FireflyClient(
+                        base_url=config.firefly.base_url,
+                        token=config.firefly.token,
+                    )
+                    store = _get_store()
+
+                    # Sync last 90 days by default
+                    end_date = date.today()
+                    start_date = end_date - timedelta(days=90)
+
+                    transactions = firefly.list_transactions(
+                        start_date=start_date.isoformat(),
+                        end_date=end_date.isoformat(),
+                    )
+
+                    # Cache transactions
+                    for tx in transactions:
+                        store.upsert_firefly_cache(
+                            firefly_id=tx.get("id"),
+                            type_=tx.get("type", "withdrawal"),
+                            date=tx.get("date"),
+                            amount=tx.get("amount"),
+                            description=tx.get("description"),
+                            source_account=tx.get("source_name"),
+                            destination_account=tx.get("destination_name"),
+                            category_name=tx.get("category_name"),
+                            external_id=tx.get("external_id"),
+                            internal_reference=tx.get("internal_reference"),
+                        )
+
+                    _extraction_status[
+                        "result"
+                    ] = f"Extraction completed. Also synced {len(transactions)} Firefly transactions."
+                except Exception as firefly_err:
+                    logger.warning(f"Firefly sync failed (extraction still succeeded): {firefly_err}")
+                    _extraction_status[
+                        "result"
+                    ] = f"Extraction completed (Firefly sync failed: {firefly_err})"
+            else:
+                _extraction_status["result"] = f"Extraction completed with exit code {result}"
+
             _extraction_status["progress"] = "Done"
         except Exception as e:
             _extraction_status["error"] = str(e)
@@ -2794,7 +2840,7 @@ def link_document_to_transaction(request: HttpRequest) -> HttpResponse:
 
             if success:
                 # Mark the extraction as LINKED (not ACCEPTED - different semantic)
-                record = store.get_extraction_by_document_id(document_id_int)
+                record = store.get_extraction_by_document(document_id_int)
                 if record:
                     store.update_extraction_status(
                         record.id,
@@ -2818,7 +2864,7 @@ def link_document_to_transaction(request: HttpRequest) -> HttpResponse:
 
     # GET: Show confirmation page
     # Get document and transaction details for confirmation
-    extraction_record = store.get_extraction_by_document_id(document_id_int)
+    extraction_record = store.get_extraction_by_document(document_id_int)
     tx_cache = store.get_firefly_cache_entry(firefly_id_int)
 
     context = {
