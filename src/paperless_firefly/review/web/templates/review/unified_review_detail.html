@@ -1,0 +1,669 @@
+{% extends "review/base.html" %}
+
+{% block title %}Review: {{ record.title|truncatechars:40 }} - SparkLink{% endblock %}
+
+{% block extra_css %}
+<style>
+    .review-layout {
+        display: grid;
+        grid-template-columns: 1fr 400px;
+        gap: 1.5rem;
+        align-items: start;
+    }
+    
+    @media (max-width: 1024px) {
+        .review-layout {
+            grid-template-columns: 1fr;
+        }
+    }
+    
+    .nav-buttons {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+    }
+    
+    .record-type-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        padding: 0.25rem 0.75rem;
+        border-radius: 9999px;
+        font-size: 0.75rem;
+        font-weight: 600;
+    }
+    
+    .record-type-badge.paperless {
+        background: #f3e8ff;
+        color: #7c3aed;
+    }
+    
+    .record-type-badge.firefly {
+        background: #dcfce7;
+        color: #059669;
+    }
+    
+    .form-section {
+        margin-bottom: 1.5rem;
+        padding-bottom: 1.5rem;
+        border-bottom: 1px solid var(--gray-200);
+    }
+    
+    .form-section:last-child {
+        border-bottom: none;
+        margin-bottom: 0;
+        padding-bottom: 0;
+    }
+    
+    .form-section-title {
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--gray-500);
+        margin-bottom: 1rem;
+    }
+    
+    .form-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+    }
+    
+    @media (max-width: 768px) {
+        .form-row {
+            grid-template-columns: 1fr;
+        }
+    }
+    
+    /* Link Section */
+    .link-section {
+        background: white;
+        border-radius: 0.5rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        overflow: hidden;
+        position: sticky;
+        top: 1rem;
+    }
+    
+    .link-header {
+        padding: 1rem 1.25rem;
+        background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+        color: white;
+    }
+    
+    .link-header h3 {
+        font-size: 1rem;
+        font-weight: 600;
+        margin-bottom: 0.25rem;
+    }
+    
+    .link-header p {
+        font-size: 0.75rem;
+        opacity: 0.9;
+    }
+    
+    .link-status {
+        padding: 1rem 1.25rem;
+        border-bottom: 1px solid var(--gray-200);
+    }
+    
+    .link-status.pending {
+        background: #fef3c7;
+        border-left: 3px solid #d97706;
+    }
+    
+    .link-status.linked {
+        background: #dcfce7;
+        border-left: 3px solid #059669;
+    }
+    
+    .link-status.orphan {
+        background: #fee2e2;
+        border-left: 3px solid #dc2626;
+    }
+    
+    .link-status-title {
+        font-weight: 600;
+        font-size: 0.875rem;
+        margin-bottom: 0.25rem;
+    }
+    
+    .link-status-desc {
+        font-size: 0.75rem;
+        color: var(--gray-600);
+    }
+    
+    /* Suggestions */
+    .suggestions-section {
+        padding: 1rem 1.25rem;
+    }
+    
+    .suggestions-title {
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        color: var(--gray-500);
+        margin-bottom: 0.75rem;
+    }
+    
+    .suggestion-item {
+        padding: 0.75rem;
+        background: var(--gray-50);
+        border-radius: 0.375rem;
+        margin-bottom: 0.5rem;
+        cursor: pointer;
+        transition: all 0.15s;
+        border: 2px solid transparent;
+    }
+    
+    .suggestion-item:hover {
+        background: #dbeafe;
+        border-color: #93c5fd;
+    }
+    
+    .suggestion-item.selected {
+        background: #dbeafe;
+        border-color: var(--primary);
+    }
+    
+    .suggestion-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.5rem;
+    }
+    
+    .suggestion-score {
+        background: var(--primary);
+        color: white;
+        padding: 0.125rem 0.5rem;
+        border-radius: 9999px;
+        font-size: 0.625rem;
+        font-weight: 600;
+    }
+    
+    .suggestion-title {
+        font-weight: 600;
+        font-size: 0.875rem;
+        max-width: 200px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    
+    .suggestion-meta {
+        font-size: 0.75rem;
+        color: var(--gray-500);
+    }
+    
+    .suggestion-actions {
+        margin-top: 0.5rem;
+        display: flex;
+        gap: 0.5rem;
+    }
+    
+    /* Orphan Section */
+    .orphan-section {
+        padding: 1rem 1.25rem;
+        background: #fef3c7;
+        border-top: 1px dashed #d97706;
+    }
+    
+    .orphan-section h4 {
+        font-size: 0.875rem;
+        color: #92400e;
+        margin-bottom: 0.5rem;
+    }
+    
+    .orphan-section p {
+        font-size: 0.75rem;
+        color: #92400e;
+        margin-bottom: 0.75rem;
+    }
+    
+    /* Action Buttons */
+    .action-buttons {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        padding: 1rem;
+        background: var(--gray-50);
+        border-top: 1px solid var(--gray-200);
+    }
+    
+    /* Linked Record Info */
+    .linked-record-info {
+        padding: 1rem 1.25rem;
+        background: #f0fdf4;
+        border-top: 1px solid #86efac;
+    }
+    
+    .linked-record-info h4 {
+        font-size: 0.75rem;
+        color: #166534;
+        text-transform: uppercase;
+        margin-bottom: 0.5rem;
+    }
+    
+    .linked-record-details {
+        font-size: 0.875rem;
+    }
+    
+    /* Confidence Badge */
+    .confidence-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        padding: 0.125rem 0.5rem;
+        border-radius: 9999px;
+        font-size: 0.625rem;
+        font-weight: 600;
+    }
+    
+    .confidence-high { background: #dcfce7; color: #166534; }
+    .confidence-medium { background: #fef3c7; color: #92400e; }
+    .confidence-low { background: #fee2e2; color: #991b1b; }
+    
+    /* AI Badge */
+    .badge-ai {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        background: linear-gradient(135deg, #818cf8, #6366f1);
+        color: white;
+        font-size: 0.625rem;
+        font-weight: 600;
+        padding: 0.125rem 0.375rem;
+        border-radius: 0.25rem;
+        margin-left: 0.5rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Navigation -->
+<div class="nav-buttons">
+    <div class="flex gap-2 items-center">
+        <a href="{% url 'unified_review_list' %}" class="btn btn-outline">← Back to List</a>
+        <span class="record-type-badge {{ record_type }}">
+            {% if record_type == 'paperless' %}📄 Paperless{% else %}🏦 Firefly{% endif %}
+        </span>
+    </div>
+    <div class="flex gap-2">
+        <span class="confidence-badge {% if record.confidence >= 80 %}confidence-high{% elif record.confidence >= 50 %}confidence-medium{% else %}confidence-low{% endif %}">
+            {{ record.confidence|floatformat:0 }}% confidence
+        </span>
+    </div>
+</div>
+
+<div class="review-layout">
+    <!-- Main Form -->
+    <div>
+        <form method="post" action="{% if record_type == 'paperless' %}{% url 'save' record.extraction_id %}{% endif %}" id="review-form">
+            {% csrf_token %}
+            <div class="card">
+                <div class="card-header">
+                    <h2>{{ record.title|truncatechars:50 }}</h2>
+                </div>
+                <div class="card-body">
+                    <!-- Amount & Currency -->
+                    <div class="form-section">
+                        <div class="form-section-title">Amount</div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label" for="amount">Amount *</label>
+                                <input type="number" 
+                                       id="amount" 
+                                       name="amount" 
+                                       class="form-input" 
+                                       value="{{ record.amount }}"
+                                       step="0.01"
+                                       {% if record_type == 'firefly' %}readonly{% endif %}
+                                       required>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="currency">Currency</label>
+                                <input type="text" 
+                                       id="currency" 
+                                       name="currency" 
+                                       class="form-input" 
+                                       value="{{ record.currency }}"
+                                       maxlength="3"
+                                       {% if record_type == 'firefly' %}readonly{% endif %}>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Date -->
+                    <div class="form-section">
+                        <div class="form-section-title">Date</div>
+                        <div class="form-group">
+                            <label class="form-label" for="date">Transaction Date *</label>
+                            <input type="date" 
+                                   id="date" 
+                                   name="date" 
+                                   class="form-input" 
+                                   value="{{ record.date }}"
+                                   {% if record_type == 'firefly' %}readonly{% endif %}
+                                   required>
+                        </div>
+                    </div>
+                    
+                    <!-- Description -->
+                    <div class="form-section">
+                        <div class="form-section-title">Description</div>
+                        <div class="form-group">
+                            <label class="form-label" for="description">Description *</label>
+                            <input type="text" 
+                                   id="description" 
+                                   name="description" 
+                                   class="form-input" 
+                                   value="{{ record.description }}"
+                                   {% if record_type == 'firefly' %}readonly{% endif %}
+                                   required>
+                        </div>
+                    </div>
+                    
+                    <!-- Accounts -->
+                    <div class="form-section">
+                        <div class="form-section-title">Accounts</div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label" for="source_account">Source Account</label>
+                                {% if record_type == 'paperless' %}
+                                <select id="source_account" name="source_account" class="form-input">
+                                    <option value="">-- Select --</option>
+                                    {% for account in firefly_accounts %}
+                                    <option value="{{ account.name }}" {% if account.name == record.source_account %}selected{% endif %}>
+                                        {{ account.name }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                                {% else %}
+                                <input type="text" class="form-input" value="{{ record.source_account }}" readonly>
+                                {% endif %}
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="destination_account">Destination / Vendor</label>
+                                <input type="text" 
+                                       id="destination_account" 
+                                       name="destination_account" 
+                                       class="form-input" 
+                                       value="{{ record.vendor|default:record.destination_account }}"
+                                       {% if record_type == 'firefly' %}readonly{% endif %}>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Category -->
+                    <div class="form-section">
+                        <div class="form-section-title">
+                            Category
+                            {% if llm_suggestion %}
+                            <span class="badge-ai" title="AI suggested: {{ llm_suggestion.category }}">🤖 AI</span>
+                            {% endif %}
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="category">Category</label>
+                            {% if record_type == 'paperless' %}
+                            <select id="category" name="category" class="form-input">
+                                <option value="">-- Select Category --</option>
+                                {% for cat in firefly_categories %}
+                                <option value="{{ cat.name }}" {% if cat.name == record.category %}selected{% endif %}>
+                                    {{ cat.name }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                            {% if llm_suggestion %}
+                            <div class="form-help">
+                                AI suggested: <strong>{{ llm_suggestion.category }}</strong>
+                                <button type="button" class="btn btn-xs btn-outline" 
+                                        onclick="document.getElementById('category').value='{{ llm_suggestion.category }}'">
+                                    Use suggestion
+                                </button>
+                            </div>
+                            {% endif %}
+                            {% else %}
+                            <input type="text" class="form-input" value="{{ record.category }}" readonly>
+                            {% endif %}
+                        </div>
+                    </div>
+                    
+                    {% if record_type == 'paperless' %}
+                    <!-- Transaction Type -->
+                    <div class="form-section">
+                        <div class="form-section-title">Transaction Type</div>
+                        <div class="form-group">
+                            <select id="transaction_type" name="transaction_type" class="form-input">
+                                <option value="withdrawal" {% if record.transaction_type == 'withdrawal' or record.transaction_type == 'WITHDRAWAL' %}selected{% endif %}>Withdrawal (Expense)</option>
+                                <option value="deposit" {% if record.transaction_type == 'deposit' or record.transaction_type == 'DEPOSIT' %}selected{% endif %}>Deposit (Income)</option>
+                                <option value="transfer" {% if record.transaction_type == 'transfer' or record.transaction_type == 'TRANSFER' %}selected{% endif %}>Transfer</option>
+                            </select>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+                
+                {% if record_type == 'paperless' %}
+                <div class="action-buttons">
+                    <button type="submit" class="btn btn-success">💾 Save & Approve</button>
+                    <a href="{% url 'reject' record.extraction_id %}" class="btn btn-danger" 
+                       onclick="return confirm('Reject this extraction?')">❌ Reject</a>
+                    {% if record.review_decision %}
+                    <a href="{% url 'reset_extraction' record.extraction_id %}" class="btn btn-outline">🔄 Reset</a>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
+        </form>
+        
+        {% if record_type == 'paperless' %}
+        <!-- Document Preview Link -->
+        <div class="card mt-4">
+            <div class="card-body">
+                <a href="{% url 'document' record.id %}" target="_blank" class="btn btn-outline">
+                    📄 View Original Document
+                </a>
+                <a href="{{ paperless_url }}/documents/{{ record.id }}/" target="_blank" class="btn btn-outline">
+                    Open in Paperless ↗
+                </a>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+    
+    <!-- Link Section (Right Sidebar) -->
+    <div class="link-section">
+        <div class="link-header">
+            <h3>🔗 Linking</h3>
+            <p>{% if record_type == 'paperless' %}Match to Firefly transaction{% else %}Match to Paperless document{% endif %}</p>
+        </div>
+        
+        <!-- Current Link Status -->
+        <div class="link-status {{ link_status }}">
+            {% if link_status == 'linked' %}
+            <div class="link-status-title">✅ Linked</div>
+            <div class="link-status-desc">This record is linked and ready for import</div>
+            {% elif link_status == 'orphan' %}
+            <div class="link-status-title">📍 Orphan</div>
+            <div class="link-status-desc">Confirmed as having no matching record</div>
+            {% else %}
+            <div class="link-status-title">⚠️ Not Linked</div>
+            <div class="link-status-desc">Must be linked or marked as orphan before import</div>
+            {% endif %}
+        </div>
+        
+        {% if linked_record %}
+        <!-- Linked Record Info -->
+        <div class="linked-record-info">
+            <h4>Linked to:</h4>
+            <div class="linked-record-details">
+                {% if record_type == 'paperless' %}
+                <strong>🏦 Firefly #{{ linkage.firefly_id }}</strong><br>
+                {{ linked_record.description|truncatechars:40 }}<br>
+                <span class="text-muted">{{ linked_record.amount }} • {{ linked_record.date }}</span>
+                {% else %}
+                <strong>📄 Document #{{ linked_record.document_id }}</strong><br>
+                {{ linked_record.title|truncatechars:40 }}
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+        
+        {% if link_status == 'pending' %}
+        <!-- Top 3 Suggestions -->
+        <div class="suggestions-section">
+            <div class="suggestions-title">
+                Top Matches (click to link)
+            </div>
+            
+            {% if suggestions %}
+            {% for suggestion in suggestions %}
+            <div class="suggestion-item" 
+                 data-id="{{ suggestion.id }}"
+                 data-type="{{ suggestion.type }}"
+                 onclick="selectSuggestion(this, {{ suggestion.id }}, '{{ suggestion.type }}')">
+                <div class="suggestion-header">
+                    <span class="suggestion-title">
+                        {% if suggestion.type == 'firefly' %}
+                        🏦 {{ suggestion.description|truncatechars:25 }}
+                        {% else %}
+                        📄 {{ suggestion.title|truncatechars:25 }}
+                        {% endif %}
+                    </span>
+                    <span class="suggestion-score">{{ suggestion.score }}%</span>
+                </div>
+                <div class="suggestion-meta">
+                    {{ suggestion.amount }} • {{ suggestion.date }}
+                    {% if suggestion.vendor or suggestion.destination %}
+                    • {{ suggestion.vendor|default:suggestion.destination }}
+                    {% endif %}
+                </div>
+                <div class="suggestion-actions">
+                    <button type="button" class="btn btn-sm btn-primary" 
+                            onclick="event.stopPropagation(); quickLink({{ record.id }}, {{ suggestion.id }})">
+                        🔗 Link
+                    </button>
+                </div>
+            </div>
+            {% endfor %}
+            {% else %}
+            <p class="text-muted text-sm">No matching records found</p>
+            {% endif %}
+            
+            <button type="button" class="btn btn-outline btn-sm mt-3" onclick="loadMoreSuggestions()">
+                🔄 Load More Suggestions
+            </button>
+        </div>
+        
+        <!-- Mark as Orphan -->
+        <div class="orphan-section">
+            <h4>📍 No Match?</h4>
+            <p>If this record has no matching partner (e.g., cash payment, no receipt), mark it as orphan.</p>
+            <button type="button" class="btn btn-warning btn-sm" onclick="markAsOrphan()">
+                Mark as Orphan
+            </button>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+// Store current record info
+const recordType = '{{ record_type }}';
+const recordId = {{ record.id }};
+{% if record_type == 'paperless' %}
+const documentId = {{ record.id }};
+{% else %}
+const fireflyId = {{ record.id }};
+{% endif %}
+
+let selectedSuggestion = null;
+
+function selectSuggestion(element, id, type) {
+    // Remove selection from all
+    document.querySelectorAll('.suggestion-item').forEach(el => {
+        el.classList.remove('selected');
+    });
+    // Select this one
+    element.classList.add('selected');
+    selectedSuggestion = { id, type };
+}
+
+function quickLink(paperlessId, fireflyId) {
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    
+    fetch('{% url "api_quick_link" %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken
+        },
+        body: JSON.stringify({
+            paperless_id: recordType === 'paperless' ? recordId : fireflyId,
+            firefly_id: recordType === 'paperless' ? fireflyId : recordId
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(data.message);
+            location.reload();
+        } else {
+            alert('Error: ' + data.error);
+        }
+    })
+    .catch(error => {
+        alert('Error creating link: ' + error);
+    });
+}
+
+function markAsOrphan() {
+    if (!confirm('Mark this record as orphan (no matching partner)?')) {
+        return;
+    }
+    
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    
+    fetch('{% url "api_quick_link" %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken
+        },
+        body: JSON.stringify({
+            paperless_id: recordType === 'paperless' ? recordId : null,
+            firefly_id: recordType === 'firefly' ? recordId : null,
+            mark_orphan: true
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(data.message);
+            location.reload();
+        } else {
+            alert('Error: ' + data.error);
+        }
+    })
+    .catch(error => {
+        alert('Error marking as orphan: ' + error);
+    });
+}
+
+function loadMoreSuggestions() {
+    fetch('{% url "api_link_suggestions" record_type record_id %}')
+    .then(response => response.json())
+    .then(data => {
+        console.log('Suggestions:', data.suggestions);
+        // Could update the suggestions list dynamically
+        alert('Found ' + data.suggestions.length + ' suggestions');
+    })
+    .catch(error => {
+        console.error('Error loading suggestions:', error);
+    });
+}
+</script>
+{% endblock %}

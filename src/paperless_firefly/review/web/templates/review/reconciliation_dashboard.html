@@ -648,11 +648,17 @@
                         <span class="record-status {% if record.linked %}status-linked{% elif record.orphan_confirmed %}status-orphan{% elif record.status == 'NEEDS_REVIEW' %}status-review{% else %}status-pending{% endif %}">
                             {% if record.linked %}✓ Linked{% elif record.orphan_confirmed %}📍 Orphan{% elif record.status == 'NEEDS_REVIEW' %}👁 Review{% else %}⏳ Pending{% endif %}
                         </span>
-                        {% if record.linked and record.linked_firefly_id %}
-                        <span class="text-xs text-muted" title="{{ record.linked_firefly_description }}">→ FF #{{ record.linked_firefly_id }}</span>
-                        {% elif record.match_suggestions %}
-                        <span class="text-xs text-muted">{{ record.match_suggestions|length }} suggestions</span>
-                        {% endif %}
+                        <div class="flex gap-1 items-center">
+                            {% if record.linked and record.linked_firefly_id %}
+                            <span class="text-xs text-muted" title="{{ record.linked_firefly_description }}">→ FF #{{ record.linked_firefly_id }}</span>
+                            {% elif record.match_suggestions %}
+                            <span class="text-xs text-muted">{{ record.match_suggestions|length }} suggestions</span>
+                            {% endif %}
+                            <a href="{% url 'unified_review_detail' 'paperless' record.document_id %}" 
+                               class="btn btn-outline btn-xs" onclick="event.stopPropagation();">
+                                📝 Review
+                            </a>
+                        </div>
                     </div>
                     {% if record.match_suggestions and not record.linked %}
                     <div class="quick-matches">
@@ -713,9 +719,15 @@
                         <span class="record-status {% if tx.linked %}status-linked{% elif tx.orphan_confirmed %}status-orphan{% elif tx.match_status == 'PROPOSED' %}status-review{% else %}status-pending{% endif %}">
                             {% if tx.linked %}✓ Linked{% elif tx.orphan_confirmed %}📍 Orphan{% elif tx.match_status == 'PROPOSED' %}👁 Proposed{% else %}⏳ Unmatched{% endif %}
                         </span>
-                        {% if tx.linked and tx.linked_document_id %}
-                        <span class="text-xs text-muted" title="{{ tx.linked_document_title }}">→ Doc #{{ tx.linked_document_id }}</span>
-                        {% endif %}
+                        <div class="flex gap-1 items-center">
+                            {% if tx.linked and tx.linked_document_id %}
+                            <span class="text-xs text-muted" title="{{ tx.linked_document_title }}">→ Doc #{{ tx.linked_document_id }}</span>
+                            {% endif %}
+                            <a href="{% url 'unified_review_detail' 'firefly' tx.firefly_id %}" 
+                               class="btn btn-outline btn-xs" onclick="event.stopPropagation();">
+                                📝 Review
+                            </a>
+                        </div>
                     </div>
                 </li>
                 {% endfor %}

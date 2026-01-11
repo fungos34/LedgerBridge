@@ -1268,3 +1268,228 @@ class StateStore:
             """
             ).fetchone()
             return result[0] if result else 0
+
+    # === Linkage Methods (Spark v1.0 - SSOT for import eligibility) ===
+
+    def create_linkage(
+        self,
+        extraction_id: int,
+        document_id: int,
+        firefly_id: int | None,
+        link_type: str,
+        confidence: float | None = None,
+        match_reasons: list[str] | None = None,
+        linked_by: str = "USER",
+        notes: str | None = None,
+    ) -> int:
+        """Create a linkage record between an extraction and Firefly transaction.
+        
+        Args:
+            extraction_id: The extraction ID to link
+            document_id: The Paperless document ID
+            firefly_id: The Firefly transaction ID (None for orphans)
+            link_type: One of PENDING, LINKED, ORPHAN, AUTO_LINKED
+            confidence: Match confidence score (0.0-1.0)
+            match_reasons: List of reasons for the match
+            linked_by: Who created the link (AUTO, USER, etc.)
+            notes: Optional notes about the linkage
+            
+        Returns:
+            The linkage record ID
+        """
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        reasons_json = json.dumps(match_reasons or [])
+        
+        with self._transaction() as conn:
+            # Check if linkage already exists for this extraction
+            existing = conn.execute(
+                "SELECT id FROM linkage WHERE extraction_id = ?",
+                (extraction_id,)
+            ).fetchone()
+            
+            if existing:
+                # Update existing linkage
+                conn.execute(
+                    """
+                    UPDATE linkage
+                    SET firefly_id = ?, link_type = ?, confidence = ?,
+                        match_reasons = ?, linked_at = ?, linked_by = ?, notes = ?
+                    WHERE extraction_id = ?
+                    """,
+                    (firefly_id, link_type, confidence, reasons_json, now, linked_by, notes, extraction_id),
+                )
+                return existing["id"]
+            else:
+                # Create new linkage
+                cursor = conn.execute(
+                    """
+                    INSERT INTO linkage
+                    (extraction_id, document_id, firefly_id, link_type, confidence, 
+                     match_reasons, linked_at, linked_by, notes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (extraction_id, document_id, firefly_id, link_type, confidence,
+                     reasons_json, now, linked_by, notes),
+                )
+                return cursor.lastrowid or 0
+
+    def get_linkage_by_extraction(self, extraction_id: int) -> dict[str, Any] | None:
+        """Get linkage record by extraction ID."""
+        with self._transaction() as conn:
+            row = conn.execute(
+                "SELECT * FROM linkage WHERE extraction_id = ?",
+                (extraction_id,)
+            ).fetchone()
+            return dict(row) if row else None
+
+    def get_linkage_by_document(self, document_id: int) -> dict[str, Any] | None:
+        """Get linkage record by document ID."""
+        with self._transaction() as conn:
+            row = conn.execute(
+                "SELECT * FROM linkage WHERE document_id = ?",
+                (document_id,)
+            ).fetchone()
+            return dict(row) if row else None
+
+    def get_linkage_by_firefly_id(self, firefly_id: int) -> dict[str, Any] | None:
+        """Get linkage record by Firefly transaction ID."""
+        with self._transaction() as conn:
+            row = conn.execute(
+                "SELECT * FROM linkage WHERE firefly_id = ?",
+                (firefly_id,)
+            ).fetchone()
+            return dict(row) if row else None
+
+    def update_linkage_type(
+        self,
+        extraction_id: int,
+        link_type: str,
+        firefly_id: int | None = None,
+        confidence: float | None = None,
+        linked_by: str = "USER",
+    ) -> bool:
+        """Update the link type for an extraction.
+        
+        Returns:
+            True if updated, False if not found
+        """
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        
+        with self._transaction() as conn:
+            if firefly_id is not None:
+                cursor = conn.execute(
+                    """
+                    UPDATE linkage
+                    SET link_type = ?, firefly_id = ?, confidence = ?, linked_at = ?, linked_by = ?
+                    WHERE extraction_id = ?
+                    """,
+                    (link_type, firefly_id, confidence, now, linked_by, extraction_id),
+                )
+            else:
+                cursor = conn.execute(
+                    """
+                    UPDATE linkage
+                    SET link_type = ?, linked_at = ?, linked_by = ?
+                    WHERE extraction_id = ?
+                    """,
+                    (link_type, now, linked_by, extraction_id),
+                )
+            return cursor.rowcount > 0
+
+    def get_importable_extractions(self) -> list[dict[str, Any]]:
+        """Get extractions that are eligible for import to Firefly.
+        
+        An extraction is importable if:
+        - It has been reviewed (AUTO or ACCEPTED/EDITED decision)
+        - It has a linkage record with type LINKED or ORPHAN
+        - It has not already been imported
+        
+        Returns:
+            List of extraction records with linkage info
+        """
+        with self._transaction() as conn:
+            rows = conn.execute(
+                """
+                SELECT e.*, l.link_type, l.firefly_id as linked_firefly_id,
+                       l.confidence as link_confidence, l.linked_at,
+                       i.status as import_status, i.error_message as import_error
+                FROM extractions e
+                JOIN linkage l ON e.id = l.extraction_id
+                LEFT JOIN imports i ON e.external_id = i.external_id
+                WHERE (e.review_state = 'AUTO' OR e.review_decision IN ('ACCEPTED', 'EDITED'))
+                AND l.link_type IN ('LINKED', 'ORPHAN')
+                AND (i.id IS NULL OR i.status = 'FAILED')
+                ORDER BY e.created_at DESC
+                """
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def get_unlinked_extractions(self) -> list[dict[str, Any]]:
+        """Get extractions that need linking before import.
+        
+        Returns extractions that:
+        - Have no linkage record, OR
+        - Have a PENDING linkage type
+        
+        Returns:
+            List of extraction records without linkage
+        """
+        with self._transaction() as conn:
+            rows = conn.execute(
+                """
+                SELECT e.*, l.link_type, pd.title as doc_title
+                FROM extractions e
+                LEFT JOIN linkage l ON e.id = l.extraction_id
+                LEFT JOIN paperless_documents pd ON e.document_id = pd.document_id
+                WHERE (l.id IS NULL OR l.link_type = 'PENDING')
+                AND e.review_state NOT IN ('IMPORTED')
+                ORDER BY e.created_at DESC
+                """
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def get_all_extractions_with_linkage(self) -> list[dict[str, Any]]:
+        """Get all extractions with their linkage status.
+        
+        Returns all extractions regardless of review state, including
+        linkage information for the reconciliation view.
+        """
+        with self._transaction() as conn:
+            rows = conn.execute(
+                """
+                SELECT e.*, l.link_type, l.firefly_id as linked_firefly_id,
+                       l.confidence as link_confidence,
+                       pd.title as doc_title,
+                       fc.description as linked_tx_description,
+                       fc.amount as linked_tx_amount,
+                       fc.date as linked_tx_date
+                FROM extractions e
+                LEFT JOIN linkage l ON e.id = l.extraction_id
+                LEFT JOIN paperless_documents pd ON e.document_id = pd.document_id
+                LEFT JOIN firefly_cache fc ON l.firefly_id = fc.firefly_id
+                WHERE e.review_state NOT IN ('IMPORTED')
+                ORDER BY e.created_at DESC
+                LIMIT 200
+                """
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def ensure_linkage_exists(self, extraction_id: int, document_id: int) -> int:
+        """Ensure a linkage record exists for an extraction.
+        
+        Creates a PENDING linkage if none exists.
+        
+        Returns:
+            The linkage record ID
+        """
+        existing = self.get_linkage_by_extraction(extraction_id)
+        if existing:
+            return existing["id"]
+        
+        return self.create_linkage(
+            extraction_id=extraction_id,
+            document_id=document_id,
+            firefly_id=None,
+            link_type="PENDING",
+            linked_by="SYSTEM",
+        )

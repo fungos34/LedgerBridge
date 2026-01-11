@@ -1,0 +1,393 @@
+{% extends "review/base.html" %}
+
+{% block title %}Unified Review - SparkLink{% endblock %}
+
+{% block extra_css %}
+<style>
+    .unified-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1.5rem;
+        margin-bottom: 1.5rem;
+    }
+    
+    @media (max-width: 1200px) {
+        .unified-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+    
+    .stats-bar {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+    }
+    
+    @media (max-width: 768px) {
+        .stats-bar {
+            grid-template-columns: repeat(2, 1fr);
+        }
+    }
+    
+    .stat-card {
+        background: white;
+        border-radius: 0.5rem;
+        padding: 1rem;
+        text-align: center;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+    
+    .stat-card .value {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: var(--gray-900);
+    }
+    
+    .stat-card .label {
+        font-size: 0.625rem;
+        color: var(--gray-500);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+    
+    .stat-card.warning .value { color: #d97706; }
+    .stat-card.success .value { color: #059669; }
+    .stat-card.info .value { color: #2563eb; }
+    
+    .panel {
+        background: white;
+        border-radius: 0.5rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        overflow: hidden;
+    }
+    
+    .panel-header {
+        padding: 1rem 1.25rem;
+        border-bottom: 1px solid var(--gray-200);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: var(--gray-50);
+    }
+    
+    .panel-header h2 {
+        font-size: 1rem;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    .panel-header .count {
+        background: var(--gray-200);
+        padding: 0.125rem 0.5rem;
+        border-radius: 9999px;
+        font-size: 0.75rem;
+        font-weight: 500;
+    }
+    
+    .panel-body {
+        max-height: 600px;
+        overflow-y: auto;
+    }
+    
+    .record-list {
+        list-style: none;
+    }
+    
+    .record-item {
+        padding: 1rem 1.25rem;
+        border-bottom: 1px solid var(--gray-100);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+        transition: background 0.15s;
+    }
+    
+    .record-item:hover {
+        background: var(--gray-50);
+    }
+    
+    .record-item.needs-action {
+        background: #fef3c7;
+        border-left: 3px solid #d97706;
+    }
+    
+    .record-item.linked {
+        background: #dcfce7;
+        border-left: 3px solid #059669;
+    }
+    
+    .record-item.orphan {
+        background: #fee2e2;
+        border-left: 3px solid #dc2626;
+    }
+    
+    .record-info {
+        flex: 1;
+        min-width: 0;
+    }
+    
+    .record-title {
+        font-weight: 600;
+        font-size: 0.875rem;
+        color: var(--gray-900);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 200px;
+    }
+    
+    .record-meta {
+        font-size: 0.75rem;
+        color: var(--gray-500);
+        display: flex;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+        margin-top: 0.25rem;
+    }
+    
+    .record-amount {
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-weight: 600;
+        white-space: nowrap;
+    }
+    
+    .record-status {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        padding: 0.125rem 0.5rem;
+        border-radius: 9999px;
+        font-size: 0.625rem;
+        font-weight: 500;
+        text-transform: uppercase;
+        white-space: nowrap;
+    }
+    
+    .status-needs-link { background: #fef3c7; color: #92400e; }
+    .status-needs-review { background: #dbeafe; color: #1d4ed8; }
+    .status-linked { background: #dcfce7; color: #166534; }
+    .status-orphan { background: #fee2e2; color: #991b1b; }
+    .status-ready { background: #d1fae5; color: #065f46; }
+    
+    .record-actions {
+        display: flex;
+        gap: 0.5rem;
+        flex-shrink: 0;
+    }
+    
+    .btn-review {
+        background: var(--primary);
+        color: white;
+        padding: 0.375rem 0.75rem;
+        border-radius: 0.375rem;
+        font-size: 0.75rem;
+        font-weight: 500;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+    }
+    
+    .btn-review:hover {
+        background: var(--primary-dark);
+        color: white;
+    }
+    
+    .empty-state {
+        padding: 3rem;
+        text-align: center;
+        color: var(--gray-500);
+    }
+    
+    .empty-state h3 {
+        margin-bottom: 0.5rem;
+    }
+    
+    /* Help text */
+    .help-banner {
+        background: #eff6ff;
+        border: 1px solid #bfdbfe;
+        border-radius: 0.5rem;
+        padding: 1rem 1.25rem;
+        margin-bottom: 1.5rem;
+        font-size: 0.875rem;
+        color: #1e40af;
+    }
+    
+    .help-banner h3 {
+        font-size: 0.875rem;
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+    }
+    
+    .help-banner ul {
+        margin: 0;
+        padding-left: 1.25rem;
+    }
+    
+    .help-banner li {
+        margin-bottom: 0.25rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Stats Bar -->
+<div class="stats-bar">
+    <div class="stat-card warning">
+        <div class="value">{{ stats.paperless_pending }}</div>
+        <div class="label">📄 Paperless Needs Action</div>
+    </div>
+    <div class="stat-card success">
+        <div class="value">{{ stats.paperless_ready }}</div>
+        <div class="label">✅ Ready to Import</div>
+    </div>
+    <div class="stat-card warning">
+        <div class="value">{{ stats.firefly_unmatched }}</div>
+        <div class="label">🏦 Firefly Unmatched</div>
+    </div>
+    <div class="stat-card info">
+        <div class="value">{{ stats.firefly_matched }}</div>
+        <div class="label">🔗 Firefly Matched</div>
+    </div>
+</div>
+
+<!-- Help Banner -->
+<div class="help-banner">
+    <h3>📋 Unified Review Workflow</h3>
+    <ul>
+        <li><strong>Review:</strong> Click "Review" on any record to edit details and set the category</li>
+        <li><strong>Link:</strong> Match Paperless documents to Firefly transactions (or mark as orphan)</li>
+        <li><strong>Import:</strong> Only linked or orphaned records can be imported to Firefly</li>
+    </ul>
+</div>
+
+<!-- Two-Column Grid -->
+<div class="unified-grid">
+    <!-- Paperless Documents Panel -->
+    <div class="panel">
+        <div class="panel-header">
+            <h2>📄 Paperless Documents <span class="count">{{ paperless_records|length }}</span></h2>
+        </div>
+        <div class="panel-body">
+            {% if paperless_records %}
+            <ul class="record-list">
+                {% for record in paperless_records %}
+                <li class="record-item {% if record.needs_linking or record.needs_review %}needs-action{% elif record.is_linked %}linked{% elif record.is_orphan %}orphan{% endif %}">
+                    <div class="record-info">
+                        <div class="record-title" title="{{ record.title }}">{{ record.title|truncatechars:30 }}</div>
+                        <div class="record-meta">
+                            <span class="record-amount">{{ record.currency }} {{ record.amount|default:"—" }}</span>
+                            <span>{{ record.date|default:"No date" }}</span>
+                            {% if record.vendor %}
+                            <span>→ {{ record.vendor|truncatechars:20 }}</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="record-status">
+                        {% if record.needs_linking %}
+                        <span class="status-needs-link">⚠️ Needs Link</span>
+                        {% elif record.needs_review %}
+                        <span class="status-needs-review">👁️ Needs Review</span>
+                        {% elif record.is_orphan %}
+                        <span class="status-orphan">📍 Orphan</span>
+                        {% elif record.is_linked %}
+                        <span class="status-linked">🔗 Linked</span>
+                        {% endif %}
+                        {% if record.ready_for_import %}
+                        <span class="status-ready">✅ Ready</span>
+                        {% endif %}
+                    </div>
+                    <div class="record-actions">
+                        <a href="{% url 'unified_review_detail' 'paperless' record.document_id %}" class="btn-review">
+                            📝 Review
+                        </a>
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <div class="empty-state">
+                <h3>No Paperless Documents</h3>
+                <p>Sync documents from Paperless to start reviewing</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    
+    <!-- Firefly Transactions Panel -->
+    <div class="panel">
+        <div class="panel-header">
+            <h2>🏦 Firefly Transactions <span class="count">{{ firefly_records|length }}</span></h2>
+        </div>
+        <div class="panel-body">
+            {% if firefly_records %}
+            <ul class="record-list">
+                {% for record in firefly_records %}
+                <li class="record-item {% if record.needs_linking %}needs-action{% elif record.is_linked %}linked{% elif record.is_orphan %}orphan{% endif %}">
+                    <div class="record-info">
+                        <div class="record-title" title="{{ record.description }}">{{ record.description|truncatechars:30 }}</div>
+                        <div class="record-meta">
+                            <span class="record-amount">{{ record.amount|default:"—" }}</span>
+                            <span>{{ record.date|default:"No date" }}</span>
+                            {% if record.destination_account %}
+                            <span>→ {{ record.destination_account|truncatechars:20 }}</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="record-status">
+                        {% if record.needs_linking %}
+                        <span class="status-needs-link">⚠️ Unmatched</span>
+                        {% elif record.is_orphan %}
+                        <span class="status-orphan">📍 No Receipt</span>
+                        {% elif record.is_linked %}
+                        <span class="status-linked">🔗 Linked</span>
+                        {% endif %}
+                    </div>
+                    <div class="record-actions">
+                        <a href="{% url 'unified_review_detail' 'firefly' record.firefly_id %}" class="btn-review">
+                            📝 Review
+                        </a>
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <div class="empty-state">
+                <h3>No Firefly Transactions</h3>
+                <p>Sync transactions from Firefly to start matching</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="card">
+    <div class="card-header">
+        <h2>Quick Actions</h2>
+    </div>
+    <div class="card-body">
+        <div class="flex gap-3 flex-wrap">
+            <form method="post" action="{% url 'sync_paperless' %}">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-outline">📄 Sync Paperless</button>
+            </form>
+            <form method="post" action="{% url 'sync_firefly_transactions' %}">
+                {% csrf_token %}
+                <input type="hidden" name="days" value="90">
+                <button type="submit" class="btn btn-outline">🏦 Sync Firefly (90 days)</button>
+            </form>
+            <form method="post" action="{% url 'run_auto_match' %}">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-primary">🔗 Run Auto-Match</button>
+            </form>
+            <a href="{% url 'import_queue' %}" class="btn btn-success">📤 Import Queue</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -119,6 +119,29 @@ urlpatterns = [
         name="api_sync_status",
     ),
     # ============================================================================
+    # Unified Review Routes (Spark v1.0 - Combined review + linking workflow)
+    # ============================================================================
+    path(
+        "unified-review/",
+        views.unified_review_list,
+        name="unified_review_list",
+    ),
+    path(
+        "unified-review/<str:record_type>/<int:record_id>/",
+        views.unified_review_detail,
+        name="unified_review_detail",
+    ),
+    path(
+        "api/link-suggestions/<str:record_type>/<int:record_id>/",
+        views.api_link_suggestions,
+        name="api_link_suggestions",
+    ),
+    path(
+        "api/quick-link/",
+        views.api_quick_link,
+        name="api_quick_link",
+    ),
+    # ============================================================================
     # LLM Control Routes (Phase 6-7 - SPARK_EVALUATION_REPORT.md 6.7/6.8)
     # ============================================================================
     path(
