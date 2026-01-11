@@ -2183,9 +2183,13 @@ def reconciliation_dashboard(request: HttpRequest) -> HttpResponse:
     conn = store._get_connection()
     try:
         rows = conn.execute(
-            """SELECT e.*, pd.title as doc_title
+            """SELECT e.*, pd.title as doc_title,
+                      fc.firefly_id as linked_firefly_id,
+                      fc.description as linked_firefly_description
                FROM extractions e
                LEFT JOIN paperless_documents pd ON e.document_id = pd.document_id
+               LEFT JOIN firefly_cache fc ON fc.matched_document_id = e.document_id 
+                                          AND fc.match_status IN ('MATCHED', 'CONFIRMED')
                WHERE e.review_state NOT IN ('IMPORTED')
                ORDER BY e.created_at DESC
                LIMIT 100"""
@@ -2209,8 +2213,19 @@ def reconciliation_dashboard(request: HttpRequest) -> HttpResponse:
                 )
                 record["category"] = proposal.get("category")
                 record["status"] = record.get("review_state", "PENDING")
-                record["linked"] = record.get("review_decision") == "LINKED"
+                
+                # Determine link status from review_decision OR from firefly_cache join
+                is_linked = (
+                    record.get("review_decision") == "LINKED" 
+                    or record.get("linked_firefly_id") is not None
+                )
+                record["linked"] = is_linked
                 record["orphan_confirmed"] = record.get("review_decision") == "ORPHAN_CONFIRMED"
+                
+                # Include linked firefly info for display
+                if record.get("linked_firefly_id"):
+                    record["linked_firefly_id"] = record["linked_firefly_id"]
+                    record["linked_firefly_description"] = record.get("linked_firefly_description", "")
 
                 # Get match suggestions for this document
                 suggestions = conn.execute(
@@ -2241,22 +2256,28 @@ def reconciliation_dashboard(request: HttpRequest) -> HttpResponse:
     finally:
         conn.close()
 
-    # Get Firefly records (cached transactions)
+    # Get Firefly records (cached transactions, excluding soft-deleted)
     firefly_records = []
     conn = store._get_connection()
     try:
         rows = conn.execute(
-            """SELECT * FROM firefly_cache
-               ORDER BY date DESC
+            """SELECT fc.*, pd.title as linked_document_title
+               FROM firefly_cache fc
+               LEFT JOIN paperless_documents pd ON fc.matched_document_id = pd.document_id
+               WHERE fc.deleted_at IS NULL
+               ORDER BY fc.date DESC
                LIMIT 100"""
         ).fetchall()
 
         for row in rows:
             record = dict(row)
-            record["linked"] = record.get("match_status") == "CONFIRMED"
+            # Check if linked - MATCHED or CONFIRMED status means linked
+            is_linked = record.get("match_status") in ("MATCHED", "CONFIRMED")
+            record["linked"] = is_linked
             record["orphan_confirmed"] = record.get("match_status") == "ORPHAN_CONFIRMED"
             record["category"] = record.get("category_name")
             record["linked_document_id"] = record.get("matched_document_id")
+            record["linked_document_title"] = record.get("linked_document_title", "")
             firefly_records.append(record)
 
     except Exception as e:
@@ -2682,6 +2703,15 @@ def accept_proposal(request: HttpRequest, proposal_id: int) -> HttpResponse:
         success = service.link_proposal(proposal_id, user_decision=True)
 
         if success:
+            # Also update the extraction's review_decision to LINKED
+            extraction = store.get_extraction_by_document(proposal["document_id"])
+            if extraction:
+                store.update_extraction_status(
+                    extraction.id,
+                    review_decision="LINKED",
+                    review_state="LINKED",
+                )
+            
             messages.success(
                 request,
                 f"Successfully linked document {proposal['document_id']} "
@@ -2765,14 +2795,14 @@ def manual_link(request: HttpRequest) -> HttpResponse:
 
     if not document_id or not firefly_id:
         messages.error(request, "Both document_id and firefly_id are required")
-        return redirect("reconciliation_list")
+        return redirect("reconciliation_dashboard")
 
     try:
         document_id_int = int(document_id)
         firefly_id_int = int(firefly_id)
     except ValueError:
         messages.error(request, "Invalid document_id or firefly_id")
-        return redirect("reconciliation_list")
+        return redirect("reconciliation_dashboard")
 
     store = _get_store()
 
@@ -2794,6 +2824,15 @@ def manual_link(request: HttpRequest) -> HttpResponse:
         )
 
         if success:
+            # Also update the extraction's review_decision to LINKED
+            extraction = store.get_extraction_by_document(document_id_int)
+            if extraction:
+                store.update_extraction_status(
+                    extraction.id,
+                    review_decision="LINKED",
+                    review_state="LINKED",
+                )
+            
             messages.success(
                 request,
                 f"Successfully linked document {document_id_int} to transaction {firefly_id_int}",
@@ -2805,7 +2844,7 @@ def manual_link(request: HttpRequest) -> HttpResponse:
         logger.error(f"Error manual linking doc {document_id} to tx {firefly_id}: {e}")
         messages.error(request, f"Error creating manual link: {e}")
 
-    return redirect("reconciliation_list")
+    return redirect("reconciliation_dashboard")
 
 
 @login_required
