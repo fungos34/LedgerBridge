@@ -325,24 +325,16 @@
 </div>
 
 <div class="landing-grid">
-    <!-- Review Queue -->
-    <a href="{% url 'list' %}" class="service-card primary">
+    <!-- Unified Review & Link (Consolidated entry point) -->
+    <a href="{% url 'unified_review_list' %}" class="service-card primary">
         <div class="service-icon">📋</div>
-        <div class="service-title">Review Queue</div>
-        <div class="service-desc">Review and approve extracted transactions from your documents</div>
+        <div class="service-title">Review & Link</div>
+        <div class="service-desc">Review extracted transactions and link documents to bank transactions</div>
         {% if pending_count > 0 %}
         <span class="service-badge pending">{{ pending_count }} pending</span>
         {% else %}
         <span class="service-badge ready">All clear!</span>
         {% endif %}
-    </a>
-    
-    <!-- Reconciliation -->
-    <a href="{% url 'reconciliation_dashboard' %}" class="service-card primary" title="Match documents with bank transactions">
-        <div class="service-icon">🔗</div>
-        <div class="service-title">Reconciliation</div>
-        <div class="service-desc">Match documents with existing bank transactions in Firefly</div>
-        <span class="service-badge" style="background: #dbeafe; color: #1e40af;">Link to Bank Tx</span>
     </a>
     
     <!-- Import Queue -->

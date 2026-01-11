@@ -933,7 +933,7 @@ class StateStore:
     def soft_delete_firefly_cache(self, firefly_id: int) -> bool:
         """
         Soft delete a Firefly cache entry by setting deleted_at timestamp.
-        
+
         This preserves audit trail while marking the record as removed from Firefly.
         Returns True if a record was updated, False if not found.
         """
@@ -952,10 +952,10 @@ class StateStore:
     def soft_delete_missing_firefly_transactions(self, current_firefly_ids: set[int]) -> int:
         """
         Soft delete cached entries that are no longer in Firefly.
-        
+
         Args:
             current_firefly_ids: Set of firefly_ids that currently exist in Firefly
-            
+
         Returns:
             Count of soft-deleted records
         """
@@ -966,13 +966,13 @@ class StateStore:
                 "SELECT firefly_id FROM firefly_cache WHERE deleted_at IS NULL"
             ).fetchall()
             cached_ids = {row["firefly_id"] for row in rows}
-            
+
             # Find IDs that were in cache but not in current Firefly
             deleted_ids = cached_ids - current_firefly_ids
-            
+
             if not deleted_ids:
                 return 0
-            
+
             # Soft delete them
             placeholders = ",".join("?" * len(deleted_ids))
             cursor = conn.execute(
@@ -1283,7 +1283,7 @@ class StateStore:
         notes: str | None = None,
     ) -> int:
         """Create a linkage record between an extraction and Firefly transaction.
-        
+
         Args:
             extraction_id: The extraction ID to link
             document_id: The Paperless document ID
@@ -1293,20 +1293,19 @@ class StateStore:
             match_reasons: List of reasons for the match
             linked_by: Who created the link (AUTO, USER, etc.)
             notes: Optional notes about the linkage
-            
+
         Returns:
             The linkage record ID
         """
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         reasons_json = json.dumps(match_reasons or [])
-        
+
         with self._transaction() as conn:
             # Check if linkage already exists for this extraction
             existing = conn.execute(
-                "SELECT id FROM linkage WHERE extraction_id = ?",
-                (extraction_id,)
+                "SELECT id FROM linkage WHERE extraction_id = ?", (extraction_id,)
             ).fetchone()
-            
+
             if existing:
                 # Update existing linkage
                 conn.execute(
@@ -1316,7 +1315,16 @@ class StateStore:
                         match_reasons = ?, linked_at = ?, linked_by = ?, notes = ?
                     WHERE extraction_id = ?
                     """,
-                    (firefly_id, link_type, confidence, reasons_json, now, linked_by, notes, extraction_id),
+                    (
+                        firefly_id,
+                        link_type,
+                        confidence,
+                        reasons_json,
+                        now,
+                        linked_by,
+                        notes,
+                        extraction_id,
+                    ),
                 )
                 return existing["id"]
             else:
@@ -1324,12 +1332,21 @@ class StateStore:
                 cursor = conn.execute(
                     """
                     INSERT INTO linkage
-                    (extraction_id, document_id, firefly_id, link_type, confidence, 
+                    (extraction_id, document_id, firefly_id, link_type, confidence,
                      match_reasons, linked_at, linked_by, notes)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (extraction_id, document_id, firefly_id, link_type, confidence,
-                     reasons_json, now, linked_by, notes),
+                    (
+                        extraction_id,
+                        document_id,
+                        firefly_id,
+                        link_type,
+                        confidence,
+                        reasons_json,
+                        now,
+                        linked_by,
+                        notes,
+                    ),
                 )
                 return cursor.lastrowid or 0
 
@@ -1337,8 +1354,7 @@ class StateStore:
         """Get linkage record by extraction ID."""
         with self._transaction() as conn:
             row = conn.execute(
-                "SELECT * FROM linkage WHERE extraction_id = ?",
-                (extraction_id,)
+                "SELECT * FROM linkage WHERE extraction_id = ?", (extraction_id,)
             ).fetchone()
             return dict(row) if row else None
 
@@ -1346,8 +1362,7 @@ class StateStore:
         """Get linkage record by document ID."""
         with self._transaction() as conn:
             row = conn.execute(
-                "SELECT * FROM linkage WHERE document_id = ?",
-                (document_id,)
+                "SELECT * FROM linkage WHERE document_id = ?", (document_id,)
             ).fetchone()
             return dict(row) if row else None
 
@@ -1355,8 +1370,7 @@ class StateStore:
         """Get linkage record by Firefly transaction ID."""
         with self._transaction() as conn:
             row = conn.execute(
-                "SELECT * FROM linkage WHERE firefly_id = ?",
-                (firefly_id,)
+                "SELECT * FROM linkage WHERE firefly_id = ?", (firefly_id,)
             ).fetchone()
             return dict(row) if row else None
 
@@ -1369,12 +1383,12 @@ class StateStore:
         linked_by: str = "USER",
     ) -> bool:
         """Update the link type for an extraction.
-        
+
         Returns:
             True if updated, False if not found
         """
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        
+
         with self._transaction() as conn:
             if firefly_id is not None:
                 cursor = conn.execute(
@@ -1398,12 +1412,12 @@ class StateStore:
 
     def get_importable_extractions(self) -> list[dict[str, Any]]:
         """Get extractions that are eligible for import to Firefly.
-        
+
         An extraction is importable if:
         - It has been reviewed (AUTO or ACCEPTED/EDITED decision)
         - It has a linkage record with type LINKED or ORPHAN
         - It has not already been imported
-        
+
         Returns:
             List of extraction records with linkage info
         """
@@ -1426,11 +1440,11 @@ class StateStore:
 
     def get_unlinked_extractions(self) -> list[dict[str, Any]]:
         """Get extractions that need linking before import.
-        
+
         Returns extractions that:
         - Have no linkage record, OR
         - Have a PENDING linkage type
-        
+
         Returns:
             List of extraction records without linkage
         """
@@ -1450,7 +1464,7 @@ class StateStore:
 
     def get_all_extractions_with_linkage(self) -> list[dict[str, Any]]:
         """Get all extractions with their linkage status.
-        
+
         Returns all extractions regardless of review state, including
         linkage information for the reconciliation view.
         """
@@ -1476,16 +1490,16 @@ class StateStore:
 
     def ensure_linkage_exists(self, extraction_id: int, document_id: int) -> int:
         """Ensure a linkage record exists for an extraction.
-        
+
         Creates a PENDING linkage if none exists.
-        
+
         Returns:
             The linkage record ID
         """
         existing = self.get_linkage_by_extraction(extraction_id)
         if existing:
             return existing["id"]
-        
+
         return self.create_linkage(
             extraction_id=extraction_id,
             document_id=document_id,

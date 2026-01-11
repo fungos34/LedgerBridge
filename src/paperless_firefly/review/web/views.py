@@ -6,6 +6,7 @@ import json
 import logging
 import threading
 import traceback
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
 import requests
@@ -370,7 +371,7 @@ def user_settings(request: HttpRequest) -> HttpResponse:
 @login_required
 def review_list(request: HttpRequest) -> HttpResponse:
     """List all extractions pending review.
-    
+
     DEPRECATED: This view is maintained for backwards compatibility.
     Users are redirected to the unified review list which combines
     review and linking functionality.
@@ -1622,14 +1623,16 @@ def run_extract(request: HttpRequest) -> HttpResponse:
                             tags=tx.tags,
                         )
 
-                    _extraction_status[
-                        "result"
-                    ] = f"Extraction completed. Also synced {len(transactions)} Firefly transactions."
+                    _extraction_status["result"] = (
+                        f"Extraction completed. Also synced {len(transactions)} Firefly transactions."
+                    )
                 except Exception as firefly_err:
-                    logger.warning(f"Firefly sync failed (extraction still succeeded): {firefly_err}")
-                    _extraction_status[
-                        "result"
-                    ] = f"Extraction completed (Firefly sync failed: {firefly_err})"
+                    logger.warning(
+                        f"Firefly sync failed (extraction still succeeded): {firefly_err}"
+                    )
+                    _extraction_status["result"] = (
+                        f"Extraction completed (Firefly sync failed: {firefly_err})"
+                    )
             else:
                 _extraction_status["result"] = f"Extraction completed with exit code {result}"
 
@@ -2184,7 +2187,7 @@ def _get_reconciliation_dashboard_stats(store: StateStore) -> dict:
 def reconciliation_dashboard(request: HttpRequest) -> HttpResponse:
     """
     DEPRECATED: Redirects to unified_review_list.
-    
+
     The unified review list combines all review and reconciliation
     functionality in one place.
     """
@@ -2195,7 +2198,7 @@ def reconciliation_dashboard(request: HttpRequest) -> HttpResponse:
 def reconciliation_dashboard_legacy(request: HttpRequest) -> HttpResponse:
     """
     Legacy reconciliation dashboard - kept for direct access if needed.
-    
+
     Unified reconciliation dashboard showing both Paperless documents
     and Firefly transactions side-by-side.
 
@@ -2231,7 +2234,7 @@ def reconciliation_dashboard_legacy(request: HttpRequest) -> HttpResponse:
                       fc.description as linked_firefly_description
                FROM extractions e
                LEFT JOIN paperless_documents pd ON e.document_id = pd.document_id
-               LEFT JOIN firefly_cache fc ON fc.matched_document_id = e.document_id 
+               LEFT JOIN firefly_cache fc ON fc.matched_document_id = e.document_id
                                           AND fc.match_status IN ('MATCHED', 'CONFIRMED')
                WHERE e.review_state NOT IN ('IMPORTED')
                ORDER BY e.created_at DESC
@@ -2256,19 +2259,21 @@ def reconciliation_dashboard_legacy(request: HttpRequest) -> HttpResponse:
                 )
                 record["category"] = proposal.get("category")
                 record["status"] = record.get("review_state", "PENDING")
-                
+
                 # Determine link status from review_decision OR from firefly_cache join
                 is_linked = (
-                    record.get("review_decision") == "LINKED" 
+                    record.get("review_decision") == "LINKED"
                     or record.get("linked_firefly_id") is not None
                 )
                 record["linked"] = is_linked
                 record["orphan_confirmed"] = record.get("review_decision") == "ORPHAN_CONFIRMED"
-                
+
                 # Include linked firefly info for display
                 if record.get("linked_firefly_id"):
                     record["linked_firefly_id"] = record["linked_firefly_id"]
-                    record["linked_firefly_description"] = record.get("linked_firefly_description", "")
+                    record["linked_firefly_description"] = record.get(
+                        "linked_firefly_description", ""
+                    )
 
                 # Get match suggestions for this document
                 suggestions = conn.execute(
@@ -2483,7 +2488,7 @@ def run_auto_match(request: HttpRequest) -> HttpResponse:
     except Exception as e:
         logger.exception(f"Error running auto-match: {e}")
         messages.error(request, f"Error running auto-match: {e}")
-    
+
     return redirect("unified_review_list")
 
 
@@ -2548,6 +2553,7 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
             # Generate external_id with proper arguments
             # Use document hash as source_hash, default amount for sync
             from hashlib import sha256
+
             doc_hash = sha256(f"paperless-{doc_id}-{doc.title or ''}".encode()).hexdigest()
             external_id = generate_external_id(
                 document_id=doc_id,
@@ -2578,7 +2584,7 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
 def reconciliation_list(request: HttpRequest) -> HttpResponse:
     """
     DEPRECATED: Redirects to unified_review_list.
-    
+
     The unified review list shows all pending proposals and records.
     """
     return redirect("unified_review_list")
@@ -2763,7 +2769,7 @@ def accept_proposal(request: HttpRequest, proposal_id: int) -> HttpResponse:
                     review_decision="LINKED",
                     review_state="LINKED",
                 )
-            
+
             messages.success(
                 request,
                 f"Successfully linked document {proposal['document_id']} "
@@ -2884,7 +2890,7 @@ def manual_link(request: HttpRequest) -> HttpResponse:
                     review_decision="LINKED",
                     review_state="LINKED",
                 )
-            
+
             messages.success(
                 request,
                 f"Successfully linked document {document_id_int} to transaction {firefly_id_int}",
@@ -2990,7 +2996,7 @@ def link_document_to_transaction(request: HttpRequest) -> HttpResponse:
 def unlinked_transactions(request: HttpRequest) -> HttpResponse:
     """
     DEPRECATED: Redirects to unified_review_list.
-    
+
     The unified review list shows all unlinked records including
     Firefly transactions without receipts.
     """
@@ -3399,27 +3405,28 @@ def _get_top_match_suggestions(
     max_results: int = 3,
 ) -> list[dict]:
     """Get top matching suggestions for linking.
-    
+
     For Paperless documents: find matching Firefly transactions
     For Firefly transactions: find matching Paperless documents
-    
+
     Returns list of suggested matches with confidence scores.
     """
     from ...matching.engine import MatchingEngine
-    
+
     suggestions = []
-    
+
     try:
         from ...config import Config
+
         config = Config.load(_get_config_path())
         engine = MatchingEngine(store, config)
-        
+
         if record_type == "paperless":
             # Get extraction for this document
             extraction_record = store.get_extraction_by_document(record_id)
             if not extraction_record:
                 return []
-            
+
             try:
                 extraction_data = json.loads(extraction_record.extraction_json)
                 extraction_dict = {
@@ -3428,35 +3435,40 @@ def _get_top_match_suggestions(
                     "vendor": extraction_data.get("proposal", {}).get("destination_account"),
                     "description": extraction_data.get("proposal", {}).get("description"),
                 }
-                
+
                 matches = engine.find_matches(
                     document_id=record_id,
                     extraction=extraction_dict,
                     max_results=max_results,
                 )
-                
+
                 for match in matches:
                     cached_tx = store.get_firefly_cache_entry(match.firefly_id)
                     if cached_tx:
-                        suggestions.append({
-                            "id": match.firefly_id,
-                            "type": "firefly",
-                            "score": round(match.total_score * 100, 1),
-                            "amount": cached_tx.get("amount"),
-                            "date": cached_tx.get("date"),
-                            "description": cached_tx.get("description"),
-                            "destination": cached_tx.get("destination_account"),
-                            "reasons": match.reasons,
-                        })
+                        suggestions.append(
+                            {
+                                "id": match.firefly_id,
+                                "type": "firefly",
+                                "score": round(match.total_score * 100, 1),
+                                "amount": cached_tx.get("amount"),
+                                "date": cached_tx.get("date"),
+                                "description": cached_tx.get("description"),
+                                # FIX: Use consistent key names (both vendor AND destination_account)
+                                "vendor": cached_tx.get("destination_account"),
+                                "destination_account": cached_tx.get("destination_account"),
+                                "source_account": cached_tx.get("source_account"),
+                                "reasons": match.reasons,
+                            }
+                        )
             except (json.JSONDecodeError, TypeError):
                 pass
-        
+
         elif record_type == "firefly":
             # Get Firefly transaction from cache
             tx = store.get_firefly_cache_entry(record_id)
             if not tx:
                 return []
-            
+
             # Build extraction-like dict for matching
             tx_dict = {
                 "amount": tx.get("amount"),
@@ -3464,7 +3476,7 @@ def _get_top_match_suggestions(
                 "vendor": tx.get("destination_account") or tx.get("source_account"),
                 "description": tx.get("description"),
             }
-            
+
             # Get all unlinked extractions and score them against this transaction
             conn = store._get_connection()
             try:
@@ -3478,24 +3490,26 @@ def _get_top_match_suggestions(
                     LIMIT 50
                     """
                 ).fetchall()
-                
+
                 for row in rows:
                     try:
                         extraction_data = json.loads(row["extraction_json"])
                         extraction_dict = {
                             "amount": extraction_data.get("proposal", {}).get("amount"),
                             "date": extraction_data.get("proposal", {}).get("date"),
-                            "vendor": extraction_data.get("proposal", {}).get("destination_account"),
+                            "vendor": extraction_data.get("proposal", {}).get(
+                                "destination_account"
+                            ),
                             "description": extraction_data.get("proposal", {}).get("description"),
                         }
-                        
+
                         # Calculate match score using engine's scoring methods
                         from decimal import Decimal
-                        
+
                         # Simple amount and date matching for now
                         amount_score = 0.0
                         date_score = 0.0
-                        
+
                         tx_amount = tx_dict.get("amount")
                         ext_amount = extraction_dict.get("amount")
                         if tx_amount and ext_amount:
@@ -3512,13 +3526,14 @@ def _get_top_match_suggestions(
                                         amount_score = 0.5
                             except Exception:
                                 pass
-                        
+
                         # Date matching
                         tx_date = tx_dict.get("date")
                         ext_date = extraction_dict.get("date")
                         if tx_date and ext_date:
                             try:
                                 from datetime import datetime
+
                                 tx_dt = datetime.fromisoformat(str(tx_date)[:10])
                                 ext_dt = datetime.fromisoformat(str(ext_date)[:10])
                                 diff_days = abs((tx_dt - ext_dt).days)
@@ -3530,45 +3545,50 @@ def _get_top_match_suggestions(
                                     date_score = 0.5
                             except Exception:
                                 pass
-                        
+
                         total_score = (amount_score * 0.6) + (date_score * 0.4)
-                        
+
                         if total_score >= 0.3:  # Minimum threshold
-                            suggestions.append({
-                                "id": row["document_id"],
-                                "extraction_id": row["id"],
-                                "type": "paperless",
-                                "score": round(total_score * 100, 1),
-                                "title": extraction_data.get("paperless_title") or row.get("doc_title"),
-                                "amount": ext_amount,
-                                "date": ext_date,
-                                "vendor": extraction_dict.get("vendor"),
-                                "reasons": [],
-                            })
+                            suggestions.append(
+                                {
+                                    "id": row["document_id"],
+                                    "extraction_id": row["id"],
+                                    "type": "paperless",
+                                    "score": round(total_score * 100, 1),
+                                    "title": extraction_data.get("paperless_title")
+                                    or row.get("doc_title"),
+                                    "amount": ext_amount,
+                                    "date": ext_date,
+                                    # FIX: Include both vendor AND destination_account for consistency
+                                    "vendor": extraction_dict.get("vendor"),
+                                    "destination_account": extraction_dict.get("vendor"),
+                                    "reasons": [],
+                                }
+                            )
                     except (json.JSONDecodeError, TypeError):
                         continue
             finally:
                 conn.close()
-            
+
             # Sort by score and limit
             suggestions.sort(key=lambda x: x["score"], reverse=True)
             suggestions = suggestions[:max_results]
-    
+
     except Exception as e:
         logger.error(f"Error getting match suggestions: {e}")
-    
+
     return suggestions
 
 
 @login_required
 def unified_review_list(request: HttpRequest) -> HttpResponse:
     """Unified review list showing both Paperless and Firefly records.
-    
+
     This view combines the review queue and reconciliation dashboard,
     showing all records that need review and/or linking before import.
     """
     store = _get_store()
-    
+
     # Get all extractions with their linkage status
     paperless_records = []
     conn = store._get_connection()
@@ -3584,8 +3604,8 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
             LEFT JOIN paperless_documents pd ON e.document_id = pd.document_id
             LEFT JOIN firefly_cache fc ON l.firefly_id = fc.firefly_id
             WHERE e.review_state NOT IN ('IMPORTED')
-            ORDER BY 
-                CASE 
+            ORDER BY
+                CASE
                     WHEN l.link_type IS NULL OR l.link_type = 'PENDING' THEN 0
                     ELSE 1
                 END,
@@ -3593,7 +3613,7 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
             LIMIT 100
             """
         ).fetchall()
-        
+
         for row in rows:
             record = dict(row)
             try:
@@ -3610,36 +3630,35 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
                 record["vendor"] = proposal.get("destination_account")
                 record["category"] = proposal.get("category")
                 record["confidence"] = record.get("overall_confidence", 0) * 100
-                
+
                 # Link status
                 link_type = record.get("link_type")
                 record["needs_linking"] = link_type is None or link_type == "PENDING"
                 record["is_linked"] = link_type == "LINKED" or link_type == "AUTO_LINKED"
                 record["is_orphan"] = link_type == "ORPHAN"
-                
+
                 # Review status
                 record["needs_review"] = (
                     record.get("review_state") in ("REVIEW", "MANUAL")
                     and record.get("review_decision") is None
                 )
-                
+
                 # Ready for import?
-                record["ready_for_import"] = (
-                    (record["is_linked"] or record["is_orphan"])
-                    and (record.get("review_state") == "AUTO" 
-                         or record.get("review_decision") in ("ACCEPTED", "EDITED"))
+                record["ready_for_import"] = (record["is_linked"] or record["is_orphan"]) and (
+                    record.get("review_state") == "AUTO"
+                    or record.get("review_decision") in ("ACCEPTED", "EDITED")
                 )
             except (json.JSONDecodeError, TypeError):
                 record["title"] = f"Document #{record['document_id']}"
                 record["needs_linking"] = True
                 record["needs_review"] = True
-            
+
             paperless_records.append(record)
     except Exception as e:
         logger.error(f"Error loading paperless records: {e}")
     finally:
         conn.close()
-    
+
     # Get Firefly records (unmatched transactions)
     firefly_records = []
     conn = store._get_connection()
@@ -3654,17 +3673,23 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
             LEFT JOIN extractions e ON l.extraction_id = e.id
             LEFT JOIN paperless_documents pd ON e.document_id = pd.document_id
             WHERE fc.deleted_at IS NULL
-            ORDER BY 
+            ORDER BY
                 CASE WHEN fc.match_status = 'UNMATCHED' THEN 0 ELSE 1 END,
                 fc.date DESC
             LIMIT 100
             """
         ).fetchall()
-        
+
         for row in rows:
             record = dict(row)
-            record["is_linked"] = record.get("match_status") in ("MATCHED", "CONFIRMED") or record.get("linked_extraction_id") is not None
-            record["needs_linking"] = record.get("match_status") == "UNMATCHED" and record.get("linked_extraction_id") is None
+            record["is_linked"] = (
+                record.get("match_status") in ("MATCHED", "CONFIRMED")
+                or record.get("linked_extraction_id") is not None
+            )
+            record["needs_linking"] = (
+                record.get("match_status") == "UNMATCHED"
+                and record.get("linked_extraction_id") is None
+            )
             record["is_orphan"] = record.get("match_status") == "ORPHAN_CONFIRMED"
             record["category"] = record.get("category_name")
             firefly_records.append(record)
@@ -3672,61 +3697,66 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
         logger.error(f"Error loading firefly records: {e}")
     finally:
         conn.close()
-    
+
     # Calculate stats
     stats = {
-        "paperless_pending": len([r for r in paperless_records if r.get("needs_linking") or r.get("needs_review")]),
+        "paperless_pending": len(
+            [r for r in paperless_records if r.get("needs_linking") or r.get("needs_review")]
+        ),
         "paperless_ready": len([r for r in paperless_records if r.get("ready_for_import")]),
         "firefly_unmatched": len([r for r in firefly_records if r.get("needs_linking")]),
         "firefly_matched": len([r for r in firefly_records if r.get("is_linked")]),
     }
-    
+
     context = {
         "paperless_records": paperless_records,
         "firefly_records": firefly_records,
         "stats": stats,
         **_get_external_urls(request.user if hasattr(request, "user") else None),
     }
-    
+
     return render(request, "review/unified_review_list.html", context)
 
 
 @login_required
 def unified_review_detail(request: HttpRequest, record_type: str, record_id: int) -> HttpResponse:
     """Unified review detail for both Paperless and Firefly records.
-    
+
     This view provides:
     - Full review form (amount, date, vendor, category, etc.)
     - Linking section with top 3 auto-suggested matches
     - Autofill from source data
     - Confidence scoring
-    
+
     Args:
         record_type: 'paperless' or 'firefly'
         record_id: Document ID (paperless) or Transaction ID (firefly)
     """
     store = _get_store()
-    
+
     record_data = {}
     extraction_data = {}
     source_data = {}
     linkage = None
-    
+
     if record_type == "paperless":
         # Get extraction record
         extraction_record = store.get_extraction_by_document(record_id)
         if not extraction_record:
-            return render(request, "review/not_found.html", {
-                "message": f"Paperless document {record_id} not found"
-            }, status=404)
-        
+            return render(
+                request,
+                "review/not_found.html",
+                {"message": f"Paperless document {record_id} not found"},
+                status=404,
+            )
+
         try:
             extraction_data = json.loads(extraction_record.extraction_json)
         except (json.JSONDecodeError, TypeError):
             extraction_data = {}
-        
+
         proposal = extraction_data.get("proposal", {})
-        
+
         record_data = {
             "type": "paperless",
             "id": record_id,
@@ -3738,6 +3768,8 @@ def unified_review_detail(request: HttpRequest, record_type: str, record_id: int
             "description": proposal.get("description"),
             "vendor": proposal.get("destination_account"),
             "source_account": proposal.get("source_account"),
+            # FIX: Always include destination_account key (even if None) to prevent template crash
+            "destination_account": proposal.get("destination_account"),
             "category": proposal.get("category"),
             "invoice_number": proposal.get("invoice_number"),
             "transaction_type": proposal.get("transaction_type", "withdrawal"),
@@ -3746,21 +3778,24 @@ def unified_review_detail(request: HttpRequest, record_type: str, record_id: int
             "review_decision": extraction_record.review_decision,
             "llm_opt_out": extraction_record.llm_opt_out,
         }
-        
+
         # Get linkage status
         linkage = store.get_linkage_by_extraction(extraction_record.id)
-        
+
         # Get provenance info
         source_data = extraction_data.get("provenance", {})
-        
+
     elif record_type == "firefly":
         # Get Firefly transaction from cache
         tx = store.get_firefly_cache_entry(record_id)
         if not tx:
-            return render(request, "review/not_found.html", {
-                "message": f"Firefly transaction {record_id} not found"
-            }, status=404)
-        
+            return render(
+                request,
+                "review/not_found.html",
+                {"message": f"Firefly transaction {record_id} not found"},
+                status=404,
+            )
+
         record_data = {
             "type": "firefly",
             "id": record_id,
@@ -3778,22 +3813,25 @@ def unified_review_detail(request: HttpRequest, record_type: str, record_id: int
             "match_status": tx.get("match_status"),
             "synced_at": tx.get("synced_at"),
         }
-        
+
         # Get linkage status
         linkage = store.get_linkage_by_firefly_id(record_id)
-        
+
         source_data = {
             "source": "firefly",
             "synced_at": tx.get("synced_at"),
         }
     else:
-        return render(request, "review/not_found.html", {
-            "message": f"Invalid record type: {record_type}"
-        }, status=404)
-    
+        return render(
+            request,
+            "review/not_found.html",
+            {"message": f"Invalid record type: {record_type}"},
+            status=404,
+        )
+
     # Get top match suggestions
     suggestions = _get_top_match_suggestions(store, record_type, record_id, max_results=3)
-    
+
     # Get Firefly accounts and categories for dropdowns
     firefly_accounts = []
     firefly_categories = []
@@ -3803,12 +3841,12 @@ def unified_review_detail(request: HttpRequest, record_type: str, record_id: int
         firefly_categories = client.list_categories()
     except Exception as e:
         logger.warning(f"Could not fetch Firefly data: {e}")
-    
+
     # LLM suggestion (for Paperless records)
     llm_suggestion = None
     if record_type == "paperless":
         llm_suggestion = _get_llm_suggestion_for_document(store, record_id)
-    
+
     # Determine link status
     link_status = "pending"
     linked_record = None
@@ -3831,7 +3869,7 @@ def unified_review_detail(request: HttpRequest, record_type: str, record_id: int
                         pass
         elif linkage.get("link_type") == "ORPHAN":
             link_status = "orphan"
-    
+
     context = {
         "record": record_data,
         "record_type": record_type,
@@ -3848,14 +3886,14 @@ def unified_review_detail(request: HttpRequest, record_type: str, record_id: int
         "llm_globally_enabled": _is_llm_globally_enabled(),
         **_get_external_urls(request.user if hasattr(request, "user") else None),
     }
-    
+
     return render(request, "review/unified_review_detail.html", context)
 
 
 @login_required
 def api_link_suggestions(request: HttpRequest, record_type: str, record_id: int) -> JsonResponse:
     """API endpoint to get link suggestions for a record.
-    
+
     Returns top 3 suggested matches from the other source.
     """
     store = _get_store()
@@ -3867,7 +3905,7 @@ def api_link_suggestions(request: HttpRequest, record_type: str, record_id: int)
 @require_http_methods(["POST"])
 def api_quick_link(request: HttpRequest) -> JsonResponse:
     """API endpoint to quickly link two records.
-    
+
     Expects JSON body with:
     - paperless_id: Document ID
     - firefly_id: Firefly transaction ID
@@ -3877,23 +3915,23 @@ def api_quick_link(request: HttpRequest) -> JsonResponse:
         body = json.loads(request.body) if request.body else {}
     except json.JSONDecodeError:
         return JsonResponse({"success": False, "error": "Invalid JSON"}, status=400)
-    
+
     paperless_id = body.get("paperless_id")
     firefly_id = body.get("firefly_id")
     mark_orphan = body.get("mark_orphan", False)
     confidence = body.get("confidence")
-    
+
     if not paperless_id:
         return JsonResponse({"success": False, "error": "paperless_id required"}, status=400)
-    
+
     store = _get_store()
-    
+
     try:
         # Get extraction for document
         extraction = store.get_extraction_by_document(int(paperless_id))
         if not extraction:
             return JsonResponse({"success": False, "error": "Extraction not found"}, status=404)
-        
+
         if mark_orphan:
             # Mark as orphan
             store.create_linkage(
@@ -3904,24 +3942,26 @@ def api_quick_link(request: HttpRequest) -> JsonResponse:
                 confidence=None,
                 linked_by="USER",
             )
-            
+
             # Update extraction status
             store.update_extraction_status(
                 extraction.id,
                 review_decision="ORPHAN_CONFIRMED",
                 review_state="ORPHAN_CONFIRMED",
             )
-            
-            return JsonResponse({
-                "success": True,
-                "message": f"Document {paperless_id} marked as orphan",
-                "link_type": "ORPHAN",
-            })
-        
+
+            return JsonResponse(
+                {
+                    "success": True,
+                    "message": f"Document {paperless_id} marked as orphan",
+                    "link_type": "ORPHAN",
+                }
+            )
+
         elif firefly_id:
             # Link to Firefly transaction
             firefly_id_int = int(firefly_id)
-            
+
             # Create linkage
             store.create_linkage(
                 extraction_id=extraction.id,
@@ -3931,14 +3971,14 @@ def api_quick_link(request: HttpRequest) -> JsonResponse:
                 confidence=confidence,
                 linked_by="USER",
             )
-            
+
             # Update extraction status
             store.update_extraction_status(
                 extraction.id,
                 review_decision="LINKED",
                 review_state="LINKED",
             )
-            
+
             # Update Firefly cache match status
             store.update_firefly_match_status(
                 firefly_id=firefly_id_int,
@@ -3946,14 +3986,16 @@ def api_quick_link(request: HttpRequest) -> JsonResponse:
                 document_id=int(paperless_id),
                 confidence=confidence,
             )
-            
+
             # Try to write linkage markers to Firefly
             try:
                 firefly_client = _get_firefly_client(request)
                 from ...config import load_config
+
                 config = load_config(_get_config_path())
-                
+
                 from ...services.reconciliation import ReconciliationService
+
                 service = ReconciliationService(
                     config=config,
                     state_store=store,
@@ -3965,18 +4007,19 @@ def api_quick_link(request: HttpRequest) -> JsonResponse:
                 )
             except Exception as e:
                 logger.warning(f"Could not write linkage to Firefly: {e}")
-            
-            return JsonResponse({
-                "success": True,
-                "message": f"Document {paperless_id} linked to transaction {firefly_id}",
-                "link_type": "LINKED",
-            })
+
+            return JsonResponse(
+                {
+                    "success": True,
+                    "message": f"Document {paperless_id} linked to transaction {firefly_id}",
+                    "link_type": "LINKED",
+                }
+            )
         else:
-            return JsonResponse({
-                "success": False,
-                "error": "Either firefly_id or mark_orphan required"
-            }, status=400)
-    
+            return JsonResponse(
+                {"success": False, "error": "Either firefly_id or mark_orphan required"}, status=400
+            )
+
     except Exception as e:
         logger.error(f"Error creating quick link: {e}")
         return JsonResponse({"success": False, "error": str(e)}, status=500)
@@ -3986,25 +4029,24 @@ def api_quick_link(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["POST"])
 def api_unlink(request: HttpRequest) -> JsonResponse:
     """API endpoint to remove a linkage between records.
-    
+
     This sets the linkage back to PENDING status, allowing re-linking.
     """
     store = _get_store()
-    
+
     try:
         data = json.loads(request.body)
         record_type = data.get("record_type")
         record_id = data.get("record_id")
-        
+
         if not record_type or not record_id:
-            return JsonResponse({
-                "success": False,
-                "error": "record_type and record_id required"
-            }, status=400)
-        
+            return JsonResponse(
+                {"success": False, "error": "record_type and record_id required"}, status=400
+            )
+
         record_id = int(record_id)
         linkage = None
-        
+
         if record_type == "paperless":
             # Get extraction by document ID
             extraction = store.get_extraction_by_document(record_id)
@@ -4013,24 +4055,22 @@ def api_unlink(request: HttpRequest) -> JsonResponse:
         elif record_type == "firefly":
             linkage = store.get_linkage_by_firefly_id(record_id)
         else:
-            return JsonResponse({
-                "success": False,
-                "error": f"Invalid record_type: {record_type}"
-            }, status=400)
-        
+            return JsonResponse(
+                {"success": False, "error": f"Invalid record_type: {record_type}"}, status=400
+            )
+
         if not linkage:
-            return JsonResponse({
-                "success": False,
-                "error": "No linkage found for this record"
-            }, status=404)
-        
+            return JsonResponse(
+                {"success": False, "error": "No linkage found for this record"}, status=404
+            )
+
         # Reset the linkage to PENDING
         store.update_linkage_type(
             linkage_id=linkage["id"],
             link_type="PENDING",
             linked_by="USER_UNLINKED",
         )
-        
+
         # If it was a Paperless extraction, reset the match status
         if record_type == "paperless" and linkage.get("firefly_id"):
             store.update_firefly_match_status(
@@ -4044,23 +4084,18 @@ def api_unlink(request: HttpRequest) -> JsonResponse:
             try:
                 conn.execute(
                     "UPDATE firefly_cache SET match_status = 'UNMATCHED', matched_document_id = NULL WHERE firefly_id = ?",
-                    (record_id,)
+                    (record_id,),
                 )
                 conn.commit()
             finally:
                 conn.close()
-        
-        return JsonResponse({
-            "success": True,
-            "message": "Linkage removed. Record is back to pending status."
-        })
-        
+
+        return JsonResponse(
+            {"success": True, "message": "Linkage removed. Record is back to pending status."}
+        )
+
     except json.JSONDecodeError:
-        return JsonResponse({
-            "success": False,
-            "error": "Invalid JSON body"
-        }, status=400)
+        return JsonResponse({"success": False, "error": "Invalid JSON body"}, status=400)
     except Exception as e:
         logger.error(f"Error removing link: {e}")
         return JsonResponse({"success": False, "error": str(e)}, status=500)
-

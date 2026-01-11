@@ -6,8 +6,6 @@ Provides admin interfaces for:
 2. State store models (read/write access to state.db tables)
 """
 
-import json
-
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.models import User
@@ -19,12 +17,12 @@ from .models import (
     FireflyCache,
     Import,
     InterpretationRun,
+    Linkage,
     MatchProposal,
     PaperlessDocument,
     UserProfile,
     VendorMapping,
 )
-
 
 # =============================================================================
 # User Profile Admin (Default Database)
@@ -369,3 +367,54 @@ class BankMatchAdmin(StateStoreAdmin):
     search_fields = ("bank_reference", "document_id")
     ordering = ("-matched_at",)
     readonly_fields = ("matched_at",)
+
+
+@admin.register(Linkage)
+class LinkageAdmin(StateStoreAdmin):
+    """Admin for document-transaction linkages.
+
+    The linkage table is the SSOT for import eligibility.
+    """
+
+    list_display = (
+        "id",
+        "document_id",
+        "extraction_id",
+        "firefly_id",
+        "link_type_colored",
+        "confidence_pct",
+        "linked_by",
+        "linked_at",
+    )
+    list_filter = ("link_type", "linked_by")
+    search_fields = ("document_id", "extraction_id", "firefly_id")
+    ordering = ("-linked_at",)
+    readonly_fields = ("linked_at",)
+
+    def link_type_colored(self, obj):
+        """Color-code the link type."""
+        colors = {
+            "LINKED": "#28a745",
+            "AUTO_LINKED": "#17a2b8",
+            "ORPHAN": "#ffc107",
+            "PENDING": "#6c757d",
+        }
+        color = colors.get(obj.link_type, "#6c757d")
+        text_color = "white" if obj.link_type != "ORPHAN" else "black"
+        return format_html(
+            '<span style="background-color: {}; color: {}; padding: 2px 8px; '
+            'border-radius: 3px; font-weight: bold;">{}</span>',
+            color,
+            text_color,
+            obj.link_type,
+        )
+
+    link_type_colored.short_description = "Link Type"
+
+    def confidence_pct(self, obj):
+        """Display confidence as percentage."""
+        if obj.confidence is None:
+            return "—"
+        return f"{obj.confidence * 100:.0f}%"
+
+    confidence_pct.short_description = "Confidence"

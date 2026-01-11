@@ -3,8 +3,6 @@ Django application initialization.
 """
 
 import os
-import sys
-from pathlib import Path
 
 
 def get_wsgi_application(config_path: str = None, state_db_path: str = None):

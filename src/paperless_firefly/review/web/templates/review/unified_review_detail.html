@@ -391,7 +391,7 @@
                                        id="destination_account" 
                                        name="destination_account" 
                                        class="form-input" 
-                                       value="{{ record.vendor|default:record.destination_account }}"
+                                       value="{{ record.vendor|default:record.destination_account|default:'' }}"
                                        {% if record_type == 'firefly' %}readonly{% endif %}>
                             </div>
                         </div>
@@ -541,9 +541,9 @@
                     <span class="suggestion-score">{{ suggestion.score }}%</span>
                 </div>
                 <div class="suggestion-meta">
-                    {{ suggestion.amount }} • {{ suggestion.date }}
+                    {{ suggestion.amount|default:"—" }} • {{ suggestion.date|default:"—" }}
                     {% if suggestion.vendor or suggestion.destination_account %}
-                    • {{ suggestion.vendor|default:suggestion.destination_account }}
+                    • {{ suggestion.vendor|default:suggestion.destination_account|default:"—" }}
                     {% endif %}
                 </div>
                 <div class="suggestion-actions">

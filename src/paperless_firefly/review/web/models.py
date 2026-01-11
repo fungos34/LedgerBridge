@@ -12,7 +12,6 @@ from django.db import models
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
-
 # =============================================================================
 # User Profile Model (Django default database)
 # =============================================================================
@@ -289,7 +288,9 @@ class InterpretationRun(StateStoreModel):
     llm_result = models.TextField(blank=True, null=True, help_text="JSON LLM result if used")
     final_state = models.TextField()
     suggested_category = models.TextField(blank=True, null=True)
-    suggested_splits = models.TextField(blank=True, null=True, help_text="JSON splits if applicable")
+    suggested_splits = models.TextField(
+        blank=True, null=True, help_text="JSON splits if applicable"
+    )
     auto_applied = models.BooleanField(default=False)
     decision_source = models.TextField(blank=True, null=True)
     firefly_write_action = models.TextField(blank=True, null=True)
@@ -326,3 +327,40 @@ class BankMatch(StateStoreModel):
 
     def __str__(self):
         return f"Bank Match: {self.bank_reference} ({self.bank_amount})"
+
+
+class Linkage(StateStoreModel):
+    """
+    Links between Paperless documents and Firefly transactions.
+    Maps to: linkage table in state.db
+
+    This is the SSOT for determining import eligibility:
+    - PENDING: Not yet linked, cannot be imported
+    - LINKED/AUTO_LINKED: Matched to existing Firefly transaction
+    - ORPHAN: No matching transaction (e.g., cash payment)
+
+    Only LINKED, AUTO_LINKED, and ORPHAN statuses can be imported.
+    """
+
+    id = models.AutoField(primary_key=True)
+    extraction_id = models.IntegerField(unique=True)
+    document_id = models.IntegerField()
+    firefly_id = models.IntegerField(blank=True, null=True, help_text="NULL for orphans")
+    link_type = models.TextField(
+        default="PENDING",
+        help_text="PENDING, LINKED, ORPHAN, or AUTO_LINKED",
+    )
+    confidence = models.FloatField(blank=True, null=True, help_text="Match confidence 0.0-1.0")
+    match_reasons = models.TextField(blank=True, null=True, help_text="JSON array of match reasons")
+    linked_at = models.TextField()
+    linked_by = models.TextField(blank=True, null=True, help_text="AUTO, USER, etc.")
+    notes = models.TextField(blank=True, null=True)
+
+    class Meta(StateStoreModel.Meta):
+        db_table = "linkage"
+        verbose_name = "Linkage"
+        verbose_name_plural = "Linkages"
+
+    def __str__(self):
+        link_target = f"FF#{self.firefly_id}" if self.firefly_id else "ORPHAN"
+        return f"Link: Doc#{self.document_id} → {link_target} ({self.link_type})"

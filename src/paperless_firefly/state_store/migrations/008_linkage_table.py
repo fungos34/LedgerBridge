@@ -28,28 +28,20 @@ def upgrade(conn: sqlite3.Connection) -> None:
             linked_at TEXT NOT NULL,
             linked_by TEXT,  -- 'AUTO', 'USER', etc.
             notes TEXT,  -- Optional user notes
-            
+
             FOREIGN KEY (extraction_id) REFERENCES extractions(id),
             FOREIGN KEY (document_id) REFERENCES paperless_documents(document_id),
-            
+
             UNIQUE(extraction_id)  -- One link per extraction
         )
         """
     )
-    
+
     # Create indexes for efficient queries
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_linkage_document_id ON linkage(document_id)"
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_linkage_firefly_id ON linkage(firefly_id)"
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_linkage_link_type ON linkage(link_type)"
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_linkage_extraction_id ON linkage(extraction_id)"
-    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_linkage_document_id ON linkage(document_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_linkage_firefly_id ON linkage(firefly_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_linkage_link_type ON linkage(link_type)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_linkage_extraction_id ON linkage(extraction_id)")
 
 
 def downgrade(conn: sqlite3.Connection) -> None:
