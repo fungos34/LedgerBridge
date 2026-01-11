@@ -363,13 +363,25 @@ def user_settings(request: HttpRequest) -> HttpResponse:
 
 
 # ============================================================================
-# Review Queue
+# Review Queue (DEPRECATED - redirects to unified_review_list)
 # ============================================================================
 
 
 @login_required
 def review_list(request: HttpRequest) -> HttpResponse:
-    """List all extractions pending review."""
+    """List all extractions pending review.
+    
+    DEPRECATED: This view is maintained for backwards compatibility.
+    Users are redirected to the unified review list which combines
+    review and linking functionality.
+    """
+    # Redirect to unified review list
+    return redirect("unified_review_list")
+
+
+@login_required
+def review_list_legacy(request: HttpRequest) -> HttpResponse:
+    """Legacy review list - kept for direct access if needed."""
     store = _get_store()
     pending = store.get_extractions_for_review()
 
@@ -2171,6 +2183,19 @@ def _get_reconciliation_dashboard_stats(store: StateStore) -> dict:
 @login_required
 def reconciliation_dashboard(request: HttpRequest) -> HttpResponse:
     """
+    DEPRECATED: Redirects to unified_review_list.
+    
+    The unified review list combines all review and reconciliation
+    functionality in one place.
+    """
+    return redirect("unified_review_list")
+
+
+@login_required
+def reconciliation_dashboard_legacy(request: HttpRequest) -> HttpResponse:
+    """
+    Legacy reconciliation dashboard - kept for direct access if needed.
+    
     Unified reconciliation dashboard showing both Paperless documents
     and Firefly transactions side-by-side.
 
@@ -2547,13 +2572,23 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
         logger.exception(f"Error syncing Paperless: {e}")
         messages.error(request, f"Error syncing: {e}")
 
-    return redirect("reconciliation_dashboard")
+    return redirect("unified_review_list")
 
 
 @login_required
 def reconciliation_list(request: HttpRequest) -> HttpResponse:
     """
-    List pending match proposals for review.
+    DEPRECATED: Redirects to unified_review_list.
+    
+    The unified review list shows all pending proposals and records.
+    """
+    return redirect("unified_review_list")
+
+
+@login_required
+def reconciliation_list_legacy(request: HttpRequest) -> HttpResponse:
+    """
+    Legacy list pending match proposals for review.
 
     Displays proposals sorted by confidence score, with transaction and
     document details for review.
@@ -2955,7 +2990,18 @@ def link_document_to_transaction(request: HttpRequest) -> HttpResponse:
 @login_required
 def unlinked_transactions(request: HttpRequest) -> HttpResponse:
     """
-    Show Firefly transactions that don't have linked documents.
+    DEPRECATED: Redirects to unified_review_list.
+    
+    The unified review list shows all unlinked records including
+    Firefly transactions without receipts.
+    """
+    return redirect("unified_review_list")
+
+
+@login_required
+def unlinked_transactions_legacy(request: HttpRequest) -> HttpResponse:
+    """
+    Legacy: Show Firefly transactions that don't have linked documents.
 
     Useful for finding transactions that need receipts.
     """
