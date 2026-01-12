@@ -202,10 +202,9 @@ class AIJobQueueService:
 
             # Get extraction data if available
             extraction_data = None
-            if extraction_id:
-                extraction = self.store.get_extraction(extraction_id)
-                if extraction:
-                    extraction_data = json.loads(extraction.extraction_json)
+            extraction = self.store.get_extraction_by_document(document_id)
+            if extraction:
+                extraction_data = json.loads(extraction.extraction_json)
 
             # Build context for AI
             context = self._build_ai_context(document, extraction_data)

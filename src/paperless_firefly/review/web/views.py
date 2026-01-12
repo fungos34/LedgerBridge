@@ -6,7 +6,7 @@ import json
 import logging
 import threading
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
 import requests
@@ -4540,15 +4540,47 @@ def api_quick_accept(request: HttpRequest, document_id: int) -> JsonResponse:
         extraction_data = json.loads(extraction.extraction_json) if extraction.extraction_json else {}
         proposal = extraction_data.get("proposal", {})
         
-        # Check if AI suggestions are available and apply them
+        # Track which AI suggestions were applied
+        ai_suggestions_applied = {}
+        original_values = {}
+        
+        # Check if AI suggestions are available and apply ALL of them
         ai_job = store.get_ai_job_by_document(document_id, active_only=False)
         if ai_job and ai_job["status"] == "COMPLETED" and ai_job.get("suggestions_json"):
             try:
                 suggestions = json.loads(ai_job["suggestions_json"])
-                # Apply category suggestion if available
-                if suggestions.get("category", {}).get("value"):
-                    proposal["category"] = suggestions["category"]["value"]
-                    extraction_data["proposal"] = proposal
+                
+                # Apply all available suggestions
+                field_mappings = {
+                    "category": "category",
+                    "description": "description",
+                    "destination_account": "destination_account",
+                    "date": "date",
+                    "amount": "amount",
+                    "transaction_type": "transaction_type",
+                }
+                
+                for suggestion_key, proposal_key in field_mappings.items():
+                    if suggestions.get(suggestion_key, {}).get("value"):
+                        original_values[proposal_key] = proposal.get(proposal_key)
+                        proposal[proposal_key] = suggestions[suggestion_key]["value"]
+                        ai_suggestions_applied[suggestion_key] = {
+                            "value": suggestions[suggestion_key]["value"],
+                            "confidence": suggestions[suggestion_key].get("confidence"),
+                            "original": original_values[proposal_key],
+                        }
+                
+                extraction_data["proposal"] = proposal
+                
+                # Store which AI suggestions were applied for audit
+                if "ai_applied" not in extraction_data:
+                    extraction_data["ai_applied"] = {}
+                extraction_data["ai_applied"] = {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "job_id": ai_job["id"],
+                    "suggestions": ai_suggestions_applied,
+                }
+                
             except json.JSONDecodeError:
                 logger.warning(f"Could not parse AI suggestions for document {document_id}")
         
@@ -4570,7 +4602,7 @@ def api_quick_accept(request: HttpRequest, document_id: int) -> JsonResponse:
             review_state="AUTO",
         )
         
-        # Create audit trail entry
+        # Create audit trail entry with detailed info about what was applied
         store.create_interpretation_run(
             document_id=document_id,
             firefly_id=None,
@@ -4579,16 +4611,20 @@ def api_quick_accept(request: HttpRequest, document_id: int) -> JsonResponse:
             inputs_summary={
                 "action": "quick_accept",
                 "document_id": document_id,
-                "ai_suggestions_applied": ai_job is not None and ai_job["status"] == "COMPLETED",
+                "ai_job_id": ai_job["id"] if ai_job else None,
+                "ai_suggestions_applied": ai_suggestions_applied,
+                "original_values": original_values,
             },
             final_state="ACCEPTED",
             duration_ms=0,
             decision_source="USER_QUICK_ACCEPT",
+            llm_result=ai_suggestions_applied if ai_suggestions_applied else None,
         )
 
         return JsonResponse({
             "success": True,
             "message": f"Document {document_id} accepted",
+            "ai_suggestions_applied": len(ai_suggestions_applied),
         })
 
     except Exception as e:
@@ -4985,11 +5021,10 @@ def _run_ai_job_now(request: HttpRequest, store: StateStore, job: dict) -> bool:
         # Get extraction data
         extraction_data = {}
         external_id = None
-        if extraction_id:
-            ext = store.get_extraction(extraction_id)
-            if ext:
-                extraction_data = json.loads(ext.extraction_json) if ext.extraction_json else {}
-                external_id = ext.external_id
+        ext = store.get_extraction_by_document(document_id)
+        if ext:
+            extraction_data = json.loads(ext.extraction_json) if ext.extraction_json else {}
+            external_id = ext.external_id
         
         proposal = extraction_data.get("proposal", {})
         

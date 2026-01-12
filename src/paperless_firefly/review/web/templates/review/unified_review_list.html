@@ -734,7 +734,7 @@ function markAsOrphan(paperlessId) {
 
 // Quick accept a document (applies AI suggestions and marks as accepted)
 function quickAcceptDocument(documentId) {
-    if (!confirm('Accept this document with current values?')) {
+    if (!confirm('Accept this document?\n\nIf AI has processed this document, all AI suggestions will be applied automatically.\n\nThis action will be recorded in the audit trail.')) {
         return;
     }
     
@@ -750,7 +750,12 @@ function quickAcceptDocument(documentId) {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            // Remove the accepted item from the list or reload
+            // Show message about how many AI suggestions were applied
+            let msg = 'Document accepted!';
+            if (data.ai_suggestions_applied && data.ai_suggestions_applied > 0) {
+                msg += ` (${data.ai_suggestions_applied} AI suggestion(s) applied)`;
+            }
+            alert(msg);
             location.reload();
         } else {
             alert('Error: ' + (data.error || 'Unknown error'));
