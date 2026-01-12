@@ -585,6 +585,9 @@ def _is_llm_globally_enabled() -> bool:
 
     Per SPARK_EVALUATION_REPORT.md 6.7.1: Global opt-out via config.llm.enabled.
     Environment variable SPARK_LLM_ENABLED takes precedence.
+    
+    Note: This only checks base config. For user-specific settings, use
+    _is_llm_enabled_for_user(request) instead.
     """
     import os
     from pathlib import Path
@@ -615,6 +618,39 @@ def _is_llm_globally_enabled() -> bool:
         pass
 
     return False  # Default to disabled if config unavailable
+
+
+def _is_llm_enabled_for_user(request: HttpRequest) -> bool:
+    """Check if LLM is enabled for the current user.
+    
+    Checks in order:
+    1. Environment variable SPARK_LLM_ENABLED (overrides all)
+    2. User profile llm_enabled setting
+    3. Base config llm.enabled
+    
+    Returns True if any of these enables LLM.
+    """
+    import os
+    from .models import UserProfile
+    
+    # Check environment variable first (takes precedence)
+    env_value = os.environ.get("SPARK_LLM_ENABLED", "").lower()
+    if env_value == "true":
+        return True
+    elif env_value == "false":
+        return False
+    
+    # Check user profile setting
+    if request.user.is_authenticated:
+        try:
+            profile = UserProfile.objects.get(user=request.user)
+            if profile.llm_enabled:
+                return True
+        except UserProfile.DoesNotExist:
+            pass
+    
+    # Fall back to global config check
+    return _is_llm_globally_enabled()
 
 
 @login_required
@@ -1248,14 +1284,15 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
     error_message = None
 
     try:
-        # Check if LLM is enabled
-        if not _is_llm_globally_enabled():
+        # Check if LLM is enabled (considering user profile)
+        if not _is_llm_enabled_for_user(request):
             final_state = "SKIPPED"
-            error_message = "LLM is not enabled. Enable it in config or set SPARK_LLM_ENABLED=true"
+            error_message = "LLM is not enabled. Enable it in Settings → AI Assistant or set SPARK_LLM_ENABLED=true"
         else:
             # Load config and create SparkAI service
             from ...config import load_config
             from ...spark_ai import SparkAIService
+            from .models import UserProfile
 
             config_path = (
                 Path(getattr(settings, "STATE_DB_PATH", "/app/data/state.db")).parent
@@ -1269,6 +1306,23 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
                 error_message = "Configuration file not found"
             else:
                 config = load_config(config_path)
+                
+                # Override config with user profile settings
+                try:
+                    profile = UserProfile.objects.get(user=request.user)
+                    if profile.llm_enabled:
+                        # User has enabled LLM - ensure config reflects this
+                        config.llm.enabled = True
+                        if profile.ollama_url:
+                            config.llm.ollama_url = profile.ollama_url
+                        if profile.ollama_model:
+                            config.llm.model_fast = profile.ollama_model
+                        if profile.ollama_model_fallback:
+                            config.llm.model_fallback = profile.ollama_model_fallback
+                        if profile.ollama_timeout:
+                            config.llm.timeout_seconds = profile.ollama_timeout
+                except UserProfile.DoesNotExist:
+                    pass
 
                 # Get categories from Firefly (pass request for user credentials)
                 firefly_client = _get_firefly_client(request)
@@ -1385,9 +1439,21 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
                             final_state = "COMPLETED"
                         else:
                             final_state = "NO_SUGGESTION"
-                            error_message = (
-                                "LLM did not return a suggestion (may be opted out or unavailable)"
-                            )
+                            # Try to diagnose why LLM returned no suggestion
+                            if not ai_service.is_enabled:
+                                error_message = "LLM service is not enabled. Check Settings → AI Assistant."
+                            else:
+                                # Check opt-out status
+                                opted_out, opt_reason = ai_service.check_opt_out(document_id)
+                                if opted_out:
+                                    error_message = f"LLM is opted out for this document: {opt_reason}"
+                                else:
+                                    # LLM call likely failed (timeout, connection, parsing)
+                                    error_message = (
+                                        f"LLM did not return a suggestion. This usually means the LLM request "
+                                        f"timed out (timeout: {config.llm.timeout_seconds}s) or failed to connect. "
+                                        f"Check that Ollama is running at {config.llm.ollama_url}"
+                                    )
 
         # Calculate duration
         duration_ms = int((time.time() - start_time) * 1000)

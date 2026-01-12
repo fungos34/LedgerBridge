@@ -218,8 +218,18 @@ class SparkAIService:
             else:
                 headers["Authorization"] = self.llm_config.auth_header
 
+        # Use explicit timeout configuration:
+        # - connect: 10 seconds for initial connection
+        # - read: full timeout for waiting for LLM response
+        # - write: 30 seconds for sending request
+        # - pool: 10 seconds for getting connection from pool
         self._client = httpx.Client(
-            timeout=float(self.llm_config.timeout_seconds),
+            timeout=httpx.Timeout(
+                connect=10.0,
+                read=float(self.llm_config.timeout_seconds),
+                write=30.0,
+                pool=10.0,
+            ),
             headers=headers,
         )
         self._category_prompt = CategoryPrompt()
@@ -752,9 +762,14 @@ class SparkAIService:
             # Debug logging only (never at INFO)
             logger.debug("Calling Ollama model %s at %s", model, self.llm_config.ollama_url)
 
-            response = self._client.post(
-                url, json=payload, timeout=float(self.llm_config.timeout_seconds)
+            # Use explicit Timeout with long read timeout for LLM inference
+            request_timeout = httpx.Timeout(
+                connect=10.0,
+                read=float(self.llm_config.timeout_seconds),
+                write=30.0,
+                pool=10.0,
             )
+            response = self._client.post(url, json=payload, timeout=request_timeout)
             response.raise_for_status()
 
             data = response.json()
@@ -1186,9 +1201,14 @@ class SparkAIService:
 
             logger.debug("Calling Ollama chat model %s at %s", model, url)
 
-            response = self._client.post(
-                url, json=payload, timeout=float(self.llm_config.timeout_seconds)
+            # Use explicit Timeout with long read timeout for LLM inference
+            request_timeout = httpx.Timeout(
+                connect=10.0,
+                read=float(self.llm_config.timeout_seconds),
+                write=30.0,
+                pool=10.0,
             )
+            response = self._client.post(url, json=payload, timeout=request_timeout)
             response.raise_for_status()
 
             data = response.json()
