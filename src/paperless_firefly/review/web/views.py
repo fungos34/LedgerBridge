@@ -1299,6 +1299,7 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
         # Record the interpretation run (audit trail)
         store.create_interpretation_run(
             document_id=document_id,
+            firefly_id=None,
             external_id=external_id,
             pipeline_version="1.0.0",
             inputs_summary={
@@ -1342,6 +1343,7 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
         # Record the failed run
         store.create_interpretation_run(
             document_id=document_id,
+            firefly_id=None,
             external_id=external_id,
             pipeline_version="1.0.0",
             inputs_summary={
