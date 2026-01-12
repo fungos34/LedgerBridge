@@ -86,7 +86,7 @@ class AIJobQueueService:
             priority=priority,
             scheduled_for=scheduled_for,
             created_by=created_by,
-            max_retries=self.config.llm.max_retries if hasattr(self.config, 'llm') else 3,
+            max_retries=self.config.llm.max_retries if hasattr(self.config, "llm") else 3,
             notes=notes,
         )
 
@@ -96,9 +96,7 @@ class AIJobQueueService:
                 f"(created_by={created_by})"
             )
         else:
-            logger.debug(
-                f"AI job already exists for document {document_id}"
-            )
+            logger.debug(f"AI job already exists for document {document_id}")
 
         return job_id
 
@@ -168,7 +166,7 @@ class AIJobQueueService:
         """
         job_id = job["id"]
         document_id = job["document_id"]
-        extraction_id = job.get("extraction_id")
+        # extraction_id available in job dict if needed: job.get("extraction_id")
 
         logger.info(f"Processing AI job #{job_id} for document {document_id}")
 
@@ -176,9 +174,7 @@ class AIJobQueueService:
         try:
             extraction = self.store.get_extraction_by_document(document_id)
             if extraction and extraction.llm_opt_out:
-                logger.info(
-                    f"Skipping AI job #{job_id} - document {document_id} has AI opted out"
-                )
+                logger.info(f"Skipping AI job #{job_id} - document {document_id} has AI opted out")
                 # Mark as completed with skip reason
                 self.store.start_ai_job(job_id)
                 self.store.complete_ai_job(
@@ -235,14 +231,14 @@ class AIJobQueueService:
 
     def _build_ai_context(
         self,
-        document: dict[str, Any],
+        document: Any,  # PaperlessDocument object
         extraction_data: dict[str, Any] | None,
     ) -> dict[str, Any]:
         """
         Build context dict for AI interpretation.
 
         Args:
-            document: Paperless document data
+            document: PaperlessDocument object from paperless_client
             extraction_data: Existing extraction data if available
 
         Returns:
@@ -255,14 +251,14 @@ class AIJobQueueService:
             "accounts": [],
         }
 
-        # Extract document content
+        # Extract document content from PaperlessDocument object
         content_parts = []
-        if document.get("title"):
-            content_parts.append(f"Title: {document['title']}")
-        if document.get("correspondent"):
-            content_parts.append(f"Correspondent: {document['correspondent']}")
-        if document.get("content"):
-            content_parts.append(document["content"])
+        if getattr(document, "title", None):
+            content_parts.append(f"Title: {document.title}")
+        if getattr(document, "correspondent", None):
+            content_parts.append(f"Correspondent: {document.correspondent}")
+        if getattr(document, "content", None):
+            content_parts.append(document.content)
 
         context["content"] = "\n\n".join(content_parts)
 
