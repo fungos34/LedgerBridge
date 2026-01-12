@@ -328,30 +328,27 @@
     <!-- Unified Review & Link (Consolidated entry point) -->
     <a href="{% url 'unified_review_list' %}" class="service-card primary">
         <div class="service-icon">📋</div>
-        <div class="service-title">Review & Link</div>
-        <div class="service-desc">Review extracted transactions and link documents to bank transactions</div>
-        {% if pending_count > 0 %}
-        <span class="service-badge pending">{{ pending_count }} pending</span>
+        <div class="service-title">Review & Import</div>
+        <div class="service-desc">Review extracted transactions, link documents to bank transactions, and import to Firefly III</div>
+        {% if pending_count > 0 or ready_to_import > 0 %}
+        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+            {% if pending_count > 0 %}
+            <span class="service-badge pending">{{ pending_count }} pending</span>
+            {% endif %}
+            {% if ready_to_import > 0 %}
+            <span class="service-badge ready">{{ ready_to_import }} ready</span>
+            {% endif %}
+        </div>
         {% else %}
         <span class="service-badge ready">All clear!</span>
         {% endif %}
     </a>
     
-    <!-- Import Queue -->
-    <a href="{% url 'import_queue' %}" class="service-card primary">
-        <div class="service-icon">📤</div>
-        <div class="service-title">Import to Firefly</div>
-        <div class="service-desc">Send approved transactions to Firefly III</div>
-        {% if ready_to_import > 0 %}
-        <span class="service-badge ready">{{ ready_to_import }} ready</span>
-        {% endif %}
-    </a>
-    
-    <!-- Document Browser (List/Unlist) -->
-    <a href="{% url 'document_browser' %}" class="service-card">
-        <div class="service-icon">📁</div>
-        <div class="service-title">Browse Documents</div>
-        <div class="service-desc">Select which Paperless documents to process</div>
+    <!-- Processing History (Archive, Documents, AI Queue, Audit) -->
+    <a href="{% url 'processing_history' %}" class="service-card primary">
+        <div class="service-icon">📊</div>
+        <div class="service-title">Processing History</div>
+        <div class="service-desc">View archive, manage documents, AI queue, and audit trail</div>
     </a>
     
     <!-- Paperless -->
