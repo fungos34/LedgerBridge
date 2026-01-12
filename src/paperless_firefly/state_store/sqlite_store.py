@@ -1820,7 +1820,13 @@ class StateStore:
         limit: int = 100,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
-        """Get list of AI jobs for display."""
+        """Get list of AI jobs for display.
+        
+        Orders by:
+        1. Status (PROCESSING first, then PENDING, then others)
+        2. Priority (higher priority first)
+        3. ID (older jobs first for same priority)
+        """
         with self._transaction() as conn:
             if status:
                 query = """
@@ -1828,7 +1834,9 @@ class StateStore:
                     FROM ai_job_queue aq
                     LEFT JOIN paperless_documents pd ON aq.document_id = pd.document_id
                     WHERE aq.status = ?
-                    ORDER BY aq.scheduled_at DESC
+                    ORDER BY 
+                        aq.priority DESC,
+                        aq.id ASC
                     LIMIT ? OFFSET ?
                 """
                 rows = conn.execute(query, (status.upper(), limit, offset)).fetchall()
@@ -1837,7 +1845,14 @@ class StateStore:
                     SELECT aq.*, pd.title as doc_title
                     FROM ai_job_queue aq
                     LEFT JOIN paperless_documents pd ON aq.document_id = pd.document_id
-                    ORDER BY aq.scheduled_at DESC
+                    ORDER BY 
+                        CASE aq.status 
+                            WHEN 'PROCESSING' THEN 0 
+                            WHEN 'PENDING' THEN 1 
+                            ELSE 2 
+                        END,
+                        aq.priority DESC,
+                        aq.id ASC
                     LIMIT ? OFFSET ?
                 """
                 rows = conn.execute(query, (limit, offset)).fetchall()

@@ -419,106 +419,103 @@
                     {% endfor %}
                 </div>
                 {% endif %}
-            </div>
-        </div>
-    </div>
-    
-    <!-- AI Schedule Settings -->
-    <div class="settings-card" id="ai-schedule">
-        <div class="settings-header">
-            <h2><span class="settings-icon">📅</span> AI Schedule</h2>
-            <p>Configure automatic background processing of AI interpretation jobs</p>
-        </div>
-        <div class="settings-body">
-            <div class="form-group">
-                <label class="form-label toggle-label">
-                    <input type="checkbox" 
-                           name="ai_schedule_enabled" 
-                           id="ai_schedule_enabled"
-                           {% if profile.ai_schedule_enabled %}checked{% endif %}
-                           onchange="toggleScheduleSettings()">
-                    <span class="toggle-text">Enable AI Scheduling</span>
-                </label>
-                <div class="form-help">Automatically schedule AI interpretation when documents are extracted</div>
-            </div>
-            
-            <div id="schedule-settings" style="{% if not profile.ai_schedule_enabled %}opacity: 0.5; pointer-events: none;{% endif %}">
-                <div class="form-row">
-                    <div class="form-group" style="flex: 1;">
-                        <label class="form-label" for="ai_schedule_interval_minutes">Processing Interval (minutes)</label>
-                        <input type="number" 
-                               name="ai_schedule_interval_minutes" 
-                               id="ai_schedule_interval_minutes"
-                               class="form-input"
-                               value="{{ profile.ai_schedule_interval_minutes|default:60 }}"
-                               min="1" max="1440"
-                               style="max-width: 120px;">
-                        <div class="form-help">Process one batch every N minutes (60 = once per hour)</div>
-                    </div>
-                    
-                    <div class="form-group" style="flex: 1;">
-                        <label class="form-label" for="ai_schedule_batch_size">Batch Size</label>
-                        <input type="number" 
-                               name="ai_schedule_batch_size" 
-                               id="ai_schedule_batch_size"
-                               class="form-input"
-                               value="{{ profile.ai_schedule_batch_size|default:1 }}"
-                               min="1" max="10"
-                               style="max-width: 80px;">
-                        <div class="form-help">Number of jobs per processing run</div>
-                    </div>
-                </div>
                 
-                <div class="form-row">
-                    <div class="form-group" style="flex: 1;">
-                        <label class="form-label" for="ai_schedule_start_hour">Start Hour</label>
-                        <input type="number" 
-                               name="ai_schedule_start_hour" 
-                               id="ai_schedule_start_hour"
-                               class="form-input"
-                               value="{{ profile.ai_schedule_start_hour|default:0 }}"
-                               min="0" max="23"
-                               style="max-width: 80px;">
-                        <div class="form-help">Start processing from this hour (0-23)</div>
+                <!-- AI Schedule Settings - integrated into AI Assistant section -->
+                <div class="settings-subsection" id="ai-schedule" style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--gray-200);">
+                    <div style="font-weight: 600; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                        📅 Background Processing Schedule
                     </div>
                     
-                    <div class="form-group" style="flex: 1;">
-                        <label class="form-label" for="ai_schedule_end_hour">End Hour</label>
-                        <input type="number" 
-                               name="ai_schedule_end_hour" 
-                               id="ai_schedule_end_hour"
-                               class="form-input"
-                               value="{{ profile.ai_schedule_end_hour|default:24 }}"
-                               min="1" max="24"
-                               style="max-width: 80px;">
-                        <div class="form-help">Stop processing after this hour (24 = no limit)</div>
+                    <div class="form-group">
+                        <label class="form-label toggle-label">
+                            <input type="checkbox" 
+                                   name="ai_schedule_enabled" 
+                                   id="ai_schedule_enabled"
+                                   {% if profile.ai_schedule_enabled %}checked{% endif %}
+                                   onchange="toggleScheduleSettings()">
+                            <span class="toggle-text">Enable Automatic AI Processing</span>
+                        </label>
+                        <div class="form-help">Automatically process AI jobs for new document extractions in the background</div>
                     </div>
                     
-                    <div class="form-group" style="flex: 1;">
-                        <label class="form-label" for="ai_schedule_max_retries">Max Retries</label>
-                        <input type="number" 
-                               name="ai_schedule_max_retries" 
-                               id="ai_schedule_max_retries"
-                               class="form-input"
-                               value="{{ profile.ai_schedule_max_retries|default:3 }}"
-                               min="0" max="10"
-                               style="max-width: 80px;">
-                        <div class="form-help">Retry failed jobs up to N times</div>
+                    <div id="schedule-settings" style="{% if not profile.ai_schedule_enabled %}opacity: 0.5; pointer-events: none;{% endif %}">
+                        <div class="form-row">
+                            <div class="form-group" style="flex: 1;">
+                                <label class="form-label" for="ai_schedule_interval_minutes">Interval (min)</label>
+                                <input type="number" 
+                                       name="ai_schedule_interval_minutes" 
+                                       id="ai_schedule_interval_minutes"
+                                       class="form-input"
+                                       value="{{ profile.ai_schedule_interval_minutes|default:60 }}"
+                                       min="1" max="1440"
+                                       style="max-width: 100px;">
+                                <div class="form-help">Processing interval</div>
+                            </div>
+                            
+                            <div class="form-group" style="flex: 1;">
+                                <label class="form-label" for="ai_schedule_batch_size">Batch Size</label>
+                                <input type="number" 
+                                       name="ai_schedule_batch_size" 
+                                       id="ai_schedule_batch_size"
+                                       class="form-input"
+                                       value="{{ profile.ai_schedule_batch_size|default:1 }}"
+                                       min="1" max="10"
+                                       style="max-width: 80px;">
+                                <div class="form-help">Jobs per run</div>
+                            </div>
+                            
+                            <div class="form-group" style="flex: 1;">
+                                <label class="form-label" for="ai_schedule_max_retries">Max Retries</label>
+                                <input type="number" 
+                                       name="ai_schedule_max_retries" 
+                                       id="ai_schedule_max_retries"
+                                       class="form-input"
+                                       value="{{ profile.ai_schedule_max_retries|default:3 }}"
+                                       min="0" max="10"
+                                       style="max-width: 80px;">
+                                <div class="form-help">Retry attempts</div>
+                            </div>
+                        </div>
+                        
+                        <div class="form-row">
+                            <div class="form-group" style="flex: 1;">
+                                <label class="form-label" for="ai_schedule_start_hour">Start Hour</label>
+                                <input type="number" 
+                                       name="ai_schedule_start_hour" 
+                                       id="ai_schedule_start_hour"
+                                       class="form-input"
+                                       value="{{ profile.ai_schedule_start_hour|default:0 }}"
+                                       min="0" max="23"
+                                       style="max-width: 80px;">
+                                <div class="form-help">0-23 hours</div>
+                            </div>
+                            
+                            <div class="form-group" style="flex: 1;">
+                                <label class="form-label" for="ai_schedule_end_hour">End Hour</label>
+                                <input type="number" 
+                                       name="ai_schedule_end_hour" 
+                                       id="ai_schedule_end_hour"
+                                       class="form-input"
+                                       value="{{ profile.ai_schedule_end_hour|default:24 }}"
+                                       min="1" max="24"
+                                       style="max-width: 80px;">
+                                <div class="form-help">1-24 hours</div>
+                            </div>
+                        </div>
+                        
+                        <!-- Queue Status -->
+                        <div class="queue-status-box" style="margin-top: 1rem; padding: 0.75rem 1rem; background: var(--gray-50); border-radius: 0.5rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+                            <div style="display: flex; gap: 1rem; font-size: 0.8125rem; flex-wrap: wrap;">
+                                <span><strong style="color: var(--gray-600);">{{ ai_queue_stats.pending }}</strong> pending</span>
+                                <span><strong style="color: var(--blue-600);">{{ ai_queue_stats.processing }}</strong> processing</span>
+                                <span><strong style="color: var(--green-600);">{{ ai_queue_stats.completed }}</strong> completed</span>
+                                <span><strong style="color: var(--red-600);">{{ ai_queue_stats.failed }}</strong> failed</span>
+                            </div>
+                            <a href="{% url 'ai_queue_list' %}" class="btn btn-xs btn-outline">
+                                View Queue →
+                            </a>
+                        </div>
                     </div>
-                </div>
-                
-                <!-- Queue Status -->
-                <div class="queue-status-box" style="margin-top: 1rem; padding: 1rem; background: var(--gray-50); border-radius: 0.5rem;">
-                    <h4 style="margin: 0 0 0.5rem 0; font-size: 0.875rem;">Queue Status</h4>
-                    <div style="display: flex; gap: 1.5rem; font-size: 0.875rem;">
-                        <span><strong>{{ ai_queue_stats.pending }}</strong> pending</span>
-                        <span><strong>{{ ai_queue_stats.processing }}</strong> processing</span>
-                        <span><strong>{{ ai_queue_stats.completed }}</strong> completed</span>
-                        <span><strong>{{ ai_queue_stats.failed }}</strong> failed</span>
-                    </div>
-                    <a href="{% url 'ai_queue_list' %}" style="font-size: 0.875rem; margin-top: 0.5rem; display: inline-block;">
-                        View Queue →
-                    </a>
                 </div>
             </div>
         </div>

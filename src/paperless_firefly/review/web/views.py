@@ -4943,7 +4943,11 @@ def api_chat(request: HttpRequest) -> JsonResponse:
 
 
 def _run_ai_job_now(request: HttpRequest, store: StateStore, job: dict) -> bool:
-    """Run an AI job immediately (synchronously)."""
+    """Run an AI job immediately (synchronously).
+    
+    Uses comprehensive suggest_for_review for complete field suggestions
+    including split transactions extraction.
+    """
     import time
     from pathlib import Path
 
@@ -5001,6 +5005,8 @@ def _run_ai_job_now(request: HttpRequest, store: StateStore, job: dict) -> bool:
                     config.llm.ollama_url = profile.ollama_url
                 if profile.ollama_model:
                     config.llm.model_fast = profile.ollama_model
+                if profile.ollama_timeout:
+                    config.llm.timeout_seconds = profile.ollama_timeout
         except UserProfile.DoesNotExist:
             pass
         
@@ -5027,47 +5033,90 @@ def _run_ai_job_now(request: HttpRequest, store: StateStore, job: dict) -> bool:
             external_id = ext.external_id
         
         proposal = extraction_data.get("proposal", {})
+        raw_text = extraction_data.get("raw_text", "")
+        confidence = extraction_data.get("confidence", {})
         
-        # Run AI interpretation
+        # Get linked bank transaction if available
+        bank_transaction = None
+        linkage = store.get_linkage_by_extraction(ext.id) if ext else None
+        if linkage and linkage.get("firefly_id"):
+            firefly_tx = store.get_firefly_cache_entry(linkage["firefly_id"])
+            if firefly_tx:
+                bank_transaction = {
+                    "amount": firefly_tx.get("amount"),
+                    "date": firefly_tx.get("date"),
+                    "description": firefly_tx.get("description"),
+                    "category_name": firefly_tx.get("category_name"),
+                    "source_account": firefly_tx.get("source_account"),
+                    "destination_account": firefly_tx.get("destination_account"),
+                }
+        
+        # Get previous AI decisions for context
+        previous_decisions = []
+        try:
+            runs = store.get_interpretation_runs(document_id, limit=3)
+            previous_decisions = [
+                {
+                    "decision_source": r.get("decision_source"),
+                    "final_state": r.get("final_state"),
+                    "suggested_category": r.get("suggested_category"),
+                }
+                for r in runs
+            ]
+        except Exception:
+            pass
+        
+        # Run comprehensive AI interpretation with suggest_for_review
         ai_service = SparkAIService(store, config, categories)
         
-        suggestion = ai_service.suggest_category(
+        suggestion = ai_service.suggest_for_review(
             amount=str(proposal.get("amount", "0")),
             date=proposal.get("date", ""),
             vendor=proposal.get("destination_account", ""),
             description=proposal.get("description", ""),
+            current_category=proposal.get("category"),
+            current_type=proposal.get("transaction_type", "withdrawal"),
+            invoice_number=proposal.get("invoice_number"),
+            ocr_confidence=confidence.get("overall", 0.0),
+            document_content=raw_text,
+            bank_transaction=bank_transaction,
+            previous_decisions=previous_decisions,
             document_id=document_id,
-            use_cache=False,
+            use_cache=False,  # Always fresh for user-triggered runs
         )
         
         duration_ms = int((time.time() - start_time) * 1000)
         
         if suggestion:
-            suggestions_json = json.dumps({
-                "category": {
-                    "value": suggestion.category,
-                    "confidence": suggestion.confidence,
-                    "reason": suggestion.reason,
-                },
-            })
+            # Build comprehensive suggestions JSON
+            suggestions_data = suggestion.to_dict()
+            suggestions_json = json.dumps(suggestions_data)
             store.complete_ai_job(job_id, suggestions_json)
             
             # Record audit trail
             store.create_interpretation_run(
                 document_id=document_id,
-                firefly_id=None,
+                firefly_id=linkage.get("firefly_id") if linkage else None,
                 external_id=external_id,
                 pipeline_version="1.0.0",
                 inputs_summary={
                     "action": "queue_run_now",
                     "job_id": job_id,
                     "triggered_by": "user",
+                    "has_splits": bool(suggestion.split_transactions),
+                    "num_field_suggestions": len(suggestion.suggestions),
                 },
                 final_state="COMPLETED",
                 duration_ms=duration_ms,
-                llm_result=suggestion.to_dict() if hasattr(suggestion, 'to_dict') else None,
-                suggested_category=suggestion.category,
+                llm_result=suggestions_data,
+                suggested_category=suggestion.suggestions.get("category", {}).get("value") if suggestion.suggestions.get("category") else None,
                 decision_source="USER_RUN_NOW",
+            )
+            
+            logger.info(
+                f"AI job #{job_id} completed in {duration_ms}ms with "
+                f"{len(suggestion.suggestions)} field suggestions"
+                f"{' + ' + str(len(suggestion.split_transactions)) + ' splits' if suggestion.split_transactions else ''}"
             )
             return True
         else:
@@ -5217,6 +5266,8 @@ def ai_queue_schedule(request: HttpRequest) -> JsonResponse:
     
     Supports run_immediately=true to execute the job synchronously.
     """
+    from .models import UserProfile
+    
     store = _get_store()
     
     document_id = request.POST.get("document_id")
@@ -5233,6 +5284,14 @@ def ai_queue_schedule(request: HttpRequest) -> JsonResponse:
     try:
         document_id = int(document_id)
         extraction_id = int(extraction_id) if extraction_id else None
+        
+        # Get max_retries from user profile settings
+        max_retries = 3  # default
+        try:
+            profile = UserProfile.objects.get(user=request.user)
+            max_retries = profile.ai_schedule_max_retries
+        except UserProfile.DoesNotExist:
+            pass
         
         # Check if there's an existing pending/processing job
         existing_job = store.get_ai_job_by_document(document_id, active_only=True)
@@ -5252,6 +5311,7 @@ def ai_queue_schedule(request: HttpRequest) -> JsonResponse:
             extraction_id=extraction_id,
             priority=priority,
             created_by="USER",
+            max_retries=max_retries,
         )
         
         if job_id:

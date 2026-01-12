@@ -264,6 +264,44 @@ class TestAIJobQueueOperations:
         assert job is not None
         assert job["status"] == "COMPLETED"
 
+    def test_complete_ai_job_with_split_transactions(self, store: StateStore):
+        """Test completing an AI job with comprehensive suggestions including splits."""
+        job_id = store.schedule_ai_job(document_id=123, created_by="TEST")
+        store.start_ai_job(job_id)
+
+        # Comprehensive suggestions matching what suggest_for_review produces
+        suggestions = {
+            "suggestions": {
+                "category": {"value": "Food & Dining", "confidence": 0.85, "reason": "Restaurant receipt"},
+                "transaction_type": {"value": "withdrawal", "confidence": 0.95, "reason": "This is a purchase"},
+                "destination_account": {"value": "Restaurant XYZ", "confidence": 0.90, "reason": "From header"},
+                "description": {"value": "Dinner at Restaurant XYZ", "confidence": 0.80, "reason": "Occasion"}
+            },
+            "split_transactions": [
+                {"amount": 15.99, "description": "Main course - Pasta", "category": "Food & Dining"},
+                {"amount": 4.50, "description": "Beverage - Soda", "category": "Food & Dining"},
+                {"amount": 3.00, "description": "Tip", "category": "Food & Dining"}
+            ],
+            "overall_confidence": 0.85,
+            "analysis_notes": "Receipt from Restaurant XYZ with 3 line items"
+        }
+        
+        result = store.complete_ai_job(job_id, json.dumps(suggestions))
+        assert result is True
+
+        job = store.get_ai_job(job_id)
+        assert job["status"] == "COMPLETED"
+        assert job["suggestions_json"] is not None
+        
+        # Verify all fields are retrievable
+        parsed = json.loads(job["suggestions_json"])
+        assert parsed["suggestions"]["category"]["value"] == "Food & Dining"
+        assert parsed["suggestions"]["destination_account"]["value"] == "Restaurant XYZ"
+        assert parsed["suggestions"]["description"]["value"] == "Dinner at Restaurant XYZ"
+        assert len(parsed["split_transactions"]) == 3
+        assert abs(sum(s["amount"] for s in parsed["split_transactions"]) - 23.49) < 0.01
+        assert parsed["overall_confidence"] == 0.85
+
 
 class TestAIJobQueueService:
     """Test AI Job Queue Service."""
@@ -303,3 +341,36 @@ class TestAIJobQueueService:
         stats = service.get_queue_stats()
         assert stats["pending"] == 2
         assert stats["total"] == 2
+
+    def test_get_job_suggestions_from_service(self, store: StateStore):
+        """Test retrieving completed job suggestions through service."""
+        from paperless_firefly.services.ai_queue import AIJobQueueService
+
+        service = AIJobQueueService(store, config=None)
+
+        # Schedule and complete a job with comprehensive suggestions
+        job_id = service.schedule_job(document_id=123, created_by="TEST")
+        assert job_id is not None
+        
+        # Simulate processing and completion
+        store.start_ai_job(job_id)
+        suggestions = {
+            "suggestions": {
+                "category": {"value": "Groceries", "confidence": 0.85, "reason": "Food items"},
+                "description": {"value": "Weekly shopping", "confidence": 0.80, "reason": "Regular purchase"}
+            },
+            "split_transactions": [
+                {"amount": 10.00, "description": "Bread, milk", "category": "Groceries"},
+                {"amount": 5.00, "description": "Snacks", "category": "Groceries"}
+            ],
+            "overall_confidence": 0.85,
+            "analysis_notes": "Receipt with line items"
+        }
+        store.complete_ai_job(job_id, json.dumps(suggestions))
+        
+        # Retrieve suggestions via service
+        result = service.get_job_suggestions(document_id=123)
+        assert result is not None
+        assert result["suggestions"]["category"]["value"] == "Groceries"
+        assert len(result["split_transactions"]) == 2
+        assert result["overall_confidence"] == 0.85
