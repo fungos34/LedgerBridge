@@ -181,6 +181,43 @@ class TestAIJobQueueOperations:
         assert job["status"] == "CANCELLED"
         assert job["completed_at"] is not None
 
+    def test_cancel_running_ai_job(self, store: StateStore):
+        """Test cancelling a running (PROCESSING) AI job."""
+        job_id = store.schedule_ai_job(document_id=123, created_by="TEST")
+        
+        # Start the job
+        store.start_ai_job(job_id)
+        job = store.get_ai_job(job_id)
+        assert job["status"] == "PROCESSING"
+        
+        # Cancel while running
+        result = store.cancel_ai_job(job_id)
+        assert result is True
+        
+        job = store.get_ai_job(job_id)
+        assert job["status"] == "CANCELLED"
+        assert job["completed_at"] is not None
+
+    def test_is_ai_job_cancelled(self, store: StateStore):
+        """Test checking if a job is cancelled."""
+        job_id = store.schedule_ai_job(document_id=123, created_by="TEST")
+        
+        # Not cancelled initially
+        assert store.is_ai_job_cancelled(job_id) is False
+        
+        # Start the job
+        store.start_ai_job(job_id)
+        assert store.is_ai_job_cancelled(job_id) is False
+        
+        # Cancel it
+        store.cancel_ai_job(job_id)
+        assert store.is_ai_job_cancelled(job_id) is True
+
+    def test_is_ai_job_cancelled_nonexistent(self, store: StateStore):
+        """Test checking cancellation status of non-existent job."""
+        # Non-existent job should return False
+        assert store.is_ai_job_cancelled(99999) is False
+
     def test_get_ai_queue_stats(self, store: StateStore):
         """Test getting queue statistics."""
         # Create jobs with different statuses

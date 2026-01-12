@@ -5069,7 +5069,12 @@ def _run_ai_job_now(request: HttpRequest, store: StateStore, job: dict) -> bool:
         # Run comprehensive AI interpretation with suggest_for_review
         # CRITICAL: Use no_timeout=True for scheduled jobs - LLM inference can take
         # minutes or even hours for complex documents and must NEVER be interrupted
+        # The cancel_check allows users to cancel via the UI (only way to stop)
         ai_service = SparkAIService(store, config, categories)
+        
+        # Create cancel check function that queries the database
+        def check_cancelled():
+            return store.is_ai_job_cancelled(job_id)
         
         suggestion = ai_service.suggest_for_review(
             amount=str(proposal.get("amount", "0")),
@@ -5086,7 +5091,13 @@ def _run_ai_job_now(request: HttpRequest, store: StateStore, job: dict) -> bool:
             document_id=document_id,
             use_cache=False,  # Always fresh for user-triggered runs
             no_timeout=True,  # NEVER timeout - wait indefinitely for LLM response
+            cancel_check=check_cancelled,  # Allow cancellation via UI
         )
+        
+        # Check if cancelled after completion
+        if store.is_ai_job_cancelled(job_id):
+            logger.info(f"AI job #{job_id} was cancelled")
+            return False
         
         duration_ms = int((time.time() - start_time) * 1000)
         

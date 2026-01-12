@@ -234,16 +234,24 @@ YOUR TASKS:
 
 Respond with complete JSON including split_transactions if items are visible."""
 
-# Build Ollama API request
+# Build Ollama API request - USE STREAMING for cancel support
 ollama_payload = {
     "model": MODEL,
     "messages": [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_message}
     ],
-    "stream": False,
+    "stream": True,  # STREAMING enabled for cancellation support
     "format": "json"
 }
+
+# Cancellation flag (in production this is checked against the database)
+# Press Ctrl+C to cancel
+cancelled = False
+
+def check_cancelled():
+    """Check if job should be cancelled (demo - checks global flag)."""
+    return cancelled
 
 print("=" * 80)
 print("TESTING OLLAMA INTEGRATION FROM DOCKER CONTAINER")
@@ -251,76 +259,105 @@ print("=" * 80)
 print(f"\nOllama URL: {OLLAMA_URL}")
 print(f"Model: {MODEL}")
 print("Timeout: NONE (will wait indefinitely)")
+print("Cancel: Press Ctrl+C to cancel the request")
 print(f"\nPayload size: {len(json.dumps(ollama_payload))} bytes")
 print(f"System prompt: {len(system_prompt)} chars")
 print(f"User message: {len(user_message)} chars")
 print("\n" + "=" * 80)
-print("SENDING REQUEST TO OLLAMA (no timeout - will wait as long as needed)...")
+print("SENDING REQUEST TO OLLAMA (streaming, no timeout)...")
 print("=" * 80)
 
 try:
-    # Make the request - NO TIMEOUT
+    # Make the request - STREAMING with NO TIMEOUT
     # LLM inference can take minutes or even hours, process must wait indefinitely
+    # Streaming allows checking for cancellation between chunks
+    content_parts = []
+    chunk_count = 0
+    
     with httpx.Client(timeout=None) as client:
-        response = client.post(
-            f"{OLLAMA_URL}/api/chat",
-            json=ollama_payload
-        )
+        with client.stream("POST", f"{OLLAMA_URL}/api/chat", json=ollama_payload) as response:
+            response.raise_for_status()
+            print(f"\nHTTP Status: {response.status_code}")
+            print("Receiving streamed response (press Ctrl+C to cancel)...")
+            
+            for line in response.iter_lines():
+                # Check for cancellation between chunks
+                if check_cancelled():
+                    print("\n⚠️  Request cancelled by user")
+                    break
+                
+                if line:
+                    try:
+                        chunk = json.loads(line)
+                        if "message" in chunk and "content" in chunk["message"]:
+                            content_parts.append(chunk["message"]["content"])
+                            chunk_count += 1
+                            # Show progress every 10 chunks
+                            if chunk_count % 10 == 0:
+                                print(f"  Received {chunk_count} chunks...")
+                        # Check if streaming is done
+                        if chunk.get("done", False):
+                            break
+                    except json.JSONDecodeError:
+                        continue
+    
+    content = "".join(content_parts)
+    
+    if not cancelled and content:
+        print("\n" + "=" * 80)
+        print("✅ SUCCESS - OLLAMA RESPONSE RECEIVED")
+        print("=" * 80)
+        print(f"\nChunks received: {chunk_count}")
+        print(f"Response length: {len(content)} chars")
+        print(f"\nRaw response content:")
+        print("-" * 80)
+        print(content)
+        print("-" * 80)
         
-        print(f"\nHTTP Status: {response.status_code}")
-        
-        if response.status_code == 200:
-            result = response.json()
-            content = result.get("message", {}).get("content", "")
+        # Try to parse as JSON
+        try:
+            parsed = json.loads(content.strip())
+            print("\n" + "=" * 80)
+            print("✅ JSON PARSING SUCCESSFUL")
+            print("=" * 80)
+            print(f"\nParsed response:")
+            print(json.dumps(parsed, indent=2))
+            
+            # Validate structure
+            has_suggestions = "suggestions" in parsed
+            has_splits = "split_transactions" in parsed
+            has_confidence = "overall_confidence" in parsed
             
             print("\n" + "=" * 80)
-            print("✅ SUCCESS - OLLAMA RESPONSE RECEIVED")
+            print("VALIDATION RESULTS")
             print("=" * 80)
-            print(f"\nModel used: {result.get('model', 'unknown')}")
-            print(f"Response length: {len(content)} chars")
-            print(f"\nRaw response content:")
-            print("-" * 80)
-            print(content)
-            print("-" * 80)
+            print(f"✓ Has 'suggestions' field: {has_suggestions}")
+            print(f"✓ Has 'split_transactions' field: {has_splits}")
+            print(f"✓ Has 'overall_confidence' field: {has_confidence}")
             
-            # Try to parse as JSON
-            try:
-                parsed = json.loads(content.strip())
-                print("\n" + "=" * 80)
-                print("✅ JSON PARSING SUCCESSFUL")
-                print("=" * 80)
-                print(f"\nParsed response:")
-                print(json.dumps(parsed, indent=2))
+            if has_suggestions:
+                print(f"\nSuggested fields: {list(parsed['suggestions'].keys())}")
+            if has_splits:
+                print(f"Number of split transactions: {len(parsed['split_transactions'])}")
                 
-                # Validate structure
-                has_suggestions = "suggestions" in parsed
-                has_splits = "split_transactions" in parsed
-                has_confidence = "overall_confidence" in parsed
-                
-                print("\n" + "=" * 80)
-                print("VALIDATION RESULTS")
-                print("=" * 80)
-                print(f"✓ Has 'suggestions' field: {has_suggestions}")
-                print(f"✓ Has 'split_transactions' field: {has_splits}")
-                print(f"✓ Has 'overall_confidence' field: {has_confidence}")
-                
-                if has_suggestions:
-                    print(f"\nSuggested fields: {list(parsed['suggestions'].keys())}")
-                if has_splits:
-                    print(f"Number of split transactions: {len(parsed['split_transactions'])}")
-                    
-            except json.JSONDecodeError as e:
-                print("\n" + "=" * 80)
-                print("⚠️  WARNING - JSON PARSING FAILED")
-                print("=" * 80)
-                print(f"Error: {e}")
-                print("This might need the _parse_json_response() method from service.py")
-                
-        else:
+        except json.JSONDecodeError as e:
             print("\n" + "=" * 80)
-            print(f"❌ ERROR - HTTP {response.status_code}")
+            print("⚠️  WARNING - JSON PARSING FAILED")
             print("=" * 80)
-            print(response.text)
+            print(f"Error: {e}")
+            print("This might need the _parse_json_response() method from service.py")
+    elif cancelled:
+        print("\n" + "=" * 80)
+        print("⚠️  REQUEST CANCELLED")
+        print("=" * 80)
+        print("The request was cancelled before completion.")
+            
+except KeyboardInterrupt:
+    cancelled = True
+    print("\n" + "=" * 80)
+    print("⚠️  CANCELLED BY USER (Ctrl+C)")
+    print("=" * 80)
+    print("Request cancelled. In the production app, use the Cancel button in the UI.")
             
 except httpx.TimeoutException:
     # Should not happen with timeout=None, but just in case

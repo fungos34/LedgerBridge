@@ -1771,7 +1771,7 @@ class StateStore:
             return cursor.rowcount > 0
 
     def cancel_ai_job(self, job_id: int) -> bool:
-        """Cancel an AI job."""
+        """Cancel an AI job (including running jobs)."""
         now = datetime.now(timezone.utc).isoformat()
 
         with self._transaction() as conn:
@@ -1783,6 +1783,20 @@ class StateStore:
                 """,
                 (now, job_id),
             )
+            return cursor.rowcount > 0
+
+    def is_ai_job_cancelled(self, job_id: int) -> bool:
+        """Check if an AI job has been cancelled.
+        
+        Used by running jobs to check for cancellation requests
+        during long-running Ollama calls.
+        """
+        with self._transaction() as conn:
+            row = conn.execute(
+                "SELECT status FROM ai_job_queue WHERE id = ?",
+                (job_id,),
+            ).fetchone()
+            return row is not None and row["status"] == "CANCELLED"
             return cursor.rowcount > 0
 
     def get_ai_queue_stats(self) -> dict[str, int]:

@@ -724,6 +724,7 @@ class SparkAIService:
         system_prompt: str,
         user_message: str,
         no_timeout: bool = False,
+        cancel_check: callable = None,
     ) -> dict | None:
         """Call Ollama API for completion with concurrency limiting.
 
@@ -736,9 +737,11 @@ class SparkAIService:
             user_message: User message.
             no_timeout: If True, wait indefinitely for response (for scheduled jobs).
                        LLM inference can take minutes or even hours for complex documents.
+            cancel_check: Optional callable that returns True if the job should be cancelled.
+                         Used for streaming responses to check for cancellation between chunks.
 
         Returns:
-            Dict with "content" and "model" keys, or None on failure.
+            Dict with "content" and "model" keys, or None on failure/cancellation.
         """
         # Acquire concurrency slot - wait indefinitely if no_timeout, otherwise use configured timeout
         wait_timeout = None if no_timeout else self.llm_config.timeout_seconds
@@ -752,19 +755,24 @@ class SparkAIService:
 
         try:
             url = f"{self.llm_config.ollama_url}/api/chat"
+            
+            # Use streaming if we have a cancel_check function
+            use_streaming = cancel_check is not None and no_timeout
+            
             payload = {
                 "model": model,
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message},
                 ],
-                "stream": False,
+                "stream": use_streaming,
                 "format": "json",
             }
 
             # Debug logging only (never at INFO)
             if no_timeout:
-                logger.info("Calling Ollama model %s (no timeout - will wait indefinitely)", model)
+                logger.info("Calling Ollama model %s (no timeout - will wait indefinitely%s)", 
+                           model, ", with cancel check" if cancel_check else "")
             else:
                 logger.debug("Calling Ollama model %s at %s", model, self.llm_config.ollama_url)
 
@@ -780,11 +788,41 @@ class SparkAIService:
                     write=30.0,
                     pool=10.0,
                 )
-            response = self._client.post(url, json=payload, timeout=request_timeout)
-            response.raise_for_status()
-
-            data = response.json()
-            content = data.get("message", {}).get("content", "")
+            
+            if use_streaming:
+                # Stream response and check for cancellation between chunks
+                content_parts = []
+                with self._client.stream("POST", url, json=payload, timeout=request_timeout) as response:
+                    response.raise_for_status()
+                    for line in response.iter_lines():
+                        # Check for cancellation between chunks
+                        if cancel_check and cancel_check():
+                            logger.info("Ollama request cancelled by user")
+                            return None
+                        
+                        if line:
+                            try:
+                                chunk = json.loads(line)
+                                if "message" in chunk and "content" in chunk["message"]:
+                                    content_parts.append(chunk["message"]["content"])
+                                # Check if streaming is done
+                                if chunk.get("done", False):
+                                    break
+                            except json.JSONDecodeError:
+                                continue
+                
+                # Final cancellation check
+                if cancel_check and cancel_check():
+                    logger.info("Ollama request cancelled by user after completion")
+                    return None
+                    
+                content = "".join(content_parts)
+            else:
+                # Non-streaming request
+                response = self._client.post(url, json=payload, timeout=request_timeout)
+                response.raise_for_status()
+                data = response.json()
+                content = data.get("message", {}).get("content", "")
 
             logger.debug("Ollama %s returned %d chars", model, len(content))
             return {"content": content, "model": model}
@@ -943,6 +981,7 @@ class SparkAIService:
         document_id: int | None = None,
         use_cache: bool = True,
         no_timeout: bool = False,
+        cancel_check: callable = None,
     ) -> TransactionReviewSuggestion | None:
         """Suggest values for all editable transaction fields during review.
         
@@ -966,9 +1005,11 @@ class SparkAIService:
             use_cache: Whether to use cached responses.
             no_timeout: If True, wait indefinitely for LLM response (for scheduled jobs).
                        LLM inference can take minutes or even hours.
+            cancel_check: Optional callable that returns True if the job should be cancelled.
+                         Allows cancellation of long-running LLM requests.
             
         Returns:
-            TransactionReviewSuggestion with per-field suggestions, or None if LLM disabled.
+            TransactionReviewSuggestion with per-field suggestions, or None if LLM disabled/cancelled.
         """
         if not self.is_enabled:
             logger.debug("LLM service disabled, skipping review suggestions")
@@ -1045,16 +1086,22 @@ class SparkAIService:
             system_prompt=self._review_prompt.system_prompt,
             user_message=user_message,
             no_timeout=no_timeout,
+            cancel_check=cancel_check,
         )
         
         # Fallback to slow model if needed
         if result is None and self.llm_config.model_fallback:
+            # Check for cancellation before fallback
+            if cancel_check and cancel_check():
+                logger.info("Job cancelled, skipping fallback model")
+                return None
             logger.info("Fast model failed, falling back to %s", self.llm_config.model_fallback)
             result = self._call_ollama(
                 model=self.llm_config.model_fallback,
                 system_prompt=self._review_prompt.system_prompt,
                 user_message=user_message,
                 no_timeout=no_timeout,
+                cancel_check=cancel_check,
             )
             
         if result is None:
