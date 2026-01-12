@@ -1459,7 +1459,7 @@ class StateStore:
         """Get extractions that are eligible for import to Firefly.
 
         An extraction is importable if:
-        - It has been reviewed (AUTO or ACCEPTED/EDITED decision)
+        - It has been reviewed (AUTO or ACCEPTED/EDITED/ORPHAN_CONFIRMED decision)
         - It has a linkage record with type LINKED or ORPHAN
         - It has not already been imported
 
@@ -1475,7 +1475,7 @@ class StateStore:
                 FROM extractions e
                 JOIN linkage l ON e.id = l.extraction_id
                 LEFT JOIN imports i ON e.external_id = i.external_id
-                WHERE (e.review_state = 'AUTO' OR e.review_decision IN ('ACCEPTED', 'EDITED'))
+                WHERE (e.review_state = 'AUTO' OR e.review_decision IN ('ACCEPTED', 'EDITED', 'ORPHAN_CONFIRMED'))
                 AND l.link_type IN ('LINKED', 'ORPHAN')
                 AND (i.id IS NULL OR i.status = 'FAILED')
                 ORDER BY e.created_at DESC

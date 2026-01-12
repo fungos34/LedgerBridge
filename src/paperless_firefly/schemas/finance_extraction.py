@@ -196,6 +196,9 @@ class FinanceExtraction:
     # Timestamps
     created_at: str = ""  # ISO timestamp when extraction was created
 
+    # Track fields that were manually edited by user (AI suggestions should not override)
+    user_edited_fields: list[str] = field(default_factory=list)
+
     def to_dict(self) -> dict:
         """Serialize to dictionary for JSON storage."""
         return {
@@ -272,6 +275,7 @@ class FinanceExtraction:
                 for sp in self.structured_payloads
             ],
             "created_at": self.created_at,
+            "user_edited_fields": self.user_edited_fields,
         }
 
     @classmethod
@@ -373,4 +377,5 @@ class FinanceExtraction:
             provenance=provenance,
             structured_payloads=structured_payloads,
             created_at=data.get("created_at", ""),
+            user_edited_fields=data.get("user_edited_fields", []),
         )

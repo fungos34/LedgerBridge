@@ -1007,6 +1007,12 @@ def save_extraction(request: HttpRequest, extraction_id: int) -> HttpResponse:
         )
         changes.append("external_id")
 
+    # Track user-edited fields (for AI suggestion suppression on reload)
+    # Add changed fields to user_edited_fields list, avoiding duplicates
+    for field_name in changes:
+        if field_name not in extraction.user_edited_fields and field_name != "external_id":
+            extraction.user_edited_fields.append(field_name)
+
     # Check if this is a save-only request (no confirmation)
     confirm = request.POST.get("confirm", "true").lower() == "true"
 
@@ -1195,15 +1201,21 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
                 except UserProfile.DoesNotExist:
                     pass
 
-                # Get categories from Firefly (pass request for user credentials)
+                # Get categories and source accounts from Firefly (pass request for user credentials)
                 firefly_client = _get_firefly_client(request)
                 categories = []
+                source_accounts = []
                 if firefly_client:
                     try:
                         cats = firefly_client.list_categories()
                         categories = [c.name for c in cats]
                     except Exception as e:
                         logger.warning(f"Could not fetch categories: {e}")
+                    try:
+                        accounts = firefly_client.list_accounts("asset")
+                        source_accounts = [acc.name for acc in accounts]
+                    except Exception as e:
+                        logger.warning(f"Could not fetch source accounts: {e}")
 
                 if not categories:
                     final_state = "ERROR"
@@ -1271,6 +1283,9 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
                     # Create SparkAI service and call comprehensive review
                     ai_service = SparkAIService(store, config, categories)
                     
+                    # Get current source account for comparison
+                    current_source_account = proposal.get("source_account")
+                    
                     # Use comprehensive review method for full field suggestions
                     review_suggestion = ai_service.suggest_for_review(
                         amount=amount,
@@ -1286,6 +1301,8 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
                         previous_decisions=previous_decisions,
                         document_id=document_id,
                         use_cache=False,  # Force fresh call
+                        source_accounts=source_accounts,
+                        current_source_account=current_source_account,
                     )
                     
                     if review_suggestion:
@@ -1477,7 +1494,7 @@ def _get_ready_to_import_count(store: StateStore) -> int:
             JOIN linkage l ON e.id = l.extraction_id
             LEFT JOIN imports i ON e.external_id = i.external_id
             WHERE i.id IS NULL
-            AND (e.review_state = 'AUTO' OR e.review_decision IN ('ACCEPTED', 'EDITED'))
+            AND (e.review_state = 'AUTO' OR e.review_decision IN ('ACCEPTED', 'EDITED', 'ORPHAN_CONFIRMED'))
             AND l.link_type IN ('LINKED', 'ORPHAN')
         """
         ).fetchone()
@@ -1508,7 +1525,7 @@ def import_queue(request: HttpRequest) -> HttpResponse:
             LEFT JOIN imports i ON e.external_id = i.external_id
             LEFT JOIN linkage l ON e.id = l.extraction_id
             WHERE (i.id IS NULL OR i.status = 'FAILED')
-            AND (e.review_state = 'AUTO' OR e.review_decision IN ('ACCEPTED', 'EDITED'))
+            AND (e.review_state = 'AUTO' OR e.review_decision IN ('ACCEPTED', 'EDITED', 'ORPHAN_CONFIRMED'))
             AND (
                 (l.firefly_id IS NOT NULL AND l.link_type = 'LINKED')
                 OR (l.link_type = 'ORPHAN')
@@ -4255,6 +4272,19 @@ def unified_review_detail(request: HttpRequest, record_type: str, record_id: int
                             ai_suggestions["_overall_confidence"] = raw_suggestions["overall_confidence"]
                         if raw_suggestions.get("analysis_notes"):
                             ai_suggestions["_analysis_notes"] = raw_suggestions["analysis_notes"]
+                        
+                        # Filter out suggestions for user-edited fields
+                        # This prevents AI suggestions from overriding user's saved changes
+                        user_edited = extraction_data.get("user_edited_fields", []) if extraction_data else []
+                        if user_edited:
+                            for field_name in user_edited:
+                                if field_name in ai_suggestions:
+                                    logger.debug(f"Suppressing AI suggestion for user-edited field: {field_name}")
+                                    del ai_suggestions[field_name]
+                            # Also suppress line_items if user edited them
+                            if "line_items" in user_edited and "split_transactions" in ai_suggestions:
+                                del ai_suggestions["split_transactions"]
+                                
                     except json.JSONDecodeError:
                         logger.warning(f"Could not parse AI suggestions for job {ai_job['id']}")
         except Exception as e:
@@ -4284,6 +4314,8 @@ def unified_review_detail(request: HttpRequest, record_type: str, record_id: int
         "current_position": current_position,
         "ai_job_status": ai_job_status,
         "ai_suggestions": ai_suggestions,
+        # List of fields user has edited (suppress AI suggestions for these)
+        "user_edited_fields": extraction_data.get("user_edited_fields", []) if extraction_data else [],
         **_get_external_urls(request.user if hasattr(request, "user") else None),
     }
 
@@ -5024,15 +5056,21 @@ def _run_ai_job_now(request: HttpRequest, store: StateStore, job: dict) -> bool:
         except UserProfile.DoesNotExist:
             pass
         
-        # Get categories
+        # Get categories and source accounts
         firefly_client = _get_firefly_client(request)
         categories = []
+        source_accounts = []
         if firefly_client:
             try:
                 cats = firefly_client.list_categories()
                 categories = [c.name for c in cats]
             except Exception as e:
                 logger.warning(f"Could not fetch categories: {e}")
+            try:
+                accounts = firefly_client.list_accounts("asset")
+                source_accounts = [acc.name for acc in accounts]
+            except Exception as e:
+                logger.warning(f"Could not fetch source accounts: {e}")
         
         if not categories:
             store.fail_ai_job(job_id, "No categories available from Firefly", can_retry=True)
@@ -5090,6 +5128,9 @@ def _run_ai_job_now(request: HttpRequest, store: StateStore, job: dict) -> bool:
         def check_cancelled():
             return store.is_ai_job_cancelled(job_id)
         
+        # Get current source account from proposal for comparison
+        current_source_account = proposal.get("source_account")
+        
         suggestion = ai_service.suggest_for_review(
             amount=str(proposal.get("amount", "0")),
             date=proposal.get("date", ""),
@@ -5106,6 +5147,8 @@ def _run_ai_job_now(request: HttpRequest, store: StateStore, job: dict) -> bool:
             use_cache=False,  # Always fresh for user-triggered runs
             no_timeout=True,  # NEVER timeout - wait indefinitely for LLM response
             cancel_check=check_cancelled,  # Allow cancellation via UI
+            source_accounts=source_accounts,
+            current_source_account=current_source_account,
         )
         
         # Check if cancelled after completion

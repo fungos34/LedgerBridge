@@ -1066,7 +1066,7 @@
                                 Enable split booking
                             </label>
                         </div>
-                        <!-- AI Split Suggestion Banner -->
+                        <!-- AI Split Suggestion Banner with Line-by-Line Acceptance -->
                         {% if ai_suggestions.split_transactions %}
                         <div class="ai-split-suggestion" id="ai-split-suggestion-banner" style="
                             background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
@@ -1074,36 +1074,63 @@
                             border-radius: 0.5rem;
                             padding: 0.75rem 1rem;
                             margin-bottom: 0.75rem;
-                            display: flex;
-                            align-items: flex-start;
-                            gap: 0.75rem;
                         ">
-                            <span style="font-size: 1.25rem;">🤖</span>
-                            <div style="flex: 1;">
-                                <div style="font-weight: 600; color: #92400e; margin-bottom: 0.25rem;">
+                            <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem;">
+                                <span style="font-size: 1.25rem;">🤖</span>
+                                <span style="font-weight: 600; color: #92400e;">
                                     AI suggests splitting into {{ ai_suggestions.split_transactions|length }} line items
-                                </div>
-                                <div style="font-size: 0.8rem; color: #78350f;">
-                                    {% for split in ai_suggestions.split_transactions %}
-                                    <div style="display: flex; gap: 0.5rem; padding: 0.125rem 0;">
-                                        <span style="font-family: monospace;">€{{ split.amount|floatformat:2 }}</span>
-                                        <span style="color: #92400e;">{{ split.category|default:"Uncategorized" }}</span>
-                                        <span style="color: #a16207;">{{ split.description|truncatechars:40 }}</span>
-                                    </div>
-                                    {% endfor %}
-                                </div>
+                                </span>
+                                <button type="button" class="btn btn-sm" onclick="applyAllAiSplits()" style="
+                                    background: #f59e0b;
+                                    color: white;
+                                    border: none;
+                                    padding: 0.25rem 0.5rem;
+                                    border-radius: 0.375rem;
+                                    font-size: 0.75rem;
+                                    cursor: pointer;
+                                    margin-left: auto;
+                                ">
+                                    ✓ Accept All
+                                </button>
                             </div>
-                            <button type="button" class="btn btn-sm" onclick="applyAiSplits()" style="
-                                background: #f59e0b;
-                                color: white;
-                                border: none;
-                                padding: 0.375rem 0.75rem;
-                                border-radius: 0.375rem;
-                                font-weight: 500;
-                                cursor: pointer;
-                            ">
-                                ✓ Apply Splits
-                            </button>
+                            <div style="font-size: 0.8rem; color: #78350f;">
+                                {% for split in ai_suggestions.split_transactions %}
+                                <div class="ai-split-line" data-split-index="{{ forloop.counter0 }}" style="
+                                    display: flex; 
+                                    gap: 0.5rem; 
+                                    padding: 0.375rem 0.5rem;
+                                    margin: 0.25rem 0;
+                                    background: rgba(255, 255, 255, 0.5);
+                                    border-radius: 0.25rem;
+                                    align-items: center;
+                                ">
+                                    <span style="font-family: monospace; min-width: 70px;">€{{ split.amount|floatformat:2 }}</span>
+                                    <span style="color: #92400e; min-width: 100px;">{{ split.category|default:"Uncategorized" }}</span>
+                                    <span style="color: #a16207; flex: 1;">{{ split.description|truncatechars:40 }}</span>
+                                    <button type="button" class="btn-accept-split" onclick="acceptSingleSplit({{ forloop.counter0 }})" style="
+                                        background: #10b981;
+                                        color: white;
+                                        border: none;
+                                        padding: 0.125rem 0.375rem;
+                                        border-radius: 0.25rem;
+                                        font-size: 0.7rem;
+                                        cursor: pointer;
+                                    " title="Accept this line">✓</button>
+                                    <button type="button" class="btn-reject-split" onclick="rejectSingleSplit({{ forloop.counter0 }})" style="
+                                        background: #ef4444;
+                                        color: white;
+                                        border: none;
+                                        padding: 0.125rem 0.375rem;
+                                        border-radius: 0.25rem;
+                                        font-size: 0.7rem;
+                                        cursor: pointer;
+                                    " title="Reject this line">✗</button>
+                                </div>
+                                {% endfor %}
+                            </div>
+                            <div style="margin-top: 0.5rem; font-size: 0.7rem; color: #92400e;">
+                                Accepted: <span id="accepted-splits-count">0</span> / {{ ai_suggestions.split_transactions|length }}
+                            </div>
                         </div>
                         {% endif %}
                         <div id="split-container" style="display: none;">
@@ -2274,6 +2301,192 @@ function applyAiSplits() {
     {% else %}
     showNotification('No Splits', 'No AI split suggestions available', 'warning');
     {% endif %}
+}
+
+// Track accepted/rejected split indices
+const acceptedSplitIndices = new Set();
+const rejectedSplitIndices = new Set();
+
+// Accept all AI splits at once (renamed from applyAiSplits to avoid confusion)
+function applyAllAiSplits() {
+    {% if ai_suggestions.split_transactions %}
+    const splits = {{ ai_suggestions.split_transactions|safe }};
+    
+    // Clear any existing splits and add all
+    const container = document.getElementById('line-items-container');
+    container.innerHTML = '';
+    
+    splits.forEach((split, index) => {
+        addLineItem(split.amount, split.description, split.category);
+        acceptedSplitIndices.add(index);
+    });
+    
+    // Enable split mode
+    document.getElementById('enable_split').checked = true;
+    toggleSplitMode(true);
+    
+    // Mark all lines as accepted in UI
+    document.querySelectorAll('.ai-split-line').forEach((line, index) => {
+        markSplitLineAccepted(index);
+    });
+    
+    updateAcceptedSplitsCount();
+    updateLineItemsJson();
+    updateSplitTotal();
+    showNotification('All Splits Applied', `Applied ${splits.length} split line items from AI`, 'success');
+    {% else %}
+    showNotification('No Splits', 'No AI split suggestions available', 'warning');
+    {% endif %}
+}
+
+// Accept a single split line
+function acceptSingleSplit(index) {
+    {% if ai_suggestions.split_transactions %}
+    const splits = {{ ai_suggestions.split_transactions|safe }};
+    
+    if (index < 0 || index >= splits.length) {
+        console.error('Invalid split index:', index);
+        return;
+    }
+    
+    if (acceptedSplitIndices.has(index)) {
+        // Already accepted - do nothing
+        return;
+    }
+    
+    // Remove from rejected if it was rejected before
+    rejectedSplitIndices.delete(index);
+    acceptedSplitIndices.add(index);
+    
+    // Enable split mode if not already
+    const enableSplit = document.getElementById('enable_split');
+    if (!enableSplit.checked) {
+        enableSplit.checked = true;
+        toggleSplitMode(true);
+    }
+    
+    // Add this split to the line items
+    const split = splits[index];
+    addLineItem(split.amount, split.description, split.category);
+    
+    // Mark as accepted in UI
+    markSplitLineAccepted(index);
+    
+    updateAcceptedSplitsCount();
+    updateLineItemsJson();
+    updateSplitTotal();
+    showNotification('Split Line Accepted', `Added: ${split.description || 'Line item'}`, 'success');
+    {% endif %}
+}
+
+// Reject a single split line
+function rejectSingleSplit(index) {
+    {% if ai_suggestions.split_transactions %}
+    const splits = {{ ai_suggestions.split_transactions|safe }};
+    
+    if (index < 0 || index >= splits.length) {
+        console.error('Invalid split index:', index);
+        return;
+    }
+    
+    if (rejectedSplitIndices.has(index)) {
+        // Already rejected - do nothing
+        return;
+    }
+    
+    // If it was accepted, remove from line items
+    if (acceptedSplitIndices.has(index)) {
+        acceptedSplitIndices.delete(index);
+        // Remove from line items - find and remove the matching one
+        removeLineItemByDescription(splits[index].description, splits[index].amount);
+    }
+    
+    rejectedSplitIndices.add(index);
+    
+    // Mark as rejected in UI
+    markSplitLineRejected(index);
+    
+    updateAcceptedSplitsCount();
+    updateLineItemsJson();
+    updateSplitTotal();
+    showNotification('Split Line Rejected', `Removed: ${splits[index].description || 'Line item'}`, 'info');
+    {% endif %}
+}
+
+// Mark a split line as accepted in the UI
+function markSplitLineAccepted(index) {
+    const line = document.querySelector(`.ai-split-line[data-split-index="${index}"]`);
+    if (line) {
+        line.style.background = 'rgba(16, 185, 129, 0.2)';
+        line.style.borderLeft = '3px solid #10b981';
+        
+        // Disable accept button, enable reject
+        const acceptBtn = line.querySelector('.btn-accept-split');
+        const rejectBtn = line.querySelector('.btn-reject-split');
+        if (acceptBtn) {
+            acceptBtn.disabled = true;
+            acceptBtn.style.opacity = '0.5';
+        }
+        if (rejectBtn) {
+            rejectBtn.disabled = false;
+            rejectBtn.style.opacity = '1';
+        }
+    }
+}
+
+// Mark a split line as rejected in the UI
+function markSplitLineRejected(index) {
+    const line = document.querySelector(`.ai-split-line[data-split-index="${index}"]`);
+    if (line) {
+        line.style.background = 'rgba(239, 68, 68, 0.1)';
+        line.style.borderLeft = '3px solid #ef4444';
+        line.style.opacity = '0.6';
+        line.style.textDecoration = 'line-through';
+        
+        // Disable both buttons
+        const acceptBtn = line.querySelector('.btn-accept-split');
+        const rejectBtn = line.querySelector('.btn-reject-split');
+        if (acceptBtn) {
+            acceptBtn.disabled = true;
+            acceptBtn.style.opacity = '0.5';
+        }
+        if (rejectBtn) {
+            rejectBtn.disabled = true;
+            rejectBtn.style.opacity = '0.5';
+        }
+    }
+}
+
+// Update the accepted splits count display
+function updateAcceptedSplitsCount() {
+    const countEl = document.getElementById('accepted-splits-count');
+    if (countEl) {
+        countEl.textContent = acceptedSplitIndices.size;
+    }
+}
+
+// Remove a line item by description and amount match
+function removeLineItemByDescription(description, amount) {
+    const container = document.getElementById('line-items-container');
+    const items = container.querySelectorAll('.line-item-row');
+    
+    for (const item of items) {
+        const descInput = item.querySelector('[name="line_description[]"]');
+        const amountInput = item.querySelector('[name="line_amount[]"]');
+        
+        if (descInput && amountInput) {
+            const itemDesc = descInput.value;
+            const itemAmount = parseFloat(amountInput.value);
+            const targetAmount = parseFloat(amount);
+            
+            // Match by description and amount (with small tolerance)
+            if (itemDesc === description && Math.abs(itemAmount - targetAmount) < 0.01) {
+                item.remove();
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 // Add per-field accept/undo controls

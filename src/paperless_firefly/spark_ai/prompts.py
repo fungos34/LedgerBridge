@@ -327,13 +327,32 @@ class TransactionReviewPrompt:
 - Find the total/grand total/sum on the document
 - Verify it matches the stated amount or correct it
 - Use the document's total as truth, NOT any pre-filled value
+- Suggest the correct amount if it differs from the current value
 
-### 2. IDENTIFY THE VENDOR/MERCHANT
+### 2. EXTRACT THE DATE
+- Find the transaction/receipt date on the document
+- Use format YYYY-MM-DD
+- Suggest the correct date if visible on the document
+
+### 3. IDENTIFY THE VENDOR/MERCHANT (destination_account)
 - Extract the store name, company, or merchant from the document header
 - Look for business names, logos, addresses at the top
 - This MUST be filled in - every receipt has a vendor
 
-### 3. CREATE SPLIT TRANSACTIONS FOR LINE ITEMS
+### 4. DETERMINE SOURCE ACCOUNT (payment method)
+- Look for payment method indicators in the document:
+  - "Barzahlung", "cash", "bar" → suggest a cash account
+  - "Bankomat", "Maestro", "Debit", "EC-Karte" → suggest a debit/checking account
+  - "Kreditkarte", "Credit Card", "Visa", "Mastercard" → suggest a credit card account
+  - "PayPal", "Klarna", "Apple Pay" → suggest appropriate account
+- Use the AVAILABLE SOURCE ACCOUNTS list to match the payment method
+- Only suggest from the provided list
+
+### 5. EXTRACT INVOICE/RECEIPT NUMBER
+- Look for receipt number, invoice number, Beleg-Nr., Rechnungsnummer
+- Extract the exact number/code shown
+
+### 6. CREATE SPLIT TRANSACTIONS FOR LINE ITEMS
 This is MANDATORY when the document shows itemized purchases:
 - SCAN the entire document for individual products/services with prices
 - EXTRACT each line item: product name + price
@@ -346,12 +365,12 @@ SPLIT TRANSACTION REQUIREMENTS:
 - Group similar items if they share a category (e.g., all groceries together)
 - Parse prices in ANY format: 2.99, 2,99, €2.99, EUR 2.99, $2.99, 2,99€
 
-### 4. SUGGEST DESCRIPTION
+### 7. SUGGEST DESCRIPTION
 - Create a concise description summarizing the purchase
 - Include key items or the nature of the transaction
 - Example: "Grocery shopping - milk, bread, cleaning supplies"
 
-### 5. DETERMINE TRANSACTION TYPE
+### 8. DETERMINE TRANSACTION TYPE
 - "withdrawal" = expense/purchase (most receipts)
 - "deposit" = refund/income
 - "transfer" = between own accounts (rare for receipts)
@@ -359,10 +378,14 @@ SPLIT TRANSACTION REQUIREMENTS:
 ## RESPONSE FORMAT (strict JSON):
 {
     "suggestions": {
+        "amount": {"value": "123.45", "confidence": 0.95, "reason": "Total shown on receipt"},
+        "date": {"value": "2025-01-15", "confidence": 0.90, "reason": "Receipt date visible"},
         "category": {"value": "PrimaryCategory", "confidence": 0.85, "reason": "Most items belong here"},
         "transaction_type": {"value": "withdrawal", "confidence": 0.95, "reason": "This is a purchase"},
         "destination_account": {"value": "Vendor Name", "confidence": 0.90, "reason": "Extracted from receipt header"},
-        "description": {"value": "Descriptive summary", "confidence": 0.80, "reason": "Based on items purchased"}
+        "source_account": {"value": "Checking Account", "confidence": 0.80, "reason": "Bankomat payment detected"},
+        "description": {"value": "Descriptive summary", "confidence": 0.80, "reason": "Based on items purchased"},
+        "invoice_number": {"value": "R-2025-001", "confidence": 0.85, "reason": "Receipt number found"}
     },
     "split_transactions": [
         {"amount": 15.99, "description": "Food items (milk, bread, eggs)", "category": "Groceries"},
@@ -375,11 +398,13 @@ SPLIT TRANSACTION REQUIREMENTS:
 
 ## CRITICAL RULES:
 - Categories in suggestions and splits MUST be from the provided list ONLY
+- Source account MUST be from the AVAILABLE SOURCE ACCOUNTS list ONLY
 - Split amounts MUST sum to total (tolerance: ±0.05)
 - ALWAYS include destination_account (vendor name)
 - ALWAYS include description
 - If document has line items → MUST suggest split_transactions
-- Confidence scores: 0.0-1.0"""
+- Confidence scores: 0.0-1.0
+- For amounts, use decimal point (not comma) and no currency symbol"""
 
     user_template: str = """ANALYZE THIS DOCUMENT AND EXTRACT ALL FINANCIAL DATA:
 
@@ -392,6 +417,7 @@ Current Vendor: {vendor}
 Current Description: {description}
 Current Category: {current_category}
 Current Type: {current_type}
+Current Source Account: {source_account}
 Invoice/Receipt Number: {invoice_number}
 OCR Quality: {ocr_confidence}%
 
@@ -416,16 +442,32 @@ AVAILABLE CATEGORIES (use ONLY these):
 {categories}
 
 ═══════════════════════════════════════════════════════════════
+AVAILABLE SOURCE ACCOUNTS (use ONLY these for source_account):
+═══════════════════════════════════════════════════════════════
+{source_accounts}
+
+═══════════════════════════════════════════════════════════════
+AVAILABLE TRANSACTION TYPES (use ONLY these):
+═══════════════════════════════════════════════════════════════
+• withdrawal (expense/purchase - most common for receipts)
+• deposit (refund/income)
+• transfer (between own accounts - rare for receipts)
+
+═══════════════════════════════════════════════════════════════
 YOUR TASKS:
 ═══════════════════════════════════════════════════════════════
 1. EXTRACT the vendor/merchant name from the document
-2. IDENTIFY all line items with prices from the OCR text
-3. CATEGORIZE each line item into the appropriate category
-4. CREATE split_transactions if multiple items/categories exist
-5. WRITE a descriptive summary
-6. VERIFY the total amount matches line items
+2. EXTRACT the total amount if different from current
+3. EXTRACT the date if visible on document
+4. EXTRACT invoice/receipt number if present
+5. IDENTIFY payment method and suggest matching source_account
+6. IDENTIFY all line items with prices from the OCR text
+7. CATEGORIZE each line item into the appropriate category
+8. CREATE split_transactions if multiple items/categories exist
+9. WRITE a descriptive summary
+10. VERIFY the total amount matches line items
 
-Respond with complete JSON including split_transactions if items are visible."""
+Respond with complete JSON including ALL fields you can determine."""
 
     def format_user_message(
         self,
@@ -441,6 +483,8 @@ Respond with complete JSON including split_transactions if items are visible."""
         bank_transaction: dict | None,
         previous_decisions: list[dict] | None,
         categories: list[str],
+        source_accounts: list[str] | None = None,
+        current_source_account: str | None = None,
     ) -> str:
         """Format the user message for transaction review.
 
@@ -457,11 +501,19 @@ Respond with complete JSON including split_transactions if items are visible."""
             bank_transaction: Linked bank transaction data if available.
             previous_decisions: List of previous interpretation decisions.
             categories: List of available category names.
+            source_accounts: List of available source account names.
+            current_source_account: Currently selected source account.
 
         Returns:
             Formatted user message.
         """
         categories_str = "\n".join(f"• {cat}" for cat in categories)
+        
+        # Format source accounts
+        if source_accounts:
+            source_accounts_str = "\n".join(f"• {acc}" for acc in source_accounts)
+        else:
+            source_accounts_str = "(No source accounts available - skip source_account suggestion)"
 
         # Format bank transaction data
         if bank_transaction:
@@ -496,10 +548,12 @@ Destination: {bank_transaction.get('destination_account', 'N/A')}"""
             description=description or "(not extracted yet)",
             current_category=current_category or "(not set)",
             current_type=current_type or "withdrawal",
+            source_account=current_source_account or "(not set)",
             invoice_number=invoice_number or "(not found)",
             ocr_confidence=int(ocr_confidence * 100) if ocr_confidence else 0,
             document_content=content,
             bank_transaction=bank_str,
             previous_decisions=decisions_str,
             categories=categories_str,
+            source_accounts=source_accounts_str,
         )

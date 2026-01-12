@@ -982,6 +982,8 @@ class SparkAIService:
         use_cache: bool = True,
         no_timeout: bool = False,
         cancel_check: callable = None,
+        source_accounts: list[str] | None = None,
+        current_source_account: str | None = None,
     ) -> TransactionReviewSuggestion | None:
         """Suggest values for all editable transaction fields during review.
         
@@ -1007,6 +1009,8 @@ class SparkAIService:
                        LLM inference can take minutes or even hours.
             cancel_check: Optional callable that returns True if the job should be cancelled.
                          Allows cancellation of long-running LLM requests.
+            source_accounts: List of available source account names for suggestions.
+            current_source_account: Currently selected source account.
             
         Returns:
             TransactionReviewSuggestion with per-field suggestions, or None if LLM disabled/cancelled.
@@ -1078,6 +1082,8 @@ class SparkAIService:
             bank_transaction=bank_transaction,
             previous_decisions=previous_decisions,
             categories=self.categories,
+            source_accounts=source_accounts,
+            current_source_account=current_source_account,
         )
         
         # Try fast model first

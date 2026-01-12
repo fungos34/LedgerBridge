@@ -354,20 +354,24 @@ def cmd_import(
             # Only AUTO confidence, no review required
             rows = conn.execute(
                 """
-                SELECT e.* FROM extractions e
+                SELECT e.*, l.firefly_id as linked_firefly_id, l.link_type
+                FROM extractions e
                 LEFT JOIN imports i ON e.external_id = i.external_id
+                LEFT JOIN linkage l ON e.id = l.extraction_id
                 WHERE e.review_state = 'AUTO'
                 AND (i.id IS NULL OR i.status = 'FAILED')
             """
             ).fetchall()
         else:
-            # AUTO + reviewed/accepted (includes failed imports for retry)
+            # AUTO + reviewed/accepted/orphan_confirmed (includes failed imports for retry)
             rows = conn.execute(
                 """
-                SELECT e.* FROM extractions e
+                SELECT e.*, l.firefly_id as linked_firefly_id, l.link_type
+                FROM extractions e
                 LEFT JOIN imports i ON e.external_id = i.external_id
+                LEFT JOIN linkage l ON e.id = l.extraction_id
                 WHERE (i.id IS NULL OR i.status = 'FAILED')
-                AND (e.review_state = 'AUTO' OR e.review_decision IN ('ACCEPTED', 'EDITED'))
+                AND (e.review_state = 'AUTO' OR e.review_decision IN ('ACCEPTED', 'EDITED', 'ORPHAN_CONFIRMED'))
             """
             ).fetchall()
     finally:
@@ -405,6 +409,10 @@ def cmd_import(
                     logger.info(f"[{document_id}] Retrying previously failed import")
                     store.delete_import(external_id)
 
+            # Check if linked to existing Firefly transaction
+            linked_firefly_id = row.get("linked_firefly_id")
+            link_type = row.get("link_type")
+
             # Build Firefly payload (handles splits automatically)
             logger.debug(f"Building payload with source_account={default_source_account}")
             payload = build_firefly_payload_with_splits(
@@ -418,7 +426,10 @@ def cmd_import(
             print(f"     → {ext.proposal.amount} {ext.proposal.currency} on {ext.proposal.date}")
 
             if dry_run:
-                print("     → [DRY RUN] Would import")
+                if linked_firefly_id:
+                    print(f"     → [DRY RUN] Would UPDATE existing Firefly transaction {linked_firefly_id}")
+                else:
+                    print("     → [DRY RUN] Would CREATE new transaction")
                 continue
 
             # Create import record BEFORE sending to Firefly
@@ -430,20 +441,47 @@ def cmd_import(
             )
             logger.debug(f"Created PENDING import record for {external_id}")
 
-            # Send to Firefly
-            logger.info(f"Sending transaction to Firefly: {ext.proposal.description}")
-            firefly_id = firefly.create_transaction(payload, skip_duplicates=True)
-
-            if firefly_id:
-                store.update_import_success(external_id, firefly_id)
-                logger.info(f"[{document_id}] Import successful, firefly_id={firefly_id}")
-                print(f"     ✓ Imported (Firefly ID: {firefly_id})")
-                imported += 1
+            # Handle linked vs orphan vs unlinked transactions
+            if linked_firefly_id and link_type == "LINKED":
+                # UPDATE existing Firefly transaction instead of creating new one
+                # This prevents duplicates when importing linked documents
+                logger.info(f"Updating existing Firefly transaction {linked_firefly_id} with document data")
+                print(f"     → Updating linked Firefly transaction {linked_firefly_id}")
+                
+                try:
+                    success = firefly.update_transaction(linked_firefly_id, payload)
+                    if success:
+                        store.update_import_success(external_id, linked_firefly_id)
+                        logger.info(f"[{document_id}] Update successful, firefly_id={linked_firefly_id}")
+                        print(f"     ✓ Updated (Firefly ID: {linked_firefly_id})")
+                        imported += 1
+                    else:
+                        store.update_import_failed(external_id, "Failed to update Firefly transaction")
+                        logger.warning(f"[{document_id}] Update failed")
+                        print("     ⚠ Update failed")
+                        failed += 1
+                except Exception as update_err:
+                    # If update fails, record the error
+                    error_msg = str(update_err)
+                    store.update_import_failed(external_id, f"Update failed: {error_msg}")
+                    logger.warning(f"[{document_id}] Update failed: {error_msg}")
+                    print(f"     ⚠ Update failed: {error_msg}")
+                    failed += 1
             else:
-                store.update_import_failed(external_id, "Duplicate detected by Firefly")
-                logger.warning(f"[{document_id}] Duplicate detected")
-                print("     ⚠ Skipped (duplicate)")
-                failed += 1
+                # CREATE new transaction (orphan or unlinked)
+                logger.info(f"Sending new transaction to Firefly: {ext.proposal.description}")
+                firefly_id = firefly.create_transaction(payload, skip_duplicates=True)
+
+                if firefly_id:
+                    store.update_import_success(external_id, firefly_id)
+                    logger.info(f"[{document_id}] Import successful, firefly_id={firefly_id}")
+                    print(f"     ✓ Imported (Firefly ID: {firefly_id})")
+                    imported += 1
+                else:
+                    store.update_import_failed(external_id, "Duplicate detected by Firefly")
+                    logger.warning(f"[{document_id}] Duplicate detected")
+                    print("     ⚠ Skipped (duplicate)")
+                    failed += 1
 
         except Exception as e:
             error_msg = str(e)
