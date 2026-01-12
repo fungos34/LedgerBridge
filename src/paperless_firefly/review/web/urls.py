@@ -145,6 +145,11 @@ urlpatterns = [
         views.api_unlink,
         name="api_unlink",
     ),
+    path(
+        "review/paperless/<int:document_id>/quick-accept/",
+        views.api_quick_accept,
+        name="api_quick_accept",
+    ),
     # ============================================================================
     # LLM Control Routes (Phase 6-7 - SPARK_EVALUATION_REPORT.md 6.7/6.8)
     # ============================================================================

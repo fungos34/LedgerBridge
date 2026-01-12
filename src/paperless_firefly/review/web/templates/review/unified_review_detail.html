@@ -615,6 +615,67 @@
     .ai-progress-spinner {
         animation: pulse 1.5s ease-in-out infinite;
     }
+    
+    /* Collapsible Cards */
+    .card-collapsible .card-header {
+        cursor: pointer;
+        transition: background-color 0.15s ease;
+        user-select: none;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    
+    .card-collapsible .card-header:hover {
+        background: var(--gray-100);
+    }
+    
+    .card-collapsible .card-header h2 {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    .card-collapsible .collapse-icon {
+        font-size: 0.75rem;
+        color: var(--gray-500);
+        transition: transform 0.2s ease;
+        margin-left: auto;
+    }
+    
+    .card-collapsible.collapsed .collapse-icon {
+        transform: rotate(-90deg);
+    }
+    
+    .card-collapsible.collapsed .card-body {
+        display: none;
+    }
+    
+    .card-collapsible .card-header-info {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.75rem;
+        color: var(--gray-500);
+    }
+    
+    /* AI Job Status Badge */
+    .ai-job-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        padding: 0.125rem 0.5rem;
+        border-radius: 9999px;
+        font-size: 0.625rem;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+    
+    .ai-job-badge.pending { background: #fef3c7; color: #92400e; }
+    .ai-job-badge.processing { background: #dbeafe; color: #1d4ed8; }
+    .ai-job-badge.completed { background: #dcfce7; color: #166534; }
+    .ai-job-badge.failed { background: #fee2e2; color: #991b1b; }
+    .ai-job-badge.not-scheduled { background: var(--gray-100); color: var(--gray-600); }
 </style>
 {% endblock %}
 
@@ -913,11 +974,21 @@
         </form>
         
         {% if record_type == 'paperless' %}
-        <!-- AI Settings -->
+        <!-- AI Settings (Collapsible, hidden by default) -->
         {% if llm_globally_enabled %}
-        <div class="card mt-4">
-            <div class="card-header">
+        <div class="card card-collapsible mt-4 collapsed" id="ai-settings-card">
+            <div class="card-header" onclick="toggleCard('ai-settings-card')">
                 <h2>🤖 AI Settings</h2>
+                <div class="card-header-info">
+                    {% if ai_job_status %}
+                    <span class="ai-job-badge {{ ai_job_status.status|lower }}">
+                        {% if ai_job_status.status == 'PENDING' %}⏳ Scheduled{% elif ai_job_status.status == 'PROCESSING' %}⚙️ Processing{% elif ai_job_status.status == 'COMPLETED' %}✅ Completed{% elif ai_job_status.status == 'FAILED' %}❌ Failed{% else %}{{ ai_job_status.status }}{% endif %}
+                    </span>
+                    {% else %}
+                    <span class="ai-job-badge not-scheduled">Not Scheduled</span>
+                    {% endif %}
+                    <span class="collapse-icon">▼</span>
+                </div>
             </div>
             <div class="card-body">
                 <div class="form-row" style="align-items: center; gap: 1rem;">
@@ -943,16 +1014,81 @@
                         </button>
                     </div>
                 </div>
+                {% if ai_job_status %}
+                <div class="mt-3 p-3" style="background: var(--gray-50); border-radius: 0.375rem;">
+                    <div class="form-help" style="margin: 0;">
+                        <strong>AI Job Status:</strong> {{ ai_job_status.status }}<br>
+                        {% if ai_job_status.scheduled_at %}
+                        <strong>Scheduled:</strong> {{ ai_job_status.scheduled_at }}<br>
+                        {% endif %}
+                        {% if ai_job_status.started_at %}
+                        <strong>Started:</strong> {{ ai_job_status.started_at }}<br>
+                        {% endif %}
+                        {% if ai_job_status.completed_at %}
+                        <strong>Completed:</strong> {{ ai_job_status.completed_at }}<br>
+                        {% endif %}
+                        {% if ai_job_status.error_message %}
+                        <strong>Error:</strong> <span style="color: var(--red-600);">{{ ai_job_status.error_message }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
+                
+                <!-- AI Suggestions from Queue -->
+                {% if ai_suggestions %}
+                <div class="mt-3 p-3" style="background: #dcfce7; border-radius: 0.375rem; border: 1px solid #86efac;">
+                    <h4 style="font-size: 0.875rem; color: #166534; margin-bottom: 0.75rem;">
+                        ✨ AI Suggestions Available
+                    </h4>
+                    {% if ai_suggestions.category %}
+                    <div class="ai-suggestion-item" style="margin-bottom: 0.5rem;">
+                        <div style="display: flex; align-items: center; justify-content: space-between;">
+                            <div>
+                                <strong>Category:</strong> 
+                                <span class="text-mono">{{ ai_suggestions.category.value }}</span>
+                                {% if ai_suggestions.category.confidence %}
+                                <span class="badge-confidence" style="margin-left: 0.5rem; background: #166534; color: white; padding: 0.125rem 0.5rem; border-radius: 9999px; font-size: 0.65rem;">
+                                    {{ ai_suggestions.category.confidence|floatformat:0 }}% confidence
+                                </span>
+                                {% endif %}
+                            </div>
+                            <button type="button" 
+                                    class="btn btn-sm btn-success"
+                                    onclick="applyAiSuggestion('category', '{{ ai_suggestions.category.value }}')"
+                                    style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">
+                                Use this
+                            </button>
+                        </div>
+                        {% if ai_suggestions.category.reason %}
+                        <div class="form-help" style="margin-top: 0.25rem; font-style: italic;">
+                            "{{ ai_suggestions.category.reason }}"
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                    <div class="mt-2 pt-2" style="border-top: 1px solid #86efac;">
+                        <button type="button" 
+                                class="btn btn-sm btn-outline"
+                                onclick="applyAllAiSuggestions()"
+                                style="font-size: 0.75rem;">
+                            ✅ Apply All AI Suggestions
+                        </button>
+                    </div>
+                </div>
+                {% endif %}
             </div>
         </div>
         {% endif %}
         
-        <!-- Confidence Details -->
+        <!-- Confidence Details (Collapsible, hidden by default) -->
         {% if confidence %}
-        <div class="card mt-4">
-            <div class="card-header">
-                <h2>Confidence Scores</h2>
-                <span class="text-mono">{{ confidence.overall|floatformat:0 }}% overall</span>
+        <div class="card card-collapsible mt-4 collapsed" id="confidence-card">
+            <div class="card-header" onclick="toggleCard('confidence-card')">
+                <h2>📊 Confidence Scores</h2>
+                <div class="card-header-info">
+                    <span class="text-mono">{{ confidence.overall|floatformat:0 }}% overall</span>
+                    <span class="collapse-icon">▼</span>
+                </div>
             </div>
             <div class="card-body">
                 <div class="confidence-bar" style="height: 0.75rem; margin-bottom: 1rem;">
@@ -981,11 +1117,15 @@
         </div>
         {% endif %}
         
-        <!-- Extraction Audit / Provenance -->
+        <!-- Extraction Audit / Provenance (Collapsible, hidden by default) -->
         {% if provenance or record.raw_text %}
-        <div class="card mt-4">
-            <div class="card-header">
+        <div class="card card-collapsible mt-4 collapsed" id="audit-card">
+            <div class="card-header" onclick="toggleCard('audit-card')">
                 <h2>🔍 Extraction Audit</h2>
+                <div class="card-header-info">
+                    <span>{{ provenance.extraction_strategy|default:"ocr" }}</span>
+                    <span class="collapse-icon">▼</span>
+                </div>
             </div>
             <div class="card-body">
                 {% if provenance %}
@@ -1292,6 +1432,32 @@ function toggleDocumentViewer() {
         localStorage.setItem('documentViewerCollapsed', isCollapsed);
     }
 }
+
+// Generic card collapse toggle
+function toggleCard(cardId) {
+    const card = document.getElementById(cardId);
+    if (card) {
+        card.classList.toggle('collapsed');
+        // Remember preference
+        const isCollapsed = card.classList.contains('collapsed');
+        localStorage.setItem(`card_${cardId}_collapsed`, isCollapsed);
+    }
+}
+
+// Initialize card collapse states from localStorage on page load
+document.addEventListener('DOMContentLoaded', function() {
+    // Collapsible cards - restore state from localStorage
+    document.querySelectorAll('.card-collapsible').forEach(card => {
+        const cardId = card.id;
+        if (cardId) {
+            const savedState = localStorage.getItem(`card_${cardId}_collapsed`);
+            // Default collapsed state is set in HTML; only restore if user explicitly toggled
+            if (savedState === 'false') {
+                card.classList.remove('collapsed');
+            }
+        }
+    });
+});
 
 // Iframe load/error handling
 function handleIframeLoad() {
@@ -1718,6 +1884,57 @@ function cancelAIRequest() {
     }
     hideAIProgressModal();
     showNotification('Request Cancelled', 'AI interpretation was cancelled.', 'warning');
+}
+
+// Apply a single AI suggestion to a form field
+function applyAiSuggestion(fieldName, value) {
+    const field = document.getElementById(fieldName);
+    if (!field) {
+        console.warn('Field not found:', fieldName);
+        return;
+    }
+    
+    // Store original value for undo
+    const originalValue = field.value;
+    
+    // Apply the AI suggestion
+    field.value = value;
+    field.classList.add('ai-modified');
+    
+    // Mark as changed
+    updateUnsavedIndicator();
+    
+    showNotification('AI Suggestion Applied', `Set ${fieldName} to "${value}"`, 'success');
+}
+
+// Apply all available AI suggestions
+function applyAllAiSuggestions() {
+    {% if ai_suggestions %}
+    const suggestions = {{ ai_suggestions|safe }};
+    let appliedCount = 0;
+    
+    // Apply category if available
+    if (suggestions.category && suggestions.category.value) {
+        const categoryField = document.getElementById('category');
+        if (categoryField) {
+            categoryField.value = suggestions.category.value;
+            categoryField.classList.add('ai-modified');
+            appliedCount++;
+        }
+    }
+    
+    // Apply other fields if they become available in the future
+    // (e.g., transaction_type, description, etc.)
+    
+    if (appliedCount > 0) {
+        updateUnsavedIndicator();
+        showNotification('AI Suggestions Applied', `Applied ${appliedCount} suggestion(s) to form fields`, 'success');
+    } else {
+        showNotification('No Suggestions', 'No AI suggestions were available to apply', 'warning');
+    }
+    {% else %}
+    showNotification('No Suggestions', 'No AI suggestions are available', 'warning');
+    {% endif %}
 }
 
 // Apply AI suggestions to form fields

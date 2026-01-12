@@ -221,6 +221,72 @@
         font-size: 0.75rem;
         color: var(--gray-500);
     }
+
+    /* Priority input */
+    .priority-input {
+        width: 4rem;
+        padding: 0.25rem 0.5rem;
+        font-size: 0.75rem;
+        border: 1px solid var(--border);
+        border-radius: 0.25rem;
+        text-align: center;
+    }
+
+    .priority-input:focus {
+        outline: none;
+        border-color: var(--primary);
+        box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+    }
+
+    .priority-input:disabled {
+        background: var(--gray-100);
+        cursor: not-allowed;
+    }
+
+    /* Run Now button */
+    .btn-run-now {
+        background: linear-gradient(135deg, #059669, #047857);
+        color: white;
+        border: 1px solid #047857;
+        padding: 0.25rem 0.5rem;
+        font-size: 0.75rem;
+        border-radius: 0.25rem;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+    }
+
+    .btn-run-now:hover:not(:disabled) {
+        background: linear-gradient(135deg, #047857, #065f46);
+    }
+
+    .btn-run-now:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    /* Processing indicator */
+    .processing-indicator {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        font-size: 0.75rem;
+        color: var(--blue-600);
+    }
+
+    .processing-indicator .spinner {
+        width: 1rem;
+        height: 1rem;
+        border: 2px solid var(--blue-200);
+        border-top-color: var(--blue-600);
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+        to { transform: rotate(360deg); }
+    }
 </style>
 {% endblock %}
 
@@ -299,7 +365,7 @@
     </thead>
     <tbody>
         {% for job in jobs %}
-        <tr>
+        <tr data-job-id="{{ job.id }}">
             <td>#{{ job.id }}</td>
             <td>
                 <a href="{% url 'unified_review_detail' 'paperless' job.document_id %}" class="doc-link">
@@ -313,7 +379,23 @@
             <td>
                 <span class="status-badge {{ job.status|lower }}">{{ job.status }}</span>
             </td>
-            <td>{{ job.priority }}</td>
+            <td>
+                {% if job.status == 'PENDING' %}
+                <input type="number" 
+                       class="priority-input"
+                       value="{{ job.priority }}"
+                       min="-99"
+                       max="99"
+                       onchange="updatePriority({{ job.id }}, this.value)"
+                       title="Higher priority jobs are processed first">
+                {% else %}
+                <input type="number" 
+                       class="priority-input"
+                       value="{{ job.priority }}"
+                       disabled
+                       title="Cannot change priority of {{ job.status|lower }} jobs">
+                {% endif %}
+            </td>
             <td>
                 <span class="timestamp">{{ job.scheduled_at|slice:":19" }}</span>
             </td>
@@ -336,6 +418,13 @@
                 {% else %}-{% endif %}
             </td>
             <td class="job-actions">
+                {% if job.status == 'PENDING' %}
+                <button class="btn-run-now" 
+                        onclick="runJobNow({{ job.id }})"
+                        {% if is_processing %}disabled title="Another job is currently processing"{% else %}title="Run this job immediately"{% endif %}>
+                    ▶️ Run Now
+                </button>
+                {% endif %}
                 {% if job.status == 'PENDING' or job.status == 'PROCESSING' %}
                 <button class="btn-cancel" onclick="cancelJob({{ job.id }})" title="Cancel job">
                     ✕ Cancel
@@ -431,6 +520,62 @@
             }
         })
         .catch(e => alert('Error: ' + e));
+    }
+    
+    function updatePriority(jobId, newPriority) {
+        fetch('{% url "ai_queue_action" %}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRFToken': '{{ csrf_token }}'
+            },
+            body: `action=update_priority&job_id=${jobId}&priority=${newPriority}`
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) {
+                alert('Failed to update priority: ' + data.error);
+                location.reload(); // Reset to original value
+            }
+        })
+        .catch(e => {
+            alert('Error: ' + e);
+            location.reload();
+        });
+    }
+    
+    function runJobNow(jobId) {
+        if (!confirm('Run this AI job immediately?')) return;
+        
+        // Show processing indicator
+        const row = document.querySelector(`tr[data-job-id="${jobId}"]`);
+        const actionsCell = row ? row.querySelector('.job-actions') : null;
+        if (actionsCell) {
+            actionsCell.innerHTML = '<span class="processing-indicator"><span class="spinner"></span> Running...</span>';
+        }
+        
+        fetch('{% url "ai_queue_action" %}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRFToken': '{{ csrf_token }}'
+            },
+            body: `action=run_now&job_id=${jobId}`
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                // Reload after a short delay to show updated status
+                setTimeout(() => location.reload(), 500);
+            } else {
+                alert('Failed to run job: ' + data.error);
+                location.reload();
+            }
+        })
+        .catch(e => {
+            alert('Error: ' + e);
+            location.reload();
+        });
     }
 </script>
 {% endblock %}

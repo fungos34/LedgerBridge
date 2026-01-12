@@ -1363,6 +1363,50 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
             decision_source="USER_RERUN",
         )
 
+        # Also update/create AI job queue entry to track this run
+        try:
+            # Check if there's an existing active job
+            existing_job = store.get_ai_job_by_document(document_id, active_only=True)
+            if existing_job:
+                # Update the existing job with the results
+                if final_state == "COMPLETED":
+                    store.complete_ai_job(
+                        existing_job["id"],
+                        json.dumps(all_suggestions) if all_suggestions else None,
+                    )
+                elif final_state == "ERROR":
+                    store.fail_ai_job(
+                        existing_job["id"],
+                        error_message or "Unknown error",
+                        can_retry=False,
+                    )
+            else:
+                # Create a new completed job entry for tracking
+                job_id = store.schedule_ai_job(
+                    document_id=document_id,
+                    extraction_id=extraction_id,
+                    external_id=external_id,
+                    created_by="USER_RERUN",
+                    notes=f"Manually triggered re-run: {reason}",
+                )
+                if job_id:
+                    # Mark as started then completed immediately
+                    store.start_ai_job(job_id)
+                    if final_state == "COMPLETED":
+                        store.complete_ai_job(
+                            job_id,
+                            json.dumps(all_suggestions) if all_suggestions else None,
+                        )
+                    elif final_state == "ERROR":
+                        store.fail_ai_job(job_id, error_message or "Unknown error", can_retry=False)
+                    elif final_state == "NO_SUGGESTION":
+                        store.complete_ai_job(job_id, None)
+                    else:
+                        # SKIPPED or other - cancel the job
+                        store.cancel_ai_job(job_id)
+        except Exception as queue_err:
+            logger.warning(f"Could not update AI job queue: {queue_err}")
+
         if is_ajax:
             response_data = {
                 "success": final_state in ["COMPLETED", "NO_SUGGESTION"],
@@ -3867,6 +3911,18 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
                         record["match_count"] = len(suggestions)
                     except Exception:
                         pass
+                
+                # Get AI job status for this document
+                record["ai_status"] = None
+                record["ai_has_suggestions"] = False
+                try:
+                    ai_job = store.get_ai_job_by_document(record["document_id"], active_only=False)
+                    if ai_job:
+                        record["ai_status"] = ai_job["status"]
+                        if ai_job["status"] == "COMPLETED" and ai_job.get("suggestions_json"):
+                            record["ai_has_suggestions"] = True
+                except Exception:
+                    pass
             except (json.JSONDecodeError, TypeError):
                 record["title"] = f"Document #{record['document_id']}"
                 record["needs_linking"] = True
@@ -4164,6 +4220,32 @@ def unified_review_detail(request: HttpRequest, record_type: str, record_id: int
     except Exception:
         pass
 
+    # Get AI job status for this document
+    ai_job_status = None
+    ai_suggestions = None
+    if record_type == "paperless":
+        try:
+            ai_job = store.get_ai_job_by_document(record_id, active_only=False)
+            if ai_job:
+                ai_job_status = {
+                    "id": ai_job["id"],
+                    "status": ai_job["status"],
+                    "scheduled_at": ai_job.get("scheduled_at"),
+                    "started_at": ai_job.get("started_at"),
+                    "completed_at": ai_job.get("completed_at"),
+                    "error_message": ai_job.get("error_message"),
+                    "priority": ai_job.get("priority", 0),
+                    "retry_count": ai_job.get("retry_count", 0),
+                }
+                # Parse suggestions if completed
+                if ai_job["status"] == "COMPLETED" and ai_job.get("suggestions_json"):
+                    try:
+                        ai_suggestions = json.loads(ai_job["suggestions_json"])
+                    except json.JSONDecodeError:
+                        logger.warning(f"Could not parse AI suggestions for job {ai_job['id']}")
+        except Exception as e:
+            logger.warning(f"Could not get AI job status: {e}")
+
     context = {
         "record": record_data,
         "record_type": record_type,
@@ -4186,6 +4268,8 @@ def unified_review_detail(request: HttpRequest, record_type: str, record_id: int
         "next_id": next_id,
         "pending_count": pending_count,
         "current_position": current_position,
+        "ai_job_status": ai_job_status,
+        "ai_suggestions": ai_suggestions,
         **_get_external_urls(request.user if hasattr(request, "user") else None),
     }
 
@@ -4427,6 +4511,88 @@ def api_unlink(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"success": False, "error": "Invalid JSON body"}, status=400)
     except Exception as e:
         logger.error(f"Error removing link: {e}")
+        return JsonResponse({"success": False, "error": str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["POST"])
+def api_quick_accept(request: HttpRequest, document_id: int) -> JsonResponse:
+    """API endpoint to quickly accept a document with current values.
+
+    This applies any AI suggestions and marks the document as accepted,
+    ready for import.
+    
+    Args:
+        request: HTTP request
+        document_id: Paperless document ID
+        
+    Returns:
+        JSON response with success status
+    """
+    store = _get_store()
+
+    try:
+        # Get extraction for document
+        extraction = store.get_extraction_by_document(document_id)
+        if not extraction:
+            return JsonResponse({"success": False, "error": "Extraction not found"}, status=404)
+        
+        extraction_data = json.loads(extraction.extraction_json) if extraction.extraction_json else {}
+        proposal = extraction_data.get("proposal", {})
+        
+        # Check if AI suggestions are available and apply them
+        ai_job = store.get_ai_job_by_document(document_id, active_only=False)
+        if ai_job and ai_job["status"] == "COMPLETED" and ai_job.get("suggestions_json"):
+            try:
+                suggestions = json.loads(ai_job["suggestions_json"])
+                # Apply category suggestion if available
+                if suggestions.get("category", {}).get("value"):
+                    proposal["category"] = suggestions["category"]["value"]
+                    extraction_data["proposal"] = proposal
+            except json.JSONDecodeError:
+                logger.warning(f"Could not parse AI suggestions for document {document_id}")
+        
+        # Update extraction with any AI suggestions applied
+        conn = store._get_connection()
+        try:
+            conn.execute(
+                "UPDATE extractions SET extraction_json = ? WHERE id = ?",
+                (json.dumps(extraction_data), extraction.id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        
+        # Update extraction status to accepted
+        store.update_extraction_status(
+            extraction.id,
+            review_decision="ACCEPTED",
+            review_state="AUTO",
+        )
+        
+        # Create audit trail entry
+        store.create_interpretation_run(
+            document_id=document_id,
+            firefly_id=None,
+            external_id=extraction.external_id,
+            pipeline_version="1.0.0",
+            inputs_summary={
+                "action": "quick_accept",
+                "document_id": document_id,
+                "ai_suggestions_applied": ai_job is not None and ai_job["status"] == "COMPLETED",
+            },
+            final_state="ACCEPTED",
+            duration_ms=0,
+            decision_source="USER_QUICK_ACCEPT",
+        )
+
+        return JsonResponse({
+            "success": True,
+            "message": f"Document {document_id} accepted",
+        })
+
+    except Exception as e:
+        logger.error(f"Error in quick accept: {e}")
         return JsonResponse({"success": False, "error": str(e)}, status=500)
 
 
@@ -4740,6 +4906,145 @@ def api_chat(request: HttpRequest) -> JsonResponse:
 # ============================================================================
 
 
+def _run_ai_job_now(request: HttpRequest, store: StateStore, job: dict) -> bool:
+    """Run an AI job immediately (synchronously)."""
+    import time
+    from pathlib import Path
+
+    from .models import UserProfile
+
+    job_id = job["id"]
+    document_id = job["document_id"]
+    extraction_id = job.get("extraction_id")
+    
+    # Check if AI is opted out for this document
+    try:
+        extraction = store.get_extraction_by_document(document_id)
+        if extraction and extraction.llm_opt_out:
+            logger.info(f"Job #{job_id} skipped - AI opted out for document {document_id}")
+            store.start_ai_job(job_id)
+            store.complete_ai_job(
+                job_id,
+                json.dumps({"skipped": True, "reason": "AI opted out for this document"}),
+            )
+            return True
+    except Exception:
+        pass
+    
+    # Mark as started
+    if not store.start_ai_job(job_id):
+        logger.warning(f"Could not start job #{job_id}")
+        return False
+    
+    start_time = time.time()
+    
+    try:
+        # Load config
+        from ...config import load_config
+        from ...spark_ai import SparkAIService
+
+        config_path = (
+            Path(getattr(settings, "STATE_DB_PATH", "/app/data/state.db")).parent
+            / "config.yaml"
+        )
+        if not config_path.exists():
+            config_path = Path("/app/config/config.yaml")
+        
+        if not config_path.exists():
+            store.fail_ai_job(job_id, "Configuration file not found", can_retry=False)
+            return False
+        
+        config = load_config(config_path)
+        
+        # Override with user profile settings
+        try:
+            profile = UserProfile.objects.get(user=request.user)
+            if profile.llm_enabled:
+                config.llm.enabled = True
+                if profile.ollama_url:
+                    config.llm.ollama_url = profile.ollama_url
+                if profile.ollama_model:
+                    config.llm.model_fast = profile.ollama_model
+        except UserProfile.DoesNotExist:
+            pass
+        
+        # Get categories
+        firefly_client = _get_firefly_client(request)
+        categories = []
+        if firefly_client:
+            try:
+                cats = firefly_client.list_categories()
+                categories = [c.name for c in cats]
+            except Exception as e:
+                logger.warning(f"Could not fetch categories: {e}")
+        
+        if not categories:
+            store.fail_ai_job(job_id, "No categories available from Firefly", can_retry=True)
+            return False
+        
+        # Get extraction data
+        extraction_data = {}
+        external_id = None
+        if extraction_id:
+            ext = store.get_extraction(extraction_id)
+            if ext:
+                extraction_data = json.loads(ext.extraction_json) if ext.extraction_json else {}
+                external_id = ext.external_id
+        
+        proposal = extraction_data.get("proposal", {})
+        
+        # Run AI interpretation
+        ai_service = SparkAIService(store, config, categories)
+        
+        suggestion = ai_service.suggest_category(
+            amount=str(proposal.get("amount", "0")),
+            date=proposal.get("date", ""),
+            vendor=proposal.get("destination_account", ""),
+            description=proposal.get("description", ""),
+            document_id=document_id,
+            use_cache=False,
+        )
+        
+        duration_ms = int((time.time() - start_time) * 1000)
+        
+        if suggestion:
+            suggestions_json = json.dumps({
+                "category": {
+                    "value": suggestion.category,
+                    "confidence": suggestion.confidence,
+                    "reason": suggestion.reason,
+                },
+            })
+            store.complete_ai_job(job_id, suggestions_json)
+            
+            # Record audit trail
+            store.create_interpretation_run(
+                document_id=document_id,
+                firefly_id=None,
+                external_id=external_id,
+                pipeline_version="1.0.0",
+                inputs_summary={
+                    "action": "queue_run_now",
+                    "job_id": job_id,
+                    "triggered_by": "user",
+                },
+                final_state="COMPLETED",
+                duration_ms=duration_ms,
+                llm_result=suggestion.to_dict() if hasattr(suggestion, 'to_dict') else None,
+                suggested_category=suggestion.category,
+                decision_source="USER_RUN_NOW",
+            )
+            return True
+        else:
+            store.fail_ai_job(job_id, "No suggestion returned from AI", can_retry=True)
+            return False
+            
+    except Exception as e:
+        logger.error(f"Error running job #{job_id}: {e}")
+        store.fail_ai_job(job_id, str(e), can_retry=True)
+        return False
+
+
 @login_required
 def ai_queue_list(request: HttpRequest) -> HttpResponse:
     """View the AI job queue."""
@@ -4761,6 +5066,9 @@ def ai_queue_list(request: HttpRequest) -> HttpResponse:
     # Get stats
     stats = store.get_ai_queue_stats()
     
+    # Check if any job is processing (for Run Now button)
+    is_processing = stats.get("processing", 0) > 0
+    
     context = {
         "jobs": jobs,
         "stats": stats,
@@ -4768,6 +5076,7 @@ def ai_queue_list(request: HttpRequest) -> HttpResponse:
         "page": page,
         "has_next": len(jobs) == per_page,
         "has_prev": page > 1,
+        "is_processing": is_processing,
         **_get_external_urls(request.user if hasattr(request, "user") else None),
     }
     return render(request, "review/ai_queue.html", context)
@@ -4818,6 +5127,39 @@ def ai_queue_action(request: HttpRequest) -> JsonResponse:
                             (job_id,),
                         )
                     results["success"] += 1
+                else:
+                    results["failed"] += 1
+            elif action == "update_priority":
+                # Update job priority
+                new_priority = int(request.POST.get("priority", 0))
+                job = store.get_ai_job(job_id)
+                if job and job["status"] == "PENDING":
+                    with store._transaction() as conn:
+                        conn.execute(
+                            "UPDATE ai_job_queue SET priority = ? WHERE id = ?",
+                            (new_priority, job_id),
+                        )
+                    results["success"] += 1
+                else:
+                    results["failed"] += 1
+            elif action == "run_now":
+                # Run job immediately
+                job = store.get_ai_job(job_id)
+                if job and job["status"] == "PENDING":
+                    # Check if any job is currently processing
+                    stats = store.get_ai_queue_stats()
+                    if stats.get("processing", 0) > 0:
+                        return JsonResponse({
+                            "success": False,
+                            "error": "Another job is currently processing. Please wait."
+                        }, status=409)
+                    
+                    # Run the job immediately
+                    success = _run_ai_job_now(request, store, job)
+                    if success:
+                        results["success"] += 1
+                    else:
+                        results["failed"] += 1
                 else:
                     results["failed"] += 1
             else:

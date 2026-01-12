@@ -156,6 +156,7 @@ class AIJobQueueService:
         Process a single AI job.
 
         Fetches fresh document metadata and runs AI interpretation.
+        Checks if AI is enabled for this document before processing.
 
         Args:
             job: Job dict from queue
@@ -170,6 +171,23 @@ class AIJobQueueService:
         extraction_id = job.get("extraction_id")
 
         logger.info(f"Processing AI job #{job_id} for document {document_id}")
+
+        # Check if AI is opted-out for this document BEFORE processing
+        try:
+            extraction = self.store.get_extraction_by_document(document_id)
+            if extraction and extraction.llm_opt_out:
+                logger.info(
+                    f"Skipping AI job #{job_id} - document {document_id} has AI opted out"
+                )
+                # Mark as completed with skip reason
+                self.store.start_ai_job(job_id)
+                self.store.complete_ai_job(
+                    job_id,
+                    json.dumps({"skipped": True, "reason": "AI opted out for this document"}),
+                )
+                return True  # Successfully handled (by skipping)
+        except Exception as e:
+            logger.warning(f"Could not check opt-out status for job #{job_id}: {e}")
 
         # Mark job as processing
         if not self.store.start_ai_job(job_id):
