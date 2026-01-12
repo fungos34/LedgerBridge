@@ -251,3 +251,153 @@ Please answer based on the documentation and your knowledge of the system."""
             question=question,
             documentation=documentation or "No additional documentation available.",
         )
+
+
+@dataclass
+class TransactionReviewPrompt:
+    """Prompt template for comprehensive transaction review suggestions.
+
+    Used when reviewing a document to suggest values for all editable fields
+    based on document content, OCR data, and linked bank transaction context.
+    """
+
+    version: str = PROMPT_VERSION
+
+    system_prompt: str = """You are a financial document review assistant helping categorize and verify transactions.
+
+Your task is to analyze the provided document and suggest values for transaction fields.
+You have access to:
+1. Document data (extracted from OCR or structured invoice)
+2. Linked bank transaction data (if available) for verification
+3. Previously applied rules or decisions
+
+IMPORTANT RULES:
+1. For 'category': ONLY suggest from the available categories list
+2. For 'transaction_type': ONLY use 'withdrawal', 'deposit', or 'transfer'
+3. Preserve existing good values - only suggest changes that improve accuracy
+4. Use linked bank data to verify/correct amounts and dates
+5. Provide confidence scores (0.0-1.0) for each suggestion
+6. Be conservative - if uncertain, keep the original value
+
+Respond in JSON format:
+{
+    "suggestions": {
+        "category": {"value": "CategoryName", "confidence": 0.85, "reason": "..."},
+        "transaction_type": {"value": "withdrawal", "confidence": 0.95, "reason": "..."},
+        "destination_account": {"value": "Vendor Name", "confidence": 0.80, "reason": "..."},
+        "description": {"value": "Description text", "confidence": 0.75, "reason": "..."}
+    },
+    "overall_confidence": 0.82,
+    "analysis_notes": "Brief analysis summary"
+}
+
+Only include fields where you have a meaningful suggestion (confidence > 0.5)."""
+
+    user_template: str = """Review this transaction and suggest values for the form fields:
+
+CURRENT DOCUMENT DATA:
+- Amount: {amount}
+- Date: {date}
+- Vendor/Payee: {vendor}
+- Description: {description}
+- Current Category: {current_category}
+- Current Transaction Type: {current_type}
+- Invoice Number: {invoice_number}
+- OCR Confidence: {ocr_confidence}%
+
+DOCUMENT CONTENT (OCR/Structured):
+{document_content}
+
+LINKED BANK TRANSACTION:
+{bank_transaction}
+
+PREVIOUS DECISIONS:
+{previous_decisions}
+
+AVAILABLE CATEGORIES:
+{categories}
+
+AVAILABLE TRANSACTION TYPES:
+- withdrawal (expense/purchase)
+- deposit (income/refund)
+- transfer (between own accounts)
+
+Analyze this data and provide suggestions for any fields that could be improved or filled in.
+Prioritize accuracy over completeness - only suggest values you're confident about."""
+
+    def format_user_message(
+        self,
+        amount: str,
+        date: str,
+        vendor: str | None,
+        description: str | None,
+        current_category: str | None,
+        current_type: str | None,
+        invoice_number: str | None,
+        ocr_confidence: float,
+        document_content: str | None,
+        bank_transaction: dict | None,
+        previous_decisions: list[dict] | None,
+        categories: list[str],
+    ) -> str:
+        """Format the user message for transaction review.
+
+        Args:
+            amount: Transaction amount.
+            date: Transaction date.
+            vendor: Vendor or payee name.
+            description: Transaction description.
+            current_category: Currently assigned category.
+            current_type: Currently assigned transaction type.
+            invoice_number: Invoice/receipt number if extracted.
+            ocr_confidence: Overall OCR confidence percentage.
+            document_content: Raw OCR text or structured content.
+            bank_transaction: Linked bank transaction data if available.
+            previous_decisions: List of previous interpretation decisions.
+            categories: List of available category names.
+
+        Returns:
+            Formatted user message.
+        """
+        categories_str = "\n".join(f"- {cat}" for cat in categories)
+
+        # Format bank transaction data
+        if bank_transaction:
+            bank_str = f"""Amount: {bank_transaction.get('amount', 'N/A')}
+Date: {bank_transaction.get('date', 'N/A')}
+Description: {bank_transaction.get('description', 'N/A')}
+Category: {bank_transaction.get('category_name', 'Not categorized')}
+Source: {bank_transaction.get('source_account', 'N/A')}
+Destination: {bank_transaction.get('destination_account', 'N/A')}"""
+        else:
+            bank_str = "No linked bank transaction"
+
+        # Format previous decisions
+        if previous_decisions:
+            decisions_str = "\n".join(
+                f"- {d.get('decision_source', 'Unknown')}: {d.get('final_state', '')} "
+                f"(Category: {d.get('suggested_category', 'None')})"
+                for d in previous_decisions[:3]  # Last 3 decisions
+            )
+        else:
+            decisions_str = "No previous decisions"
+
+        # Truncate document content to avoid token limits
+        content = document_content or "No content available"
+        if len(content) > 2000:
+            content = content[:2000] + "\n... (truncated)"
+
+        return self.user_template.format(
+            amount=amount,
+            date=date,
+            vendor=vendor or "Unknown",
+            description=description or "No description",
+            current_category=current_category or "Not set",
+            current_type=current_type or "withdrawal",
+            invoice_number=invoice_number or "Not found",
+            ocr_confidence=int(ocr_confidence * 100) if ocr_confidence else 0,
+            document_content=content,
+            bank_transaction=bank_str,
+            previous_decisions=decisions_str,
+            categories=categories_str,
+        )

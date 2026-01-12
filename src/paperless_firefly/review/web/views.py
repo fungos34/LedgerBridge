@@ -1171,9 +1171,10 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
     """Re-run interpretation for a document with SparkAI.
 
     Per SPARK_EVALUATION_REPORT.md 6.8: Rescheduling / Re-Running Interpretation.
-    - Actually invokes SparkAI service to get new category suggestion
+    - Actually invokes SparkAI service to get comprehensive field suggestions
+    - Uses full context: document content, linked bank transaction, previous decisions
     - Creates a new InterpretationRun record with the LLM result
-    - Preserves history of all runs
+    - Returns suggestions for all editable fields (category, type, vendor, description)
 
     Returns JSON response for AJAX calls (with X-Requested-With header or Accept: application/json).
     """
@@ -1193,7 +1194,7 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
     conn = store._get_connection()
     try:
         row = conn.execute(
-            "SELECT id, document_id, external_id, extraction_json FROM extractions WHERE id = ?",
+            "SELECT id, document_id, external_id, extraction_json, overall_confidence FROM extractions WHERE id = ?",
             (extraction_id,),
         ).fetchone()
         if not row:
@@ -1205,6 +1206,7 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
         document_id = row["document_id"]
         external_id = row["external_id"]
         extraction_json = row["extraction_json"]
+        ocr_confidence = row["overall_confidence"] or 0.0
     finally:
         conn.close()
 
@@ -1222,6 +1224,7 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
     start_time = time.time()
     llm_result = None
     suggested_category = None
+    all_suggestions = {}
     final_state = "COMPLETED"
     error_message = None
 
@@ -1268,30 +1271,100 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
 
                     amount = str(proposal.get("amount", "0"))
                     date = proposal.get("date", "")
-                    vendor = proposal.get("vendor", "")
+                    vendor = proposal.get("destination_account") or proposal.get("vendor", "")
                     description = proposal.get("description", "")
-
-                    # Create and call SparkAI service
+                    current_category = proposal.get("category", "")
+                    current_type = proposal.get("transaction_type", "withdrawal")
+                    invoice_number = proposal.get("invoice_number", "")
+                    
+                    # Get document content (OCR text or structured content)
+                    document_content = extraction_data.get("ocr_content", "")
+                    if not document_content:
+                        # Try to get from structured payload
+                        structured = extraction_data.get("structured", {})
+                        if structured:
+                            document_content = f"Invoice: {structured.get('invoice_id', '')}\n"
+                            document_content += f"Vendor: {structured.get('seller_name', '')}\n"
+                            document_content += f"Items: {structured.get('line_items', [])}"
+                    
+                    # Get linked bank transaction if available
+                    bank_transaction = None
+                    linkage = store.get_linkage_by_extraction(extraction_id)
+                    if linkage and linkage.get("firefly_id"):
+                        firefly_id = linkage["firefly_id"]
+                        # Get cached firefly transaction
+                        conn = store._get_connection()
+                        try:
+                            ff_row = conn.execute(
+                                """SELECT firefly_id, amount, date, description, 
+                                          source_account, destination_account, category_name
+                                   FROM firefly_cache WHERE firefly_id = ?""",
+                                (firefly_id,),
+                            ).fetchone()
+                            if ff_row:
+                                bank_transaction = dict(ff_row)
+                        finally:
+                            conn.close()
+                    
+                    # Get previous interpretation decisions
+                    previous_decisions = store.get_interpretation_runs(document_id)[:3]
+                    
+                    # Create SparkAI service and call comprehensive review
                     ai_service = SparkAIService(store, config, categories)
-
-                    suggestion = ai_service.suggest_category(
+                    
+                    # Use comprehensive review method for full field suggestions
+                    review_suggestion = ai_service.suggest_for_review(
                         amount=amount,
                         date=date,
                         vendor=vendor,
                         description=description,
+                        current_category=current_category,
+                        current_type=current_type,
+                        invoice_number=invoice_number,
+                        ocr_confidence=ocr_confidence,
+                        document_content=document_content,
+                        bank_transaction=bank_transaction,
+                        previous_decisions=previous_decisions,
                         document_id=document_id,
                         use_cache=False,  # Force fresh call
                     )
-
-                    if suggestion:
-                        llm_result = suggestion.to_dict()
-                        suggested_category = suggestion.category
+                    
+                    if review_suggestion:
+                        llm_result = review_suggestion.to_dict()
+                        all_suggestions = llm_result.get("suggestions", {})
+                        
+                        # Extract category for backward compatibility
+                        if "category" in all_suggestions:
+                            suggested_category = all_suggestions["category"]["value"]
+                        
                         final_state = "COMPLETED"
                     else:
-                        final_state = "NO_SUGGESTION"
-                        error_message = (
-                            "LLM did not return a suggestion (may be opted out or unavailable)"
+                        # Fall back to simple category suggestion
+                        suggestion = ai_service.suggest_category(
+                            amount=amount,
+                            date=date,
+                            vendor=vendor,
+                            description=description,
+                            document_id=document_id,
+                            use_cache=False,
                         )
+                        
+                        if suggestion:
+                            llm_result = suggestion.to_dict()
+                            suggested_category = suggestion.category
+                            all_suggestions = {
+                                "category": {
+                                    "value": suggestion.category,
+                                    "confidence": suggestion.confidence,
+                                    "reason": suggestion.reason,
+                                }
+                            }
+                            final_state = "COMPLETED"
+                        else:
+                            final_state = "NO_SUGGESTION"
+                            error_message = (
+                                "LLM did not return a suggestion (may be opted out or unavailable)"
+                            )
 
         # Calculate duration
         duration_ms = int((time.time() - start_time) * 1000)
@@ -1321,10 +1394,14 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
                 "state": final_state,
                 "message": f"AI interpretation completed. {f'Suggested: {suggested_category}' if suggested_category else error_message or 'No suggestion returned.'}",
             }
+            # Include all field suggestions for dynamic form updates
+            if all_suggestions:
+                response_data["suggestions"] = all_suggestions
+            # Backward compatibility: include single category suggestion
             if suggested_category:
                 response_data["suggestion"] = {
                     "category": suggested_category,
-                    "confidence": llm_result.get("confidence", 0) if llm_result else 0,
+                    "confidence": llm_result.get("overall_confidence", 0) if llm_result else 0,
                 }
             return JsonResponse(response_data)
 

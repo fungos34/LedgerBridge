@@ -1230,7 +1230,7 @@ function rerunInterpretation() {
     return;
     {% endif %}
     
-    if (!confirm('Re-run AI interpretation for this document? This will refresh the page with updated suggestions.')) {
+    if (!confirm('Re-run AI interpretation for this document? The AI will analyze all fields and provide suggestions.')) {
         return;
     }
     
@@ -1257,12 +1257,29 @@ function rerunInterpretation() {
         return response.json();
     })
     .then(data => {
+        btn.textContent = originalText;
+        btn.disabled = false;
+        
         if (data.success) {
-            window.location.reload();
+            // Apply suggestions dynamically to form fields
+            if (data.suggestions) {
+                applySuggestionsToForm(data.suggestions);
+                showSuggestionsSummary(data.suggestions, data.message);
+            } else if (data.suggestion) {
+                // Backward compatibility: single category suggestion
+                applySuggestionsToForm({
+                    category: {
+                        value: data.suggestion.category,
+                        confidence: data.suggestion.confidence,
+                        reason: ''
+                    }
+                });
+                showSuggestionsSummary({category: data.suggestion}, data.message);
+            } else {
+                alert(data.message || 'AI completed but returned no suggestions.');
+            }
         } else {
             alert('Failed to re-run interpretation: ' + (data.error || 'Unknown error'));
-            btn.textContent = originalText;
-            btn.disabled = false;
         }
     })
     .catch(error => {
@@ -1270,6 +1287,102 @@ function rerunInterpretation() {
         btn.textContent = originalText;
         btn.disabled = false;
     });
+}
+
+// Apply AI suggestions to form fields
+function applySuggestionsToForm(suggestions) {
+    const fieldMap = {
+        'category': 'category',
+        'transaction_type': 'transaction_type',
+        'destination_account': 'destination_account',
+        'description': 'description',
+        'invoice_number': 'invoice_number'
+    };
+    
+    for (const [field, suggestion] of Object.entries(suggestions)) {
+        const fieldId = fieldMap[field];
+        if (!fieldId) continue;
+        
+        const element = document.getElementById(fieldId);
+        if (!element) continue;
+        
+        // Only apply if confidence > 0.5
+        const confidence = suggestion.confidence || 0;
+        if (confidence < 0.5) continue;
+        
+        // Highlight the field to show it was updated
+        element.style.transition = 'background-color 0.3s';
+        element.style.backgroundColor = '#e8f5e9';
+        
+        // Set the value
+        if (element.tagName === 'SELECT') {
+            // For select, find and select the option
+            const option = Array.from(element.options).find(o => o.value === suggestion.value);
+            if (option) {
+                element.value = suggestion.value;
+            }
+        } else {
+            element.value = suggestion.value;
+        }
+        
+        // Add tooltip with reason
+        if (suggestion.reason) {
+            element.title = `AI suggestion (${Math.round(confidence * 100)}%): ${suggestion.reason}`;
+        }
+        
+        // Fade out highlight
+        setTimeout(() => {
+            element.style.backgroundColor = '';
+        }, 2000);
+        
+        // Add a small badge next to the field
+        addAISuggestionBadge(element, confidence, suggestion.reason);
+    }
+}
+
+// Add AI badge next to suggested field
+function addAISuggestionBadge(element, confidence, reason) {
+    // Remove existing badge if any
+    const existingBadge = element.parentElement.querySelector('.ai-suggestion-badge');
+    if (existingBadge) {
+        existingBadge.remove();
+    }
+    
+    const badge = document.createElement('span');
+    badge.className = 'ai-suggestion-badge';
+    badge.innerHTML = `🤖 ${Math.round(confidence * 100)}%`;
+    badge.style.cssText = `
+        display: inline-block;
+        margin-left: 8px;
+        padding: 2px 6px;
+        font-size: 0.7rem;
+        background: #e3f2fd;
+        color: #1976d2;
+        border-radius: 4px;
+        cursor: help;
+    `;
+    badge.title = reason || 'AI suggested this value';
+    
+    // Insert after the input/select
+    element.insertAdjacentElement('afterend', badge);
+}
+
+// Show summary of suggestions
+function showSuggestionsSummary(suggestions, message) {
+    const summaryItems = [];
+    for (const [field, suggestion] of Object.entries(suggestions)) {
+        if (suggestion.value && suggestion.confidence >= 0.5) {
+            summaryItems.push(`${field}: "${suggestion.value}" (${Math.round(suggestion.confidence * 100)}%)`);
+        }
+    }
+    
+    if (summaryItems.length > 0) {
+        const summaryText = 'AI Suggestions applied:\\n\\n' + summaryItems.join('\\n') + 
+            '\\n\\nFields have been highlighted. Review and adjust as needed.';
+        alert(summaryText);
+    } else {
+        alert(message || 'AI analysis complete. No high-confidence suggestions to apply.');
+    }
 }
 
 function selectSuggestion(element, id, type) {

@@ -33,6 +33,7 @@ from paperless_firefly.spark_ai.prompts import (
     CategoryPrompt,
     ChatPrompt,
     SplitPrompt,
+    TransactionReviewPrompt,
 )
 
 if TYPE_CHECKING:
@@ -81,6 +82,46 @@ class SplitSuggestion:
             "splits": self.splits,
             "confidence": self.confidence,
             "reason": self.reason,
+            "model": self.model,
+            "from_cache": self.from_cache,
+        }
+
+
+@dataclass
+class FieldSuggestion:
+    """Suggestion for a single form field."""
+    
+    value: str
+    confidence: float
+    reason: str
+    
+    def to_dict(self) -> dict:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "value": self.value,
+            "confidence": self.confidence,
+            "reason": self.reason,
+        }
+
+
+@dataclass
+class TransactionReviewSuggestion:
+    """Result of comprehensive transaction review suggestion."""
+    
+    suggestions: dict[str, FieldSuggestion]  # field_name -> FieldSuggestion
+    overall_confidence: float
+    analysis_notes: str
+    model: str
+    from_cache: bool = False
+    
+    def to_dict(self) -> dict:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "suggestions": {
+                k: v.to_dict() for k, v in self.suggestions.items()
+            },
+            "overall_confidence": self.overall_confidence,
+            "analysis_notes": self.analysis_notes,
             "model": self.model,
             "from_cache": self.from_cache,
         }
@@ -179,6 +220,7 @@ class SparkAIService:
         )
         self._category_prompt = CategoryPrompt()
         self._split_prompt = SplitPrompt()
+        self._review_prompt = TransactionReviewPrompt()
 
         # Concurrency limiter (SSOT for queue management)
         self._limiter = LLMConcurrencyLimiter(max_concurrent=self.llm_config.max_concurrent)
@@ -854,6 +896,184 @@ class SparkAIService:
         raise json.JSONDecodeError(
             f"Could not parse JSON from response: {content[:200]}...", content, 0
         )
+
+    def suggest_for_review(
+        self,
+        amount: str,
+        date: str,
+        vendor: str | None = None,
+        description: str | None = None,
+        current_category: str | None = None,
+        current_type: str | None = None,
+        invoice_number: str | None = None,
+        ocr_confidence: float = 0.0,
+        document_content: str | None = None,
+        bank_transaction: dict | None = None,
+        previous_decisions: list[dict] | None = None,
+        document_id: int | None = None,
+        use_cache: bool = True,
+    ) -> TransactionReviewSuggestion | None:
+        """Suggest values for all editable transaction fields during review.
+        
+        This is the comprehensive AI suggestion method used by the review UI.
+        It analyzes the document content, linked bank transactions, and previous
+        decisions to suggest values for category, transaction type, vendor, etc.
+        
+        Args:
+            amount: Transaction amount.
+            date: Transaction date.
+            vendor: Current vendor/payee name.
+            description: Current transaction description.
+            current_category: Currently assigned category.
+            current_type: Currently assigned transaction type.
+            invoice_number: Invoice/receipt number if extracted.
+            ocr_confidence: Overall OCR confidence (0.0-1.0).
+            document_content: Raw OCR text or structured invoice content.
+            bank_transaction: Linked bank transaction data if available.
+            previous_decisions: List of previous interpretation decisions.
+            document_id: Optional document ID for per-doc opt-out check.
+            use_cache: Whether to use cached responses.
+            
+        Returns:
+            TransactionReviewSuggestion with per-field suggestions, or None if LLM disabled.
+        """
+        if not self.is_enabled:
+            logger.debug("LLM service disabled, skipping review suggestions")
+            return None
+            
+        # Per-document opt-out check
+        if document_id:
+            opted_out, reason = self.check_opt_out(document_id)
+            if opted_out:
+                logger.debug("LLM opted out for doc %d: %s", document_id, reason)
+                return None
+                
+        if not self.categories:
+            logger.warning("No categories configured for LLM suggestions")
+            return None
+            
+        # Build cache key including all context
+        context_hash = hashlib.sha256(
+            json.dumps({
+                "amount": amount,
+                "date": date,
+                "vendor": vendor,
+                "description": description,
+                "current_category": current_category,
+                "current_type": current_type,
+                "bank_amount": bank_transaction.get("amount") if bank_transaction else None,
+                "content_hash": hashlib.sha256((document_content or "")[:500].encode()).hexdigest()[:8],
+            }, sort_keys=True).encode()
+        ).hexdigest()[:16]
+        cache_key = f"review:{context_hash}:{self._taxonomy_version}"
+        
+        # Check cache
+        if use_cache:
+            cached = self.store.get_llm_cache(cache_key)
+            if cached:
+                try:
+                    data = json.loads(cached["response_json"])
+                    suggestions = {}
+                    for field, field_data in data.get("suggestions", {}).items():
+                        suggestions[field] = FieldSuggestion(
+                            value=field_data["value"],
+                            confidence=field_data["confidence"],
+                            reason=field_data.get("reason", ""),
+                        )
+                    return TransactionReviewSuggestion(
+                        suggestions=suggestions,
+                        overall_confidence=data.get("overall_confidence", 0.0),
+                        analysis_notes=data.get("analysis_notes", ""),
+                        model=cached["model"],
+                        from_cache=True,
+                    )
+                except (json.JSONDecodeError, KeyError) as e:
+                    logger.warning("Invalid cached review response: %s", e)
+                    
+        # Build prompt with full context
+        user_message = self._review_prompt.format_user_message(
+            amount=amount,
+            date=date,
+            vendor=vendor,
+            description=description,
+            current_category=current_category,
+            current_type=current_type,
+            invoice_number=invoice_number,
+            ocr_confidence=ocr_confidence,
+            document_content=document_content,
+            bank_transaction=bank_transaction,
+            previous_decisions=previous_decisions,
+            categories=self.categories,
+        )
+        
+        # Try fast model first
+        result = self._call_ollama(
+            model=self.llm_config.model_fast,
+            system_prompt=self._review_prompt.system_prompt,
+            user_message=user_message,
+        )
+        
+        # Fallback to slow model if needed
+        if result is None and self.llm_config.model_fallback:
+            logger.info("Fast model failed, falling back to %s", self.llm_config.model_fallback)
+            result = self._call_ollama(
+                model=self.llm_config.model_fallback,
+                system_prompt=self._review_prompt.system_prompt,
+                user_message=user_message,
+            )
+            
+        if result is None:
+            return None
+            
+        try:
+            data = self._parse_json_response(result["content"])
+            
+            # Parse suggestions from response
+            suggestions = {}
+            for field, field_data in data.get("suggestions", {}).items():
+                if isinstance(field_data, dict) and "value" in field_data:
+                    # Validate category suggestions
+                    if field == "category" and field_data["value"] not in self.categories:
+                        logger.warning(
+                            "LLM suggested invalid category '%s', skipping",
+                            field_data["value"],
+                        )
+                        continue
+                    # Validate transaction_type suggestions
+                    if field == "transaction_type" and field_data["value"] not in ["withdrawal", "deposit", "transfer"]:
+                        logger.warning(
+                            "LLM suggested invalid transaction_type '%s', skipping",
+                            field_data["value"],
+                        )
+                        continue
+                        
+                    suggestions[field] = FieldSuggestion(
+                        value=str(field_data["value"]),
+                        confidence=float(field_data.get("confidence", 0.5)),
+                        reason=str(field_data.get("reason", "")),
+                    )
+                    
+            review_suggestion = TransactionReviewSuggestion(
+                suggestions=suggestions,
+                overall_confidence=float(data.get("overall_confidence", 0.0)),
+                analysis_notes=str(data.get("analysis_notes", "")),
+                model=result["model"],
+            )
+            
+            # Cache the result
+            self.store.set_llm_cache(
+                cache_key=cache_key,
+                model=result["model"],
+                prompt_version=PROMPT_VERSION,
+                taxonomy_version=self._taxonomy_version,
+                response_json=json.dumps(review_suggestion.to_dict()),
+            )
+            
+            return review_suggestion
+            
+        except (json.JSONDecodeError, ValueError, KeyError) as e:
+            logger.warning("Failed to parse LLM review response: %s", e)
+            return None
 
     def chat(
         self,
