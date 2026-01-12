@@ -553,7 +553,10 @@
     <div id="chat-modal" class="chat-modal" style="display: none;">
         <div class="chat-header">
             <span>⚡ SparkLink Assistant</span>
-            <button onclick="toggleChat()" class="chat-close">&times;</button>
+            <div style="display: flex; gap: 8px;">
+                <button onclick="clearChatHistory()" class="chat-clear" title="Clear chat history">🗑️</button>
+                <button onclick="toggleChat()" class="chat-close">&times;</button>
+            </div>
         </div>
         <div id="chat-messages" class="chat-messages">
             <div class="chat-message assistant">
@@ -612,7 +615,7 @@
             align-items: center;
             font-weight: 600;
         }
-        .chat-close {
+        .chat-close, .chat-clear {
             background: none;
             border: none;
             color: white;
@@ -621,7 +624,10 @@
             line-height: 1;
             opacity: 0.8;
         }
-        .chat-close:hover { opacity: 1; }
+        .chat-clear {
+            font-size: 18px;
+        }
+        .chat-close:hover, .chat-clear:hover { opacity: 1; }
         .chat-messages {
             flex: 1;
             overflow-y: auto;
@@ -702,12 +708,138 @@
     </style>
     
     <script>
+    // Chat history management
+    const CHAT_HISTORY_KEY = 'sparklink_chat_history';
+    const MAX_HISTORY_MESSAGES = 50;  // Keep last 50 messages
+    const CONTEXT_HISTORY_SIZE = 6;   // Send last 6 messages as context to LLM
+    
+    // Page context from server
+    const PAGE_CONTEXT = {{ page_context_json|safe|default:'{}' }};
+    
+    // Initialize chat on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        restoreChatHistory();
+    });
+    
     function toggleChat() {
         const modal = document.getElementById('chat-modal');
         modal.style.display = modal.style.display === 'none' ? 'flex' : 'none';
         if (modal.style.display === 'flex') {
             document.getElementById('chat-input').focus();
+            // Scroll to bottom when opening
+            const messages = document.getElementById('chat-messages');
+            messages.scrollTop = messages.scrollHeight;
         }
+    }
+    
+    function getChatHistory() {
+        try {
+            const history = localStorage.getItem(CHAT_HISTORY_KEY);
+            return history ? JSON.parse(history) : [];
+        } catch (e) {
+            return [];
+        }
+    }
+    
+    function saveChatHistory(history) {
+        try {
+            // Trim to max size
+            if (history.length > MAX_HISTORY_MESSAGES) {
+                history = history.slice(-MAX_HISTORY_MESSAGES);
+            }
+            localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(history));
+        } catch (e) {
+            console.warn('Could not save chat history:', e);
+        }
+    }
+    
+    function addToHistory(role, content) {
+        const history = getChatHistory();
+        history.push({
+            role: role,
+            content: content,
+            timestamp: new Date().toISOString(),
+            page: PAGE_CONTEXT.page_name || 'Unknown'
+        });
+        saveChatHistory(history);
+    }
+    
+    function restoreChatHistory() {
+        const history = getChatHistory();
+        if (history.length === 0) return;
+        
+        const messages = document.getElementById('chat-messages');
+        if (!messages) return;
+        
+        // Clear default welcome message if we have history
+        messages.innerHTML = '';
+        
+        // Restore messages
+        history.forEach(msg => {
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `chat-message ${msg.role}`;
+            msgDiv.innerHTML = `<p>${msg.role === 'user' ? escapeHtml(msg.content) : formatResponse(msg.content)}</p>`;
+            messages.appendChild(msgDiv);
+        });
+        
+        // Scroll to bottom
+        messages.scrollTop = messages.scrollHeight;
+    }
+    
+    function clearChatHistory() {
+        if (confirm('Clear all chat history?')) {
+            localStorage.removeItem(CHAT_HISTORY_KEY);
+            const messages = document.getElementById('chat-messages');
+            messages.innerHTML = `
+                <div class="chat-message assistant">
+                    <p>Hi! I'm the SparkLink assistant. I can help you with questions about the software, its features, and how to use it. What would you like to know?</p>
+                </div>
+            `;
+        }
+    }
+    
+    function getRecentHistoryForContext() {
+        const history = getChatHistory();
+        // Get last N messages for context
+        const recent = history.slice(-CONTEXT_HISTORY_SIZE);
+        return recent.map(m => ({
+            role: m.role,
+            content: m.content
+        }));
+    }
+    
+    function buildPageContext() {
+        // Build context about current page for the AI
+        let context = `Current page: ${PAGE_CONTEXT.page_name || 'Unknown'}`;
+        context += `\nPage description: ${PAGE_CONTEXT.description || 'SparkLink application'}`;
+        context += `\nPage URL: ${PAGE_CONTEXT.path || window.location.pathname}`;
+        
+        // Add page-specific context based on URL
+        const path = window.location.pathname;
+        
+        if (path.includes('/extraction/') || path.includes('/review/')) {
+            // On a document review page - describe the form fields
+            context += `\n\nThis is a document review page. The user can:
+- Edit Amount: The transaction amount extracted from the document
+- Edit Date: The transaction date (when the purchase/payment was made)
+- Edit Category: Categorize the transaction (e.g., Groceries, Bills, etc.)
+- Edit Vendor/Destination: Who the payment was made to
+- Edit Description: A note about the transaction
+- Edit Transaction Type: Withdrawal (expense), Deposit (income), or Transfer
+- Use Split Transaction: Split into multiple lines with different categories
+- Save: Save changes without confirming
+- Confirm: Save and mark as reviewed, move to next item
+- Skip: Review later
+- Reject: Don't import this document`;
+        } else if (path.includes('/list/')) {
+            context += `\n\nThis is the Review Queue showing documents waiting to be reviewed.`;
+        } else if (path.includes('/reconciliation')) {
+            context += `\n\nThis is the Reconciliation page for matching documents with bank transactions.`;
+        } else if (path.includes('/settings/')) {
+            context += `\n\nThis is the Settings page for configuring Paperless, Firefly, and AI options.`;
+        }
+        
+        return context;
     }
     
     function sendChat() {
@@ -717,11 +849,14 @@
         
         const messages = document.getElementById('chat-messages');
         
-        // Add user message
+        // Add user message to UI
         const userMsg = document.createElement('div');
         userMsg.className = 'chat-message user';
         userMsg.innerHTML = `<p>${escapeHtml(question)}</p>`;
         messages.appendChild(userMsg);
+        
+        // Save to history
+        addToHistory('user', question);
         
         // Clear input
         input.value = '';
@@ -735,14 +870,22 @@
         // Scroll to bottom
         messages.scrollTop = messages.scrollHeight;
         
-        // Send to API
+        // Build context
+        const pageContext = buildPageContext();
+        const conversationHistory = getRecentHistoryForContext();
+        
+        // Send to API with context
         fetch('{% url "api_chat" %}', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'X-CSRFToken': getCookie('csrftoken')
             },
-            body: JSON.stringify({ question: question })
+            body: JSON.stringify({ 
+                question: question,
+                page_context: pageContext,
+                conversation_history: conversationHistory
+            })
         })
         .then(response => response.json())
         .then(data => {
@@ -754,6 +897,8 @@
             if (data.success) {
                 assistantMsg.className = 'chat-message assistant';
                 assistantMsg.innerHTML = `<p>${formatResponse(data.response)}</p>`;
+                // Save to history
+                addToHistory('assistant', data.response);
             } else {
                 assistantMsg.className = 'chat-message error';
                 assistantMsg.innerHTML = `<p>Sorry, I couldn't process that: ${escapeHtml(data.error)}</p>`;

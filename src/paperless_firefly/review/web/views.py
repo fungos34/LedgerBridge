@@ -4655,6 +4655,14 @@ def api_chat(request: HttpRequest) -> JsonResponse:
                 "error": "Question is required"
             }, status=400)
         
+        # Extract optional context from request
+        page_context = body.get("page_context", "")
+        conversation_history = body.get("conversation_history", [])
+        
+        # Validate conversation history format
+        if not isinstance(conversation_history, list):
+            conversation_history = []
+        
         # Load base config
         config_path = Path(getattr(settings, "STATE_DB_PATH", "/app/data/state.db")).parent / "config.yaml"
         if not config_path.exists():
@@ -4701,6 +4709,8 @@ def api_chat(request: HttpRequest) -> JsonResponse:
         response = ai_service.chat(
             question=question,
             documentation=documentation,
+            page_context=page_context,
+            conversation_history=conversation_history,
         )
         
         ai_service.close()

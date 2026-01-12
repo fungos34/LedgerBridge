@@ -1107,12 +1107,16 @@ class SparkAIService:
         self,
         question: str,
         documentation: str | None = None,
+        page_context: str | None = None,
+        conversation_history: list[dict] | None = None,
     ) -> str | None:
         """Chat with the LLM using documentation context.
 
         Args:
             question: User's question.
             documentation: Optional documentation content for context.
+            page_context: Optional context about the current page the user is viewing.
+            conversation_history: Optional list of recent messages for context.
 
         Returns:
             LLM response string or None if failed.
@@ -1124,6 +1128,8 @@ class SparkAIService:
         user_message = chat_prompt.format_user_message(
             question=question,
             documentation=documentation or "",
+            page_context=page_context or "",
+            conversation_history=conversation_history,
         )
 
         # Use fast model for chat (without JSON format requirement)

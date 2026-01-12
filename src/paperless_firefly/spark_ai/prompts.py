@@ -223,10 +223,15 @@ You have access to the software documentation for detailed technical information
 Answer questions helpfully and accurately based on the provided context.
 If you don't know something, say so rather than making things up.
 
-Keep answers concise but complete. Use markdown formatting when helpful."""
+Keep answers concise but complete. Use markdown formatting when helpful.
+When the user asks about buttons or actions, give specific instructions like "Click the green Confirm button"."""
 
     user_template: str = """DOCUMENTATION CONTEXT:
 {documentation}
+
+{page_context}
+
+{conversation_history}
 
 USER QUESTION:
 {question}
@@ -237,19 +242,40 @@ Please answer based on the documentation and your knowledge of the system."""
         self,
         question: str,
         documentation: str,
+        page_context: str = "",
+        conversation_history: list[dict] | None = None,
     ) -> str:
         """Format the user message for chatbot.
 
         Args:
             question: User's question.
             documentation: Relevant documentation content.
+            page_context: Optional context about the current page.
+            conversation_history: Optional list of previous messages.
 
         Returns:
             Formatted user message.
         """
+        # Format conversation history
+        history_text = ""
+        if conversation_history:
+            history_parts = ["RECENT CONVERSATION:"]
+            for msg in conversation_history:
+                role = msg.get("role", "user").upper()
+                content = msg.get("content", "")[:500]  # Limit length
+                history_parts.append(f"{role}: {content}")
+            history_text = "\n".join(history_parts)
+        
+        # Format page context
+        page_text = ""
+        if page_context:
+            page_text = f"CURRENT PAGE CONTEXT:\n{page_context}"
+        
         return self.user_template.format(
             question=question,
             documentation=documentation or "No additional documentation available.",
+            page_context=page_text,
+            conversation_history=history_text,
         )
 
 

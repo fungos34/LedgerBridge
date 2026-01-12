@@ -132,6 +132,38 @@ class TestChatPrompt:
         assert "What is SparkLink?" in message
         assert "No additional documentation" in message
 
+    def test_format_user_message_with_history(self) -> None:
+        """Test formatting chat message with conversation history."""
+        prompt = ChatPrompt()
+        history = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi! How can I help?"},
+        ]
+        message = prompt.format_user_message(
+            question="What buttons are on this page?",
+            documentation="Test docs",
+            conversation_history=history,
+        )
+
+        assert "RECENT CONVERSATION" in message
+        assert "USER: Hello" in message
+        assert "ASSISTANT: Hi! How can I help?" in message
+        assert "What buttons are on this page?" in message
+
+    def test_format_user_message_with_page_context(self) -> None:
+        """Test formatting chat message with page context."""
+        prompt = ChatPrompt()
+        page_context = "Current page: Document Review\nYou can edit amount and date."
+        message = prompt.format_user_message(
+            question="What can I do here?",
+            documentation="Test docs",
+            page_context=page_context,
+        )
+
+        assert "CURRENT PAGE CONTEXT" in message
+        assert "Document Review" in message
+        assert "edit amount and date" in message
+
     def test_system_prompt_content(self) -> None:
         """Test system prompt contains key information."""
         prompt = ChatPrompt()
@@ -631,6 +663,40 @@ class TestSparkAIService:
         
         assert result == "SparkLink is a financial document processing application."
         mock_call.assert_called_once()
+
+    @patch.object(SparkAIService, '_call_ollama_text')
+    def test_chat_with_history_and_context(
+        self, mock_call: MagicMock, store: StateStore, mock_config_enabled: MagicMock, categories: list[str]
+    ) -> None:
+        """Test chat passes conversation history and page context to LLM."""
+        mock_call.return_value = {
+            "content": "The Confirm button saves and marks the document as reviewed.",
+            "model": "qwen2.5:7b"
+        }
+        
+        conversation_history = [
+            {"role": "user", "content": "What can I do on this page?"},
+            {"role": "assistant", "content": "You can review and edit document details."},
+        ]
+        page_context = "Current page: Document Review\nThe user can edit amount, date, etc."
+        
+        service = SparkAIService(store, mock_config_enabled, categories)
+        result = service.chat(
+            "What does the Confirm button do?",
+            documentation="Test docs",
+            page_context=page_context,
+            conversation_history=conversation_history,
+        )
+        
+        assert result == "The Confirm button saves and marks the document as reviewed."
+        mock_call.assert_called_once()
+        
+        # Verify history and context were included in the user message
+        call_args = mock_call.call_args
+        user_message = call_args.kwargs["user_message"]
+        assert "Document Review" in user_message
+        assert "RECENT CONVERSATION" in user_message
+        assert "edit amount" in user_message
 
     @patch.object(SparkAIService, '_call_ollama')
     def test_suggest_splits_with_bank_data(

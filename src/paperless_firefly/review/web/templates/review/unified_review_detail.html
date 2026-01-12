@@ -519,6 +519,93 @@
         border-radius: 0.25rem;
         margin-left: 0.5rem;
     }
+    
+    /* AI Progress Modal */
+    .ai-progress-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10000;
+    }
+    
+    .ai-progress-modal {
+        background: white;
+        border-radius: 0.75rem;
+        padding: 2rem;
+        max-width: 400px;
+        width: 90%;
+        text-align: center;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    }
+    
+    .ai-progress-title {
+        font-size: 1.25rem;
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+        color: var(--gray-900);
+    }
+    
+    .ai-progress-subtitle {
+        font-size: 0.875rem;
+        color: var(--gray-500);
+        margin-bottom: 1.5rem;
+    }
+    
+    .ai-progress-bar-container {
+        background: var(--gray-200);
+        border-radius: 9999px;
+        height: 0.75rem;
+        overflow: hidden;
+        margin-bottom: 1rem;
+    }
+    
+    .ai-progress-bar {
+        height: 100%;
+        background: linear-gradient(90deg, #6366f1, #8b5cf6);
+        border-radius: 9999px;
+        transition: width 1s linear;
+    }
+    
+    .ai-progress-time {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: var(--gray-700);
+        margin-bottom: 0.5rem;
+    }
+    
+    .ai-progress-status {
+        font-size: 0.75rem;
+        color: var(--gray-500);
+    }
+    
+    .ai-progress-cancel {
+        margin-top: 1.5rem;
+        padding: 0.5rem 1.5rem;
+        background: var(--gray-100);
+        border: 1px solid var(--gray-300);
+        border-radius: 0.375rem;
+        cursor: pointer;
+        font-size: 0.875rem;
+    }
+    
+    .ai-progress-cancel:hover {
+        background: var(--gray-200);
+    }
+    
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+    }
+    
+    .ai-progress-spinner {
+        animation: pulse 1.5s ease-in-out infinite;
+    }
 </style>
 {% endblock %}
 
@@ -1424,7 +1511,11 @@ function toggleLlmOptOut(enableAi) {
     });
 }
 
-// Re-run interpretation
+// Re-run interpretation with progress tracking
+const LLM_TIMEOUT_SECONDS = {{ llm_timeout_seconds|default:60 }};
+let aiProgressInterval = null;
+let aiAbortController = null;
+
 function rerunInterpretation() {
     {% if not llm_globally_enabled %}
     alert('AI/Ollama is not enabled. Please enable it in Settings to use this feature.');
@@ -1440,6 +1531,15 @@ function rerunInterpretation() {
     btn.textContent = '⏳ Processing...';
     btn.disabled = true;
     
+    // Show progress modal
+    showAIProgressModal(LLM_TIMEOUT_SECONDS);
+    
+    // Create abort controller for timeout
+    aiAbortController = new AbortController();
+    const timeoutId = setTimeout(() => {
+        aiAbortController.abort();
+    }, (LLM_TIMEOUT_SECONDS + 5) * 1000); // Extra 5 seconds for network
+    
     const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
     
     fetch('{% url "rerun_interpretation" record.extraction_id|default:0 %}', {
@@ -1448,9 +1548,13 @@ function rerunInterpretation() {
             'X-CSRFToken': csrfToken,
             'X-Requested-With': 'XMLHttpRequest',
             'Accept': 'application/json'
-        }
+        },
+        signal: aiAbortController.signal
     })
     .then(response => {
+        clearTimeout(timeoutId);
+        hideAIProgressModal();
+        
         const contentType = response.headers.get('content-type');
         if (!contentType || !contentType.includes('application/json')) {
             throw new Error('Server returned non-JSON response. Please try again.');
@@ -1477,17 +1581,99 @@ function rerunInterpretation() {
                 });
                 showSuggestionsSummary({category: data.suggestion}, data.message);
             } else {
-                alert(data.message || 'AI completed but returned no suggestions.');
+                showNotification(
+                    'AI Analysis Complete',
+                    data.message || 'AI completed but returned no high-confidence suggestions.',
+                    'warning'
+                );
             }
         } else {
-            alert('Failed to re-run interpretation: ' + (data.error || 'Unknown error'));
+            showNotification(
+                'AI Interpretation Failed',
+                data.error || 'Unknown error occurred.',
+                'error'
+            );
         }
     })
     .catch(error => {
-        alert('Network error: ' + error.message);
+        clearTimeout(timeoutId);
+        hideAIProgressModal();
         btn.textContent = originalText;
         btn.disabled = false;
+        
+        if (error.name === 'AbortError') {
+            showNotification(
+                'AI Request Timed Out',
+                `The AI request took longer than ${LLM_TIMEOUT_SECONDS} seconds. The server may still be processing. Try again or check Settings to increase the timeout.`,
+                'error'
+            );
+        } else {
+            showNotification(
+                'Connection Error',
+                error.message || 'Network error occurred.',
+                'error'
+            );
+        }
     });
+}
+
+function showAIProgressModal(timeoutSeconds) {
+    // Remove existing modal if any
+    hideAIProgressModal();
+    
+    const overlay = document.createElement('div');
+    overlay.id = 'ai-progress-overlay';
+    overlay.className = 'ai-progress-overlay';
+    overlay.innerHTML = `
+        <div class="ai-progress-modal">
+            <div class="ai-progress-title ai-progress-spinner">🤖 AI Processing...</div>
+            <div class="ai-progress-subtitle">Analyzing document and generating suggestions</div>
+            <div class="ai-progress-bar-container">
+                <div id="ai-progress-bar" class="ai-progress-bar" style="width: 0%"></div>
+            </div>
+            <div id="ai-progress-time" class="ai-progress-time">${timeoutSeconds}s</div>
+            <div class="ai-progress-status">Maximum wait time remaining</div>
+            <button onclick="cancelAIRequest()" class="ai-progress-cancel">Cancel</button>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    
+    // Start countdown
+    let elapsed = 0;
+    aiProgressInterval = setInterval(() => {
+        elapsed++;
+        const remaining = Math.max(0, timeoutSeconds - elapsed);
+        const progress = Math.min(100, (elapsed / timeoutSeconds) * 100);
+        
+        const timeEl = document.getElementById('ai-progress-time');
+        const barEl = document.getElementById('ai-progress-bar');
+        
+        if (timeEl) timeEl.textContent = `${remaining}s`;
+        if (barEl) barEl.style.width = `${progress}%`;
+        
+        if (elapsed >= timeoutSeconds) {
+            clearInterval(aiProgressInterval);
+        }
+    }, 1000);
+}
+
+function hideAIProgressModal() {
+    if (aiProgressInterval) {
+        clearInterval(aiProgressInterval);
+        aiProgressInterval = null;
+    }
+    const overlay = document.getElementById('ai-progress-overlay');
+    if (overlay) {
+        overlay.remove();
+    }
+}
+
+function cancelAIRequest() {
+    if (aiAbortController) {
+        aiAbortController.abort();
+    }
+    hideAIProgressModal();
+    showNotification('Request Cancelled', 'AI interpretation was cancelled.', 'warning');
 }
 
 // Apply AI suggestions to form fields
