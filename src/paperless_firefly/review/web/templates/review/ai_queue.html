@@ -1,0 +1,436 @@
+{% extends "review/base.html" %}
+{% load static %}
+
+{% block title %}AI Job Queue - SparkLink{% endblock %}
+
+{% block extra_css %}
+<style>
+    .queue-stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        gap: 1rem;
+        margin-bottom: 2rem;
+    }
+
+    .stat-card {
+        background: var(--card-bg);
+        border-radius: 0.5rem;
+        padding: 1rem;
+        text-align: center;
+        border: 1px solid var(--border);
+    }
+
+    .stat-card .stat-value {
+        font-size: 2rem;
+        font-weight: 700;
+        line-height: 1;
+    }
+
+    .stat-card .stat-label {
+        font-size: 0.75rem;
+        color: var(--gray-500);
+        text-transform: uppercase;
+        margin-top: 0.25rem;
+    }
+
+    .stat-card.pending .stat-value { color: var(--gray-600); }
+    .stat-card.processing .stat-value { color: var(--blue-500); }
+    .stat-card.completed .stat-value { color: var(--green-500); }
+    .stat-card.failed .stat-value { color: var(--red-500); }
+
+    .filter-tabs {
+        display: flex;
+        gap: 0.5rem;
+        margin-bottom: 1.5rem;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 0.5rem;
+    }
+
+    .filter-tab {
+        padding: 0.5rem 1rem;
+        border-radius: 0.375rem 0.375rem 0 0;
+        text-decoration: none;
+        color: var(--gray-600);
+        font-weight: 500;
+        font-size: 0.875rem;
+    }
+
+    .filter-tab:hover {
+        background: var(--gray-100);
+    }
+
+    .filter-tab.active {
+        background: var(--primary-50);
+        color: var(--primary-600);
+        border-bottom: 2px solid var(--primary-500);
+    }
+
+    .jobs-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .jobs-table th,
+    .jobs-table td {
+        padding: 0.75rem 1rem;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .jobs-table th {
+        background: var(--gray-50);
+        font-weight: 600;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        color: var(--gray-500);
+    }
+
+    .jobs-table tr:hover {
+        background: var(--gray-50);
+    }
+
+    .status-badge {
+        display: inline-block;
+        padding: 0.25rem 0.75rem;
+        border-radius: 9999px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+
+    .status-badge.pending { background: var(--gray-100); color: var(--gray-700); }
+    .status-badge.processing { background: var(--blue-100); color: var(--blue-700); }
+    .status-badge.completed { background: var(--green-100); color: var(--green-700); }
+    .status-badge.failed { background: var(--red-100); color: var(--red-700); }
+    .status-badge.cancelled { background: var(--yellow-100); color: var(--yellow-700); }
+
+    .job-actions {
+        display: flex;
+        gap: 0.5rem;
+    }
+
+    .job-actions button {
+        padding: 0.25rem 0.5rem;
+        font-size: 0.75rem;
+        border-radius: 0.25rem;
+        cursor: pointer;
+    }
+
+    .btn-cancel {
+        background: var(--red-50);
+        color: var(--red-600);
+        border: 1px solid var(--red-200);
+    }
+
+    .btn-cancel:hover {
+        background: var(--red-100);
+    }
+
+    .btn-retry {
+        background: var(--blue-50);
+        color: var(--blue-600);
+        border: 1px solid var(--blue-200);
+    }
+
+    .btn-retry:hover {
+        background: var(--blue-100);
+    }
+
+    .error-message {
+        max-width: 300px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--red-600);
+        font-size: 0.75rem;
+    }
+
+    .error-message:hover {
+        white-space: normal;
+        word-break: break-word;
+    }
+
+    .empty-state {
+        text-align: center;
+        padding: 3rem;
+        color: var(--gray-500);
+    }
+
+    .empty-state svg {
+        width: 4rem;
+        height: 4rem;
+        margin-bottom: 1rem;
+        opacity: 0.5;
+    }
+
+    .pagination {
+        display: flex;
+        justify-content: center;
+        gap: 0.5rem;
+        margin-top: 1.5rem;
+    }
+
+    .pagination a {
+        padding: 0.5rem 1rem;
+        border: 1px solid var(--border);
+        border-radius: 0.375rem;
+        text-decoration: none;
+        color: var(--gray-600);
+    }
+
+    .pagination a:hover:not(.disabled) {
+        background: var(--gray-50);
+    }
+
+    .pagination a.disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    .schedule-info {
+        background: var(--blue-50);
+        border: 1px solid var(--blue-200);
+        border-radius: 0.5rem;
+        padding: 1rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .schedule-info h3 {
+        font-size: 0.875rem;
+        font-weight: 600;
+        color: var(--blue-700);
+        margin-bottom: 0.5rem;
+    }
+
+    .schedule-info p {
+        font-size: 0.875rem;
+        color: var(--blue-600);
+        margin: 0;
+    }
+
+    .doc-link {
+        color: var(--primary-600);
+        text-decoration: none;
+    }
+
+    .doc-link:hover {
+        text-decoration: underline;
+    }
+
+    .timestamp {
+        font-size: 0.75rem;
+        color: var(--gray-500);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>🤖 AI Job Queue</h1>
+    <p class="text-muted">Scheduled AI interpretation jobs</p>
+</div>
+
+<!-- Queue Stats -->
+<div class="queue-stats">
+    <div class="stat-card pending">
+        <div class="stat-value">{{ stats.pending }}</div>
+        <div class="stat-label">Pending</div>
+    </div>
+    <div class="stat-card processing">
+        <div class="stat-value">{{ stats.processing }}</div>
+        <div class="stat-label">Processing</div>
+    </div>
+    <div class="stat-card completed">
+        <div class="stat-value">{{ stats.completed }}</div>
+        <div class="stat-label">Completed</div>
+    </div>
+    <div class="stat-card failed">
+        <div class="stat-value">{{ stats.failed }}</div>
+        <div class="stat-label">Failed</div>
+    </div>
+</div>
+
+<!-- Schedule Info -->
+<div class="schedule-info">
+    <h3>📅 Processing Schedule</h3>
+    <p>
+        Jobs are processed automatically based on settings configured in 
+        <a href="{% url 'settings' %}#ai-schedule">Settings → AI Schedule</a>.
+        You can also run the processor manually with:
+        <code>python manage.py process_ai_queue</code>
+    </p>
+</div>
+
+<!-- Filter Tabs -->
+<div class="filter-tabs">
+    <a href="{% url 'ai_queue_list' %}" class="filter-tab {% if not status_filter %}active{% endif %}">
+        All ({{ stats.total }})
+    </a>
+    <a href="{% url 'ai_queue_list' %}?status=pending" class="filter-tab {% if status_filter == 'pending' %}active{% endif %}">
+        Pending ({{ stats.pending }})
+    </a>
+    <a href="{% url 'ai_queue_list' %}?status=processing" class="filter-tab {% if status_filter == 'processing' %}active{% endif %}">
+        Processing ({{ stats.processing }})
+    </a>
+    <a href="{% url 'ai_queue_list' %}?status=completed" class="filter-tab {% if status_filter == 'completed' %}active{% endif %}">
+        Completed ({{ stats.completed }})
+    </a>
+    <a href="{% url 'ai_queue_list' %}?status=failed" class="filter-tab {% if status_filter == 'failed' %}active{% endif %}">
+        Failed ({{ stats.failed }})
+    </a>
+</div>
+
+<!-- Jobs Table -->
+{% if jobs %}
+<table class="jobs-table">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Document</th>
+            <th>Status</th>
+            <th>Priority</th>
+            <th>Scheduled</th>
+            <th>Started</th>
+            <th>Completed</th>
+            <th>Retries</th>
+            <th>Error</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for job in jobs %}
+        <tr>
+            <td>#{{ job.id }}</td>
+            <td>
+                <a href="{% url 'unified_review_detail' 'paperless' job.document_id %}" class="doc-link">
+                    {% if job.doc_title %}
+                        {{ job.doc_title|truncatechars:40 }}
+                    {% else %}
+                        Doc #{{ job.document_id }}
+                    {% endif %}
+                </a>
+            </td>
+            <td>
+                <span class="status-badge {{ job.status|lower }}">{{ job.status }}</span>
+            </td>
+            <td>{{ job.priority }}</td>
+            <td>
+                <span class="timestamp">{{ job.scheduled_at|slice:":19" }}</span>
+            </td>
+            <td>
+                {% if job.started_at %}
+                <span class="timestamp">{{ job.started_at|slice:":19" }}</span>
+                {% else %}-{% endif %}
+            </td>
+            <td>
+                {% if job.completed_at %}
+                <span class="timestamp">{{ job.completed_at|slice:":19" }}</span>
+                {% else %}-{% endif %}
+            </td>
+            <td>{{ job.retry_count }}/{{ job.max_retries }}</td>
+            <td>
+                {% if job.error_message %}
+                <span class="error-message" title="{{ job.error_message }}">
+                    {{ job.error_message|truncatechars:50 }}
+                </span>
+                {% else %}-{% endif %}
+            </td>
+            <td class="job-actions">
+                {% if job.status == 'PENDING' or job.status == 'PROCESSING' %}
+                <button class="btn-cancel" onclick="cancelJob({{ job.id }})" title="Cancel job">
+                    ✕ Cancel
+                </button>
+                {% endif %}
+                {% if job.status == 'FAILED' %}
+                <button class="btn-retry" onclick="retryJob({{ job.id }})" title="Retry job">
+                    ↻ Retry
+                </button>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<!-- Pagination -->
+<div class="pagination">
+    {% if has_prev %}
+    <a href="?{% if status_filter %}status={{ status_filter }}&{% endif %}page={{ page|add:'-1' }}">← Previous</a>
+    {% else %}
+    <a href="#" class="disabled">← Previous</a>
+    {% endif %}
+    
+    <span style="padding: 0.5rem 1rem;">Page {{ page }}</span>
+    
+    {% if has_next %}
+    <a href="?{% if status_filter %}status={{ status_filter }}&{% endif %}page={{ page|add:'1' }}">Next →</a>
+    {% else %}
+    <a href="#" class="disabled">Next →</a>
+    {% endif %}
+</div>
+
+{% else %}
+<div class="empty-state">
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+    </svg>
+    <h3>No jobs{% if status_filter %} with status "{{ status_filter }}"{% endif %}</h3>
+    <p>
+        {% if status_filter %}
+        Try viewing <a href="{% url 'ai_queue_list' %}">all jobs</a> or wait for new documents to be extracted.
+        {% else %}
+        AI jobs will appear here when documents are extracted with AI enabled.
+        {% endif %}
+    </p>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    function cancelJob(jobId) {
+        if (!confirm('Cancel this AI job?')) return;
+        
+        fetch('{% url "ai_queue_action" %}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRFToken': '{{ csrf_token }}'
+            },
+            body: `action=cancel&job_id=${jobId}`
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('Failed to cancel job: ' + data.error);
+            }
+        })
+        .catch(e => alert('Error: ' + e));
+    }
+    
+    function retryJob(jobId) {
+        if (!confirm('Retry this failed AI job?')) return;
+        
+        fetch('{% url "ai_queue_action" %}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRFToken': '{{ csrf_token }}'
+            },
+            body: `action=retry&job_id=${jobId}`
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('Failed to retry job: ' + data.error);
+            }
+        })
+        .catch(e => alert('Error: ' + e));
+    }
+</script>
+{% endblock %}

@@ -12,6 +12,7 @@ from django.contrib.auth.models import User
 from django.utils.html import format_html
 
 from .models import (
+    AIJobQueue,
     BankMatch,
     Extraction,
     FireflyCache,
@@ -418,3 +419,113 @@ class LinkageAdmin(StateStoreAdmin):
         return f"{obj.confidence * 100:.0f}%"
 
     confidence_pct.short_description = "Confidence"
+
+
+@admin.register(AIJobQueue)
+class AIJobQueueAdmin(StateStoreAdmin):
+    """Admin for AI job queue.
+
+    Allows viewing and managing scheduled AI interpretation jobs.
+    """
+
+    list_display = (
+        "id",
+        "document_id",
+        "extraction_id",
+        "status_colored",
+        "priority",
+        "retry_count",
+        "created_by",
+        "scheduled_at",
+        "scheduled_for",
+        "started_at",
+        "completed_at",
+    )
+    list_filter = ("status", "created_by", "priority")
+    search_fields = ("document_id", "extraction_id", "external_id", "error_message")
+    ordering = ("-scheduled_at",)
+    readonly_fields = ("scheduled_at", "started_at", "completed_at")
+    actions = ["cancel_jobs", "retry_jobs", "reset_to_pending"]
+
+    fieldsets = (
+        (
+            "Job Info",
+            {
+                "fields": ("document_id", "extraction_id", "external_id", "status", "priority"),
+            },
+        ),
+        (
+            "Scheduling",
+            {
+                "fields": ("scheduled_at", "scheduled_for", "started_at", "completed_at"),
+            },
+        ),
+        (
+            "Results",
+            {
+                "fields": ("suggestions_json", "error_message"),
+                "classes": ("collapse",),
+            },
+        ),
+        (
+            "Retry Info",
+            {
+                "fields": ("retry_count", "max_retries"),
+            },
+        ),
+        (
+            "Metadata",
+            {
+                "fields": ("created_by", "notes"),
+            },
+        ),
+    )
+
+    def status_colored(self, obj):
+        """Color-code the job status."""
+        colors = {
+            "PENDING": "#6c757d",
+            "PROCESSING": "#17a2b8",
+            "COMPLETED": "#28a745",
+            "FAILED": "#dc3545",
+            "CANCELLED": "#ffc107",
+        }
+        color = colors.get(obj.status, "#6c757d")
+        text_color = "white" if obj.status != "CANCELLED" else "black"
+        return format_html(
+            '<span style="background-color: {}; color: {}; padding: 2px 8px; '
+            'border-radius: 3px; font-weight: bold;">{}</span>',
+            color,
+            text_color,
+            obj.status,
+        )
+
+    status_colored.short_description = "Status"
+
+    @admin.action(description="Cancel selected jobs")
+    def cancel_jobs(self, request, queryset):
+        """Cancel pending/processing jobs."""
+        updated = queryset.filter(status__in=["PENDING", "PROCESSING"]).update(
+            status="CANCELLED"
+        )
+        self.message_user(request, f"Cancelled {updated} job(s).")
+
+    @admin.action(description="Retry failed jobs")
+    def retry_jobs(self, request, queryset):
+        """Reset failed jobs for retry."""
+        updated = queryset.filter(status="FAILED").update(
+            status="PENDING",
+            error_message=None,
+        )
+        self.message_user(request, f"Reset {updated} job(s) for retry.")
+
+    @admin.action(description="Reset to pending")
+    def reset_to_pending(self, request, queryset):
+        """Reset any jobs to pending status."""
+        updated = queryset.update(
+            status="PENDING",
+            started_at=None,
+            completed_at=None,
+            error_message=None,
+        )
+        self.message_user(request, f"Reset {updated} job(s) to pending.")

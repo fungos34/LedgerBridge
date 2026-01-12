@@ -484,6 +484,7 @@
                 <a href="{% url 'import_queue' %}" {% if '/import' in request.path %}class="active"{% endif %} title="Import approved transactions">📤 Import</a>
                 <a href="{% url 'archive' %}" {% if '/archive' in request.path %}class="active"{% endif %} title="View processed documents">📁 Archive</a>
                 <a href="{% url 'document_browser' %}" {% if '/documents' in request.path %}class="active"{% endif %} title="Browse and manage documents">📄 Documents</a>
+                <a href="{% url 'ai_queue_list' %}" {% if '/ai-queue' in request.path %}class="active"{% endif %} title="AI job queue">🤖 AI Queue</a>
                 <a href="{% url 'audit_trail_list' %}" {% if '/audit' in request.path %}class="active"{% endif %} title="View audit trail">📋 Audit</a>
                 {% endif %}
             </nav>

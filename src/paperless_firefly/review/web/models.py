@@ -81,6 +81,32 @@ class UserProfile(models.Model):
         default=30, help_text="Request timeout in seconds"
     )
 
+    # AI Job Queue Settings
+    ai_schedule_enabled = models.BooleanField(
+        default=True,
+        help_text="Automatically schedule AI interpretation for new documents"
+    )
+    ai_schedule_interval_minutes = models.IntegerField(
+        default=60,
+        help_text="Process one job every N minutes (e.g., 60 = one per hour)"
+    )
+    ai_schedule_batch_size = models.IntegerField(
+        default=1,
+        help_text="Number of jobs to process per scheduled run"
+    )
+    ai_schedule_max_retries = models.IntegerField(
+        default=3,
+        help_text="Maximum retry attempts for failed jobs"
+    )
+    ai_schedule_start_hour = models.IntegerField(
+        default=0,
+        help_text="Start processing jobs from this hour (0-23)"
+    )
+    ai_schedule_end_hour = models.IntegerField(
+        default=24,
+        help_text="Stop processing jobs after this hour (0-24, 24=no limit)"
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -383,3 +409,84 @@ class Linkage(StateStoreModel):
     def __str__(self):
         link_target = f"FF#{self.firefly_id}" if self.firefly_id else "ORPHAN"
         return f"Link: Doc#{self.document_id} → {link_target} ({self.link_type})"
+
+
+class AIJobQueue(StateStoreModel):
+    """
+    Queue for scheduled AI interpretation jobs.
+    Maps to: ai_job_queue table in state.db
+
+    Jobs are scheduled when documents are imported (if AI is globally enabled).
+    Processing occurs based on the configured schedule (e.g., one per hour).
+    Document metadata is fetched fresh at processing time, not when scheduled.
+    """
+
+    # Job status choices
+    STATUS_PENDING = "PENDING"
+    STATUS_PROCESSING = "PROCESSING"
+    STATUS_COMPLETED = "COMPLETED"
+    STATUS_FAILED = "FAILED"
+    STATUS_CANCELLED = "CANCELLED"
+
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_PROCESSING, "Processing"),
+        (STATUS_COMPLETED, "Completed"),
+        (STATUS_FAILED, "Failed"),
+        (STATUS_CANCELLED, "Cancelled"),
+    ]
+
+    id = models.AutoField(primary_key=True)
+    document_id = models.IntegerField()
+    extraction_id = models.IntegerField(blank=True, null=True)
+    external_id = models.TextField(blank=True, null=True)
+
+    status = models.TextField(default=STATUS_PENDING)
+    priority = models.IntegerField(default=0, help_text="Higher = processed first")
+
+    # Scheduling
+    scheduled_at = models.TextField(help_text="When the job was added to queue")
+    scheduled_for = models.TextField(
+        blank=True, null=True,
+        help_text="When to process (NULL = ASAP based on interval)"
+    )
+
+    # Processing
+    started_at = models.TextField(blank=True, null=True)
+    completed_at = models.TextField(blank=True, null=True)
+
+    # Results
+    suggestions_json = models.TextField(
+        blank=True, null=True,
+        help_text="JSON with AI suggestions for each field"
+    )
+    error_message = models.TextField(blank=True, null=True)
+
+    # Retry tracking
+    retry_count = models.IntegerField(default=0)
+    max_retries = models.IntegerField(default=3)
+
+    # Metadata
+    created_by = models.TextField(
+        blank=True, null=True,
+        help_text="AUTO, USER, or SYSTEM"
+    )
+    notes = models.TextField(blank=True, null=True)
+
+    class Meta(StateStoreModel.Meta):
+        db_table = "ai_job_queue"
+        verbose_name = "AI Job"
+        verbose_name_plural = "AI Job Queue"
+
+    def __str__(self):
+        return f"AI Job #{self.id}: Doc {self.document_id} ({self.status})"
+
+    @property
+    def is_active(self) -> bool:
+        """Check if job is pending or processing."""
+        return self.status in (self.STATUS_PENDING, self.STATUS_PROCESSING)
+
+    @property
+    def can_retry(self) -> bool:
+        """Check if job can be retried."""
+        return self.status == self.STATUS_FAILED and self.retry_count < self.max_retries

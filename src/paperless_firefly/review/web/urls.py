@@ -176,4 +176,11 @@ urlpatterns = [
     # ============================================================================
     path("audit-trail/", views.audit_trail_list, name="audit_trail_list"),
     path("audit-trail/<int:run_id>/", views.audit_trail_detail, name="audit_trail_detail"),
+    # ============================================================================
+    # AI Job Queue Routes
+    # ============================================================================
+    path("ai-queue/", views.ai_queue_list, name="ai_queue_list"),
+    path("api/ai-queue/action/", views.ai_queue_action, name="ai_queue_action"),
+    path("api/ai-queue/schedule/", views.ai_queue_schedule, name="ai_queue_schedule"),
+    path("api/ai-queue/<int:job_id>/", views.ai_queue_job_detail, name="ai_queue_job_detail"),
 ]

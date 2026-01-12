@@ -16,7 +16,7 @@ from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
-from django.views.decorators.http import require_http_methods
+from django.views.decorators.http import require_http_methods, require_POST
 
 from ...firefly_client import FireflyClient
 from ...schemas.dedupe import generate_external_id
@@ -363,6 +363,27 @@ def user_settings(request: HttpRequest) -> HttpResponse:
         except ValueError:
             profile.ollama_timeout = 30
 
+        # AI Schedule settings
+        profile.ai_schedule_enabled = request.POST.get("ai_schedule_enabled") == "on"
+        try:
+            profile.ai_schedule_interval_minutes = int(
+                request.POST.get("ai_schedule_interval_minutes", 60)
+            )
+            profile.ai_schedule_batch_size = int(
+                request.POST.get("ai_schedule_batch_size", 1)
+            )
+            profile.ai_schedule_max_retries = int(
+                request.POST.get("ai_schedule_max_retries", 3)
+            )
+            profile.ai_schedule_start_hour = int(
+                request.POST.get("ai_schedule_start_hour", 0)
+            )
+            profile.ai_schedule_end_hour = int(
+                request.POST.get("ai_schedule_end_hour", 24)
+            )
+        except ValueError:
+            pass
+
         try:
             profile.auto_import_threshold = float(request.POST.get("auto_import_threshold", 0.85))
             profile.review_threshold = float(request.POST.get("review_threshold", 0.60))
@@ -430,6 +451,14 @@ def user_settings(request: HttpRequest) -> HttpResponse:
     else:
         available_models = []
 
+    # Get AI queue stats
+    ai_queue_stats = {"pending": 0, "processing": 0, "completed": 0, "failed": 0, "total": 0}
+    try:
+        store = _get_store()
+        ai_queue_stats = store.get_ai_queue_stats()
+    except Exception as e:
+        logger.warning(f"Could not get AI queue stats: {e}")
+
     context = {
         "profile": profile,
         "paperless_status": paperless_status,
@@ -437,6 +466,7 @@ def user_settings(request: HttpRequest) -> HttpResponse:
         "firefly_accounts": firefly_accounts,
         "llm_status": llm_status,
         "available_models": available_models,
+        "ai_queue_stats": ai_queue_stats,
         "default_ollama_url": getattr(settings, "OLLAMA_URL", "http://localhost:11434"),
         "default_ollama_model": getattr(settings, "OLLAMA_MODEL", "qwen2.5:3b-instruct-q4_K_M"),
         "default_ollama_model_fallback": getattr(
@@ -2667,6 +2697,27 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
                     overall_confidence=extraction.confidence.overall,
                     review_state=extraction.confidence.review_state.value,
                 )
+                
+                # Schedule AI job if AI scheduling is enabled
+                try:
+                    from .models import UserProfile
+                    profile = UserProfile.objects.filter(user=request.user).first()
+                    if profile and profile.ai_schedule_enabled and profile.llm_enabled:
+                        # Get extraction ID for the just-saved extraction
+                        saved_extraction = store.get_extraction_by_external_id(
+                            extraction.proposal.external_id
+                        )
+                        if saved_extraction:
+                            store.schedule_ai_job(
+                                document_id=doc_id,
+                                extraction_id=saved_extraction.id,
+                                external_id=extraction.proposal.external_id,
+                                created_by="AUTO",
+                            )
+                            logger.debug(f"Scheduled AI job for doc {doc_id}")
+                except Exception as schedule_err:
+                    logger.warning(f"Failed to schedule AI job for doc {doc_id}: {schedule_err}")
+                
                 synced += 1
                 logger.info(
                     f"Extracted doc {doc_id}: {extraction.proposal.amount} {extraction.proposal.currency} - {extraction.proposal.date}"
@@ -4682,3 +4733,177 @@ def api_chat(request: HttpRequest) -> JsonResponse:
             "success": False,
             "error": str(e)
         }, status=500)
+
+
+# ============================================================================
+# AI Job Queue Views
+# ============================================================================
+
+
+@login_required
+def ai_queue_list(request: HttpRequest) -> HttpResponse:
+    """View the AI job queue."""
+    store = _get_store()
+    
+    # Get filter from query params
+    status_filter = request.GET.get("status", None)
+    page = int(request.GET.get("page", 1))
+    per_page = 50
+    offset = (page - 1) * per_page
+    
+    # Get jobs
+    jobs = store.get_ai_jobs_list(
+        status=status_filter,
+        limit=per_page,
+        offset=offset,
+    )
+    
+    # Get stats
+    stats = store.get_ai_queue_stats()
+    
+    context = {
+        "jobs": jobs,
+        "stats": stats,
+        "status_filter": status_filter,
+        "page": page,
+        "has_next": len(jobs) == per_page,
+        "has_prev": page > 1,
+        **_get_external_urls(request.user if hasattr(request, "user") else None),
+    }
+    return render(request, "review/ai_queue.html", context)
+
+
+@login_required
+@require_POST
+def ai_queue_action(request: HttpRequest) -> JsonResponse:
+    """Perform actions on AI queue jobs."""
+    store = _get_store()
+    
+    action = request.POST.get("action")
+    job_ids = request.POST.getlist("job_ids[]")
+    
+    if not job_ids:
+        job_id = request.POST.get("job_id")
+        if job_id:
+            job_ids = [job_id]
+    
+    if not action or not job_ids:
+        return JsonResponse({
+            "success": False,
+            "error": "Missing action or job IDs"
+        }, status=400)
+    
+    results = {"success": 0, "failed": 0}
+    
+    for job_id in job_ids:
+        try:
+            job_id = int(job_id)
+            if action == "cancel":
+                if store.cancel_ai_job(job_id):
+                    results["success"] += 1
+                else:
+                    results["failed"] += 1
+            elif action == "retry":
+                # Reset failed job to pending
+                job = store.get_ai_job(job_id)
+                if job and job["status"] == "FAILED":
+                    with store._transaction() as conn:
+                        conn.execute(
+                            """
+                            UPDATE ai_job_queue
+                            SET status = 'PENDING', error_message = NULL,
+                                started_at = NULL, completed_at = NULL
+                            WHERE id = ?
+                            """,
+                            (job_id,),
+                        )
+                    results["success"] += 1
+                else:
+                    results["failed"] += 1
+            else:
+                results["failed"] += 1
+        except Exception as e:
+            logger.error(f"Error performing {action} on job {job_id}: {e}")
+            results["failed"] += 1
+    
+    return JsonResponse({
+        "success": True,
+        "results": results,
+        "message": f"{results['success']} job(s) updated, {results['failed']} failed"
+    })
+
+
+@login_required
+@require_POST
+def ai_queue_schedule(request: HttpRequest) -> JsonResponse:
+    """Manually schedule an AI job for a document."""
+    store = _get_store()
+    
+    document_id = request.POST.get("document_id")
+    extraction_id = request.POST.get("extraction_id")
+    priority = int(request.POST.get("priority", 0))
+    
+    if not document_id:
+        return JsonResponse({
+            "success": False,
+            "error": "Missing document_id"
+        }, status=400)
+    
+    try:
+        document_id = int(document_id)
+        extraction_id = int(extraction_id) if extraction_id else None
+        
+        job_id = store.schedule_ai_job(
+            document_id=document_id,
+            extraction_id=extraction_id,
+            priority=priority,
+            created_by="USER",
+        )
+        
+        if job_id:
+            return JsonResponse({
+                "success": True,
+                "job_id": job_id,
+                "message": f"AI job #{job_id} scheduled for document {document_id}"
+            })
+        else:
+            return JsonResponse({
+                "success": False,
+                "error": "Job already exists for this document"
+            }, status=409)
+            
+    except Exception as e:
+        logger.exception(f"Error scheduling AI job: {e}")
+        return JsonResponse({
+            "success": False,
+            "error": str(e)
+        }, status=500)
+
+
+@login_required
+def ai_queue_job_detail(request: HttpRequest, job_id: int) -> JsonResponse:
+    """Get details of a specific AI job."""
+    store = _get_store()
+    
+    job = store.get_ai_job(job_id)
+    if not job:
+        return JsonResponse({
+            "success": False,
+            "error": "Job not found"
+        }, status=404)
+    
+    # Parse suggestions if available
+    suggestions = None
+    if job.get("suggestions_json"):
+        try:
+            suggestions = json.loads(job["suggestions_json"])
+        except json.JSONDecodeError:
+            pass
+    
+    return JsonResponse({
+        "success": True,
+        "job": {
+            **job,
+            "suggestions": suggestions,
+        }
+    })

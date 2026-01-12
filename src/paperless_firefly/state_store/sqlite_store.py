@@ -1552,3 +1552,310 @@ class StateStore:
             link_type="PENDING",
             linked_by="SYSTEM",
         )
+
+    # =========================================================================
+    # AI Job Queue Operations
+    # =========================================================================
+
+    def schedule_ai_job(
+        self,
+        document_id: int,
+        extraction_id: int | None = None,
+        external_id: str | None = None,
+        priority: int = 0,
+        scheduled_for: str | None = None,
+        created_by: str = "AUTO",
+        max_retries: int = 3,
+        notes: str | None = None,
+    ) -> int | None:
+        """
+        Schedule an AI interpretation job for a document.
+
+        Only one active (PENDING/PROCESSING) job is allowed per document.
+        Returns the job ID if created, None if a job already exists.
+
+        Args:
+            document_id: Paperless document ID
+            extraction_id: Optional extraction ID to update
+            external_id: Optional external ID for reference
+            priority: Job priority (higher = processed first)
+            scheduled_for: ISO timestamp when to process (None = ASAP)
+            created_by: Who scheduled (AUTO, USER, SYSTEM)
+            max_retries: Maximum retry attempts
+            notes: Optional notes
+
+        Returns:
+            Job ID if created, None if job already exists
+        """
+        now = datetime.now(timezone.utc).isoformat()
+
+        with self._transaction() as conn:
+            # Check for existing active job for this document
+            existing = conn.execute(
+                """
+                SELECT id FROM ai_job_queue
+                WHERE document_id = ? AND status IN ('PENDING', 'PROCESSING')
+                """,
+                (document_id,),
+            ).fetchone()
+
+            if existing:
+                return None  # Job already exists
+
+            cursor = conn.execute(
+                """
+                INSERT INTO ai_job_queue
+                (document_id, extraction_id, external_id, status, priority,
+                 scheduled_at, scheduled_for, max_retries, created_by, notes)
+                VALUES (?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    document_id,
+                    extraction_id,
+                    external_id,
+                    priority,
+                    now,
+                    scheduled_for,
+                    max_retries,
+                    created_by,
+                    notes,
+                ),
+            )
+            return cursor.lastrowid
+
+    def get_next_ai_jobs(
+        self,
+        limit: int = 1,
+        check_schedule: bool = True,
+    ) -> list[dict[str, Any]]:
+        """
+        Get the next AI jobs to process.
+
+        Jobs are ordered by:
+        1. Priority (descending)
+        2. Scheduled time (earliest first)
+        3. ID (oldest first)
+
+        Args:
+            limit: Maximum jobs to return
+            check_schedule: If True, only return jobs where scheduled_for <= now
+
+        Returns:
+            List of job dicts
+        """
+        now = datetime.now(timezone.utc).isoformat()
+
+        with self._transaction() as conn:
+            if check_schedule:
+                query = """
+                    SELECT * FROM ai_job_queue
+                    WHERE status = 'PENDING'
+                    AND (scheduled_for IS NULL OR scheduled_for <= ?)
+                    ORDER BY priority DESC, scheduled_for ASC, id ASC
+                    LIMIT ?
+                """
+                rows = conn.execute(query, (now, limit)).fetchall()
+            else:
+                query = """
+                    SELECT * FROM ai_job_queue
+                    WHERE status = 'PENDING'
+                    ORDER BY priority DESC, scheduled_for ASC, id ASC
+                    LIMIT ?
+                """
+                rows = conn.execute(query, (limit,)).fetchall()
+
+            return [dict(row) for row in rows]
+
+    def get_ai_job(self, job_id: int) -> dict[str, Any] | None:
+        """Get an AI job by ID."""
+        with self._transaction() as conn:
+            row = conn.execute(
+                "SELECT * FROM ai_job_queue WHERE id = ?", (job_id,)
+            ).fetchone()
+            return dict(row) if row else None
+
+    def get_ai_job_by_document(self, document_id: int, active_only: bool = True) -> dict[str, Any] | None:
+        """Get AI job for a document."""
+        with self._transaction() as conn:
+            if active_only:
+                row = conn.execute(
+                    """
+                    SELECT * FROM ai_job_queue
+                    WHERE document_id = ? AND status IN ('PENDING', 'PROCESSING')
+                    ORDER BY id DESC LIMIT 1
+                    """,
+                    (document_id,),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT * FROM ai_job_queue
+                    WHERE document_id = ?
+                    ORDER BY id DESC LIMIT 1
+                    """,
+                    (document_id,),
+                ).fetchone()
+            return dict(row) if row else None
+
+    def start_ai_job(self, job_id: int) -> bool:
+        """Mark an AI job as started (processing)."""
+        now = datetime.now(timezone.utc).isoformat()
+
+        with self._transaction() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE ai_job_queue
+                SET status = 'PROCESSING', started_at = ?
+                WHERE id = ? AND status = 'PENDING'
+                """,
+                (now, job_id),
+            )
+            return cursor.rowcount > 0
+
+    def complete_ai_job(
+        self,
+        job_id: int,
+        suggestions_json: str | None = None,
+    ) -> bool:
+        """Mark an AI job as completed with results."""
+        now = datetime.now(timezone.utc).isoformat()
+
+        with self._transaction() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE ai_job_queue
+                SET status = 'COMPLETED', completed_at = ?, suggestions_json = ?
+                WHERE id = ? AND status = 'PROCESSING'
+                """,
+                (now, suggestions_json, job_id),
+            )
+            return cursor.rowcount > 0
+
+    def fail_ai_job(
+        self,
+        job_id: int,
+        error_message: str,
+        can_retry: bool = True,
+    ) -> bool:
+        """Mark an AI job as failed."""
+        now = datetime.now(timezone.utc).isoformat()
+
+        with self._transaction() as conn:
+            # Get current job to check retry count
+            job = conn.execute(
+                "SELECT retry_count, max_retries FROM ai_job_queue WHERE id = ?",
+                (job_id,),
+            ).fetchone()
+
+            if not job:
+                return False
+
+            retry_count = job["retry_count"]
+            max_retries = job["max_retries"]
+
+            # Determine new status
+            if can_retry and retry_count < max_retries:
+                new_status = "PENDING"  # Will retry
+                retry_count += 1
+            else:
+                new_status = "FAILED"
+
+            cursor = conn.execute(
+                """
+                UPDATE ai_job_queue
+                SET status = ?, completed_at = ?, error_message = ?, retry_count = ?
+                WHERE id = ?
+                """,
+                (new_status, now, error_message, retry_count, job_id),
+            )
+            return cursor.rowcount > 0
+
+    def cancel_ai_job(self, job_id: int) -> bool:
+        """Cancel an AI job."""
+        now = datetime.now(timezone.utc).isoformat()
+
+        with self._transaction() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE ai_job_queue
+                SET status = 'CANCELLED', completed_at = ?
+                WHERE id = ? AND status IN ('PENDING', 'PROCESSING')
+                """,
+                (now, job_id),
+            )
+            return cursor.rowcount > 0
+
+    def get_ai_queue_stats(self) -> dict[str, int]:
+        """Get AI job queue statistics."""
+        with self._transaction() as conn:
+            rows = conn.execute(
+                """
+                SELECT status, COUNT(*) as count
+                FROM ai_job_queue
+                GROUP BY status
+                """
+            ).fetchall()
+
+            stats = {
+                "pending": 0,
+                "processing": 0,
+                "completed": 0,
+                "failed": 0,
+                "cancelled": 0,
+                "total": 0,
+            }
+
+            for row in rows:
+                status = row["status"].lower()
+                count = row["count"]
+                if status in stats:
+                    stats[status] = count
+                stats["total"] += count
+
+            return stats
+
+    def get_ai_jobs_list(
+        self,
+        status: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Get list of AI jobs for display."""
+        with self._transaction() as conn:
+            if status:
+                query = """
+                    SELECT aq.*, pd.title as doc_title
+                    FROM ai_job_queue aq
+                    LEFT JOIN paperless_documents pd ON aq.document_id = pd.document_id
+                    WHERE aq.status = ?
+                    ORDER BY aq.scheduled_at DESC
+                    LIMIT ? OFFSET ?
+                """
+                rows = conn.execute(query, (status.upper(), limit, offset)).fetchall()
+            else:
+                query = """
+                    SELECT aq.*, pd.title as doc_title
+                    FROM ai_job_queue aq
+                    LEFT JOIN paperless_documents pd ON aq.document_id = pd.document_id
+                    ORDER BY aq.scheduled_at DESC
+                    LIMIT ? OFFSET ?
+                """
+                rows = conn.execute(query, (limit, offset)).fetchall()
+
+            return [dict(row) for row in rows]
+
+    def cleanup_old_ai_jobs(self, days: int = 30) -> int:
+        """Remove completed/failed/cancelled jobs older than N days."""
+        from datetime import timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+        with self._transaction() as conn:
+            cursor = conn.execute(
+                """
+                DELETE FROM ai_job_queue
+                WHERE status IN ('COMPLETED', 'FAILED', 'CANCELLED')
+                AND completed_at < ?
+                """,
+                (cutoff,),
+            )
+            return cursor.rowcount
