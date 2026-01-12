@@ -404,8 +404,12 @@
                            class="form-input"
                            value="{{ profile.ollama_timeout|default:30 }}"
                            min="5" max="300" step="5"
-                           style="max-width: 150px;">
+                           style="max-width: 150px;"
+                           onchange="checkCloudflareTimeout(this.value)">
                     <div class="form-help">How long to wait for LLM response (default: 30s)</div>
+                    <div id="cloudflare-warning" class="form-help" style="color: var(--warning-color); display: none;">
+                        ⚠️ Warning: If using Cloudflare proxy, keep timeout under 90 seconds to avoid 524 errors (Cloudflare has 100s limit).
+                    </div>
                 </div>
                 
                 {% if available_models %}
@@ -446,5 +450,20 @@ function toggleLLMSettings() {
         settings.style.pointerEvents = 'none';
     }
 }
+
+function checkCloudflareTimeout(value) {
+    const warning = document.getElementById('cloudflare-warning');
+    if (warning) {
+        warning.style.display = parseInt(value) > 90 ? 'block' : 'none';
+    }
+}
+
+// Check on page load
+document.addEventListener('DOMContentLoaded', function() {
+    const timeoutInput = document.getElementById('ollama_timeout');
+    if (timeoutInput) {
+        checkCloudflareTimeout(timeoutInput.value);
+    }
+});
 </script>
 {% endblock %}

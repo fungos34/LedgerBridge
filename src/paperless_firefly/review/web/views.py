@@ -751,9 +751,10 @@ def review_detail(request: HttpRequest, extraction_id: int) -> HttpResponse:
         from ...matching.engine import MatchingEngine
 
         # Build extraction dict from FinanceExtraction for the matching engine
+        # Note: proposal.date is already a string (ISO format) per TransactionProposal schema
         extraction_dict = {
             "amount": extraction.proposal.amount,
-            "date": extraction.proposal.date.isoformat() if extraction.proposal.date else None,
+            "date": extraction.proposal.date,  # Already ISO string, no isoformat() needed
             "vendor": extraction.proposal.vendor,
             "description": extraction.proposal.description,
             "correspondent": getattr(extraction.proposal, "correspondent", None),
