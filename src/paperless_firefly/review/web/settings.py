@@ -49,7 +49,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "paperless_firefly.review.web",
+    "paperless_firefly.review.web.apps.WebConfig",  # Use AppConfig for background worker
 ]
 
 MIDDLEWARE = [

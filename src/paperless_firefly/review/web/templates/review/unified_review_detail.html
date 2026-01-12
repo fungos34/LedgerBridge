@@ -1911,6 +1911,31 @@ function updateLineItemsJson() {
     if (jsonField) jsonField.value = json;
 }
 
+// Initialize saved line items on page load (restore previously saved splits)
+document.addEventListener('DOMContentLoaded', function() {
+    const savedLineItems = {{ saved_line_items_json|safe|default:"[]" }};
+    if (savedLineItems && savedLineItems.length > 0) {
+        // Restore saved line items
+        lineItems = savedLineItems.map((item, idx) => ({
+            id: lineItemCounter++,
+            amount: item.amount || 0,
+            description: item.description || '',
+            category: item.category || ''
+        }));
+        
+        // Enable split mode and show the container
+        const checkbox = document.getElementById('enable_split');
+        const container = document.getElementById('split-container');
+        if (checkbox) checkbox.checked = true;
+        if (container) container.style.display = 'block';
+        
+        // Render the restored line items
+        renderLineItems();
+        
+        console.log('Restored ' + lineItems.length + ' saved line item(s)');
+    }
+});
+
 // Update split total when main amount changes
 const amountField = document.getElementById('amount');
 if (amountField) {

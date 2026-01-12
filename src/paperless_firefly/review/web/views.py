@@ -4290,6 +4290,19 @@ def unified_review_detail(request: HttpRequest, record_type: str, record_id: int
         except Exception as e:
             logger.warning(f"Could not get AI job status: {e}")
 
+    # Prepare saved line items for form initialization
+    # These are user-saved splits that should be restored on page load
+    saved_line_items = []
+    if extraction_data and extraction_data.get("line_items"):
+        for idx, item in enumerate(extraction_data["line_items"]):
+            saved_line_items.append({
+                "id": idx,
+                "amount": float(item.get("total") or item.get("unit_price") or 0),
+                "description": item.get("description", ""),
+                "category": item.get("category", ""),
+            })
+    saved_line_items_json = json.dumps(saved_line_items) if saved_line_items else "[]"
+
     context = {
         "record": record_data,
         "record_type": record_type,
@@ -4316,6 +4329,8 @@ def unified_review_detail(request: HttpRequest, record_type: str, record_id: int
         "ai_suggestions": ai_suggestions,
         # List of fields user has edited (suppress AI suggestions for these)
         "user_edited_fields": extraction_data.get("user_edited_fields", []) if extraction_data else [],
+        # Saved line items for form restoration (split transactions)
+        "saved_line_items_json": saved_line_items_json,
         **_get_external_urls(request.user if hasattr(request, "user") else None),
     }
 
