@@ -18,7 +18,7 @@ import httpx
 
 # Configuration - MODIFY THESE VALUES FOR YOUR DEPLOYMENT
 OLLAMA_URL = "http://ollama:11434"  # or http://localhost:11434 if testing locally
-MODEL = "llama3.2:3b"  # or whatever model you have pulled
+MODEL = "qwen2.5:3b-instruct-q4_K_M"  # or whatever model you have pulled
 TIMEOUT_SECONDS = 120
 
 # Sample document OCR content (typical receipt)
@@ -332,7 +332,7 @@ except httpx.TimeoutException:
     print("=" * 80)
     print("Possible issues:")
     print("  - Ollama not running")
-    print("  - Model not pulled (try: docker exec <container> ollama pull llama3.2:3b)")
+    print("  - Model not pulled (try: docker exec <container> ollama pull qwen2.5:3b-instruct-q4_K_M)")
     print("  - Network connectivity issues")
     print("  - Model too slow for timeout setting")
     
