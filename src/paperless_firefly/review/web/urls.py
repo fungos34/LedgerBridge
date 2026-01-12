@@ -188,4 +188,8 @@ urlpatterns = [
     path("api/ai-queue/action/", views.ai_queue_action, name="ai_queue_action"),
     path("api/ai-queue/schedule/", views.ai_queue_schedule, name="ai_queue_schedule"),
     path("api/ai-queue/<int:job_id>/", views.ai_queue_job_detail, name="ai_queue_job_detail"),
+    # ============================================================================
+    # Processing History (Unified Archive + Documents + AI Queue + Audit)
+    # ============================================================================
+    path("processing-history/", views.processing_history, name="processing_history"),
 ]

@@ -1,0 +1,1063 @@
+{% extends "review/base.html" %}
+
+{% block title %}Processing History - SparkLink{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Tab Navigation */
+    .tab-nav {
+        display: flex;
+        gap: 0.5rem;
+        margin-bottom: 1.5rem;
+        border-bottom: 2px solid var(--gray-200);
+        padding-bottom: 0;
+    }
+    
+    .tab-btn {
+        padding: 0.75rem 1.5rem;
+        background: transparent;
+        border: none;
+        color: var(--gray-600);
+        font-weight: 500;
+        font-size: 0.875rem;
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -2px;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        text-decoration: none;
+        transition: all 0.15s;
+    }
+    
+    .tab-btn:hover {
+        color: var(--gray-900);
+        background: var(--gray-50);
+    }
+    
+    .tab-btn.active {
+        color: var(--primary);
+        border-bottom-color: var(--primary);
+        background: transparent;
+    }
+    
+    .tab-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 1.5rem;
+        height: 1.25rem;
+        padding: 0 0.375rem;
+        background: var(--gray-200);
+        color: var(--gray-700);
+        border-radius: 9999px;
+        font-size: 0.625rem;
+        font-weight: 600;
+    }
+    
+    .tab-btn.active .tab-badge {
+        background: var(--primary);
+        color: white;
+    }
+    
+    /* Page Header */
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 1.5rem;
+    }
+    
+    .page-header h1 {
+        font-size: 1.5rem;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    .page-header .text-muted {
+        color: var(--gray-500);
+        font-size: 0.875rem;
+        margin-top: 0.25rem;
+    }
+    
+    /* Stats Grid */
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+    }
+    
+    @media (max-width: 768px) {
+        .stats-grid {
+            grid-template-columns: repeat(2, 1fr);
+        }
+    }
+    
+    .stat-card {
+        background: white;
+        border-radius: 0.5rem;
+        padding: 1rem;
+        text-align: center;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+    
+    .stat-card .stat-value {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: var(--gray-900);
+    }
+    
+    .stat-card .stat-label {
+        font-size: 0.625rem;
+        color: var(--gray-500);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+    
+    .stat-card.pending .stat-value { color: #d97706; }
+    .stat-card.processing .stat-value { color: #2563eb; }
+    .stat-card.completed .stat-value { color: #059669; }
+    .stat-card.failed .stat-value { color: #dc2626; }
+    
+    /* Filter Bar */
+    .filter-bar {
+        background: white;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin-bottom: 1rem;
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+        align-items: center;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    }
+    
+    .filter-bar input[type="text"],
+    .filter-bar input[type="number"],
+    .filter-bar select {
+        padding: 0.5rem 0.75rem;
+        border: 1px solid var(--gray-300);
+        border-radius: 0.375rem;
+        font-size: 0.875rem;
+    }
+    
+    .filter-bar input[type="text"] {
+        flex: 1;
+        min-width: 200px;
+    }
+    
+    /* Table Styles */
+    .data-table {
+        width: 100%;
+        border-collapse: collapse;
+        background: white;
+        border-radius: 0.5rem;
+        overflow: hidden;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+    
+    .data-table thead {
+        background: var(--gray-50);
+    }
+    
+    .data-table th {
+        padding: 0.75rem 1rem;
+        text-align: left;
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: var(--gray-600);
+        text-transform: uppercase;
+        letter-spacing: 0.025em;
+    }
+    
+    .data-table td {
+        padding: 0.75rem 1rem;
+        border-top: 1px solid var(--gray-100);
+        font-size: 0.875rem;
+    }
+    
+    .data-table tbody tr:hover {
+        background: var(--gray-50);
+    }
+    
+    /* Status Badges */
+    .status-badge {
+        display: inline-block;
+        padding: 0.125rem 0.5rem;
+        border-radius: 9999px;
+        font-size: 0.625rem;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+    
+    .status-badge.success, .status-badge.imported, .status-badge.completed {
+        background: #dcfce7;
+        color: #166534;
+    }
+    
+    .status-badge.warning, .status-badge.pending {
+        background: #fef3c7;
+        color: #92400e;
+    }
+    
+    .status-badge.danger, .status-badge.failed {
+        background: #fee2e2;
+        color: #991b1b;
+    }
+    
+    .status-badge.info, .status-badge.processing {
+        background: #dbeafe;
+        color: #1e40af;
+    }
+    
+    .status-badge.secondary, .status-badge.rejected {
+        background: #f3f4f6;
+        color: #6b7280;
+    }
+    
+    /* Source Badges */
+    .source-badge {
+        display: inline-block;
+        padding: 0.125rem 0.375rem;
+        border-radius: 0.25rem;
+        font-size: 0.625rem;
+        font-weight: 500;
+        text-transform: uppercase;
+    }
+    
+    .source-badge.USER { background: #dbeafe; color: #1e40af; }
+    .source-badge.RULES { background: #f3e8ff; color: #6b21a8; }
+    .source-badge.LLM { background: #fce7f3; color: #9d174d; }
+    .source-badge.AUTO { background: #dcfce7; color: #166534; }
+    
+    /* Document Cards */
+    .doc-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 1rem;
+    }
+    
+    .doc-card {
+        background: white;
+        border-radius: 0.5rem;
+        padding: 1rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        transition: transform 0.2s, box-shadow 0.2s;
+    }
+    
+    .doc-card:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    
+    .doc-card.listed {
+        border-left: 4px solid #10b981;
+    }
+    
+    .doc-card.unlisted {
+        border-left: 4px solid var(--gray-300);
+    }
+    
+    .doc-title {
+        font-weight: 600;
+        font-size: 0.9rem;
+        color: var(--gray-800);
+        word-break: break-word;
+    }
+    
+    .doc-meta {
+        font-size: 0.75rem;
+        color: var(--gray-500);
+    }
+    
+    .doc-actions {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: auto;
+        padding-top: 0.5rem;
+        border-top: 1px solid var(--gray-100);
+    }
+    
+    .toggle-btn {
+        flex: 1;
+        padding: 0.5rem;
+        border: none;
+        border-radius: 0.375rem;
+        cursor: pointer;
+        font-size: 0.8rem;
+        font-weight: 500;
+        transition: background 0.2s;
+    }
+    
+    .toggle-btn.list {
+        background: #d1fae5;
+        color: #065f46;
+    }
+    
+    .toggle-btn.list:hover {
+        background: #a7f3d0;
+    }
+    
+    .toggle-btn.unlist {
+        background: #fee2e2;
+        color: #991b1b;
+    }
+    
+    .toggle-btn.unlist:hover {
+        background: #fecaca;
+    }
+    
+    .toggle-btn:disabled {
+        opacity: 0.5;
+        cursor: wait;
+    }
+    
+    /* Pagination */
+    .pagination {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 0.5rem;
+        margin-top: 1.5rem;
+    }
+    
+    .pagination a,
+    .pagination span {
+        padding: 0.5rem 1rem;
+        border: 1px solid var(--gray-200);
+        border-radius: 0.375rem;
+        text-decoration: none;
+        color: var(--gray-600);
+        font-size: 0.875rem;
+        background: white;
+    }
+    
+    .pagination a:hover {
+        background: var(--gray-50);
+    }
+    
+    .pagination .current {
+        background: var(--primary);
+        color: white;
+        border-color: var(--primary);
+    }
+    
+    /* Empty State */
+    .empty-state {
+        text-align: center;
+        padding: 4rem 2rem;
+        color: var(--gray-500);
+        background: white;
+        border-radius: 0.5rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+    
+    .empty-state-icon {
+        font-size: 3rem;
+        margin-bottom: 1rem;
+        opacity: 0.5;
+    }
+    
+    .empty-state h3 {
+        font-size: 1rem;
+        font-weight: 600;
+        color: var(--gray-700);
+        margin-bottom: 0.5rem;
+    }
+    
+    /* Action Buttons */
+    .action-btn {
+        padding: 0.25rem 0.5rem;
+        font-size: 0.75rem;
+        border-radius: 0.25rem;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        border: 1px solid;
+        cursor: pointer;
+        transition: all 0.15s;
+    }
+    
+    .action-btn-outline {
+        background: white;
+        color: var(--gray-600);
+        border-color: var(--gray-200);
+    }
+    
+    .action-btn-outline:hover {
+        background: var(--gray-50);
+        border-color: var(--gray-300);
+    }
+    
+    .action-btn-danger {
+        background: #fee2e2;
+        color: #991b1b;
+        border-color: #fecaca;
+    }
+    
+    .action-btn-danger:hover {
+        background: #fecaca;
+    }
+    
+    .action-btn-primary {
+        background: var(--primary);
+        color: white;
+        border-color: var(--primary);
+    }
+    
+    .action-btn-primary:hover {
+        background: var(--primary-dark);
+    }
+    
+    .text-link {
+        color: var(--primary);
+        text-decoration: none;
+    }
+    
+    .text-link:hover {
+        text-decoration: underline;
+    }
+    
+    .text-mono {
+        font-family: "SFMono-Regular", Consolas, monospace;
+    }
+    
+    .text-sm {
+        font-size: 0.75rem;
+    }
+    
+    .text-muted {
+        color: var(--gray-500);
+    }
+    
+    /* Error Modal */
+    .error-modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity 0.2s, visibility 0.2s;
+    }
+    
+    .error-modal-overlay.active {
+        opacity: 1;
+        visibility: visible;
+    }
+    
+    .error-modal {
+        background: white;
+        border-radius: 0.75rem;
+        max-width: 500px;
+        width: 90%;
+        max-height: 80vh;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+        overflow: hidden;
+    }
+    
+    .error-modal-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 1rem 1.25rem;
+        background: #fee2e2;
+        border-bottom: 1px solid #fecaca;
+    }
+    
+    .error-modal-header h3 {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin: 0;
+        font-size: 1rem;
+        font-weight: 600;
+        color: #991b1b;
+    }
+    
+    .error-modal-close {
+        background: none;
+        border: none;
+        font-size: 1.5rem;
+        color: var(--gray-500);
+        cursor: pointer;
+    }
+    
+    .error-modal-body {
+        padding: 1.25rem;
+        overflow-y: auto;
+        max-height: 60vh;
+    }
+    
+    .error-modal-body pre {
+        margin: 0;
+        padding: 1rem;
+        background: var(--gray-50);
+        border: 1px solid var(--gray-200);
+        border-radius: 0.5rem;
+        font-size: 0.8rem;
+        font-family: 'Consolas', 'Monaco', monospace;
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Page Header -->
+<div class="page-header">
+    <div>
+        <h1>📊 Processing History</h1>
+        <p class="text-muted">View archive, documents, AI jobs, and audit trail</p>
+    </div>
+    <a href="{% url 'unified_review_list' %}" class="btn btn-outline">← Back to Review</a>
+</div>
+
+<!-- Tab Navigation -->
+<div class="tab-nav">
+    <a href="?tab=archive" class="tab-btn {% if active_tab == 'archive' %}active{% endif %}">
+        📦 Archive
+        <span class="tab-badge">{{ archive_count }}</span>
+    </a>
+    <a href="?tab=documents" class="tab-btn {% if active_tab == 'documents' %}active{% endif %}">
+        📁 Documents
+    </a>
+    <a href="?tab=ai_queue" class="tab-btn {% if active_tab == 'ai_queue' %}active{% endif %}">
+        🤖 AI Queue
+        <span class="tab-badge">{{ ai_stats.pending }}</span>
+    </a>
+    <a href="?tab=audit" class="tab-btn {% if active_tab == 'audit' %}active{% endif %}">
+        📜 Audit Trail
+    </a>
+</div>
+
+<!-- ==================== ARCHIVE TAB ==================== -->
+{% if active_tab == 'archive' %}
+<div class="tab-content" id="archive-content">
+    {% if archive_items %}
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Document</th>
+                <th>Amount</th>
+                <th>Date</th>
+                <th>Vendor</th>
+                <th>Status</th>
+                <th>Processed</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in archive_items %}
+            <tr>
+                <td>
+                    <div class="doc-title">{{ item.title|truncatechars:40 }}</div>
+                    <div class="text-sm text-muted">Doc #{{ item.document_id }}</div>
+                </td>
+                <td class="text-mono">{{ item.amount }} {{ item.currency }}</td>
+                <td>{{ item.date }}</td>
+                <td>{{ item.vendor|default:"—"|truncatechars:25 }}</td>
+                <td>
+                    <span class="status-badge {{ item.status_class }}">{{ item.status }}</span>
+                    {% if item.firefly_id %}
+                    <div class="text-sm text-muted">Firefly #{{ item.firefly_id }}</div>
+                    {% endif %}
+                    {% if item.import_error %}
+                    <div class="text-sm" style="color: #dc2626;">{{ item.import_error|truncatechars:40 }}</div>
+                    {% endif %}
+                </td>
+                <td class="text-sm text-muted">{{ item.reviewed_at|default:item.created_at }}</td>
+                <td>
+                    <div style="display: flex; gap: 0.25rem; flex-wrap: wrap;">
+                        {% if item.status == 'Imported' and item.firefly_id %}
+                        <a href="{{ firefly_url }}/transactions/show/{{ item.firefly_id }}" target="_blank" class="action-btn action-btn-outline" title="View in Firefly III">🔗 Firefly</a>
+                        {% endif %}
+                        <a href="{{ paperless_url }}/documents/{{ item.document_id }}/" target="_blank" class="action-btn action-btn-outline" title="View in Paperless-ngx">📄 Paperless</a>
+                        {% if item.status != 'Imported' %}
+                        <form method="post" action="{% url 'reset_extraction' item.id %}" style="display: inline;">
+                            {% csrf_token %}
+                            <button type="submit" class="action-btn action-btn-outline" onclick="return confirm('Reset this extraction for re-review?');">🔄 Reset</button>
+                        </form>
+                        {% endif %}
+                        {% if item.status == 'Rejected' and not item.firefly_id %}
+                        <form method="post" action="{% url 'delete_extraction' item.id %}" style="display: inline;">
+                            {% csrf_token %}
+                            <button type="submit" class="action-btn action-btn-danger" onclick="return confirm('Permanently delete this extraction?');">🗑️</button>
+                        </form>
+                        {% endif %}
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-state-icon">📦</div>
+        <h3>Archive is empty</h3>
+        <p>No processed extractions yet. Items will appear here after being imported or rejected.</p>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- ==================== DOCUMENTS TAB ==================== -->
+{% if active_tab == 'documents' %}
+<div class="tab-content" id="documents-content">
+    <div style="background: #dbeafe; border: 1px solid #93c5fd; color: #1e40af; padding: 0.75rem 1rem; border-radius: 0.5rem; margin-bottom: 1rem; font-size: 0.875rem;">
+        <strong>💡 Tip:</strong> Documents tagged with <code>{{ filter_tag }}</code> will be processed during extraction. 
+        Use List/Unlist to manage which documents get imported to Firefly III.
+    </div>
+    
+    <form method="get" class="filter-bar">
+        <input type="hidden" name="tab" value="documents">
+        <input type="text" name="doc_search" placeholder="Search documents..." value="{{ doc_search }}">
+        <select name="listed">
+            <option value="all" {% if show_listed == 'all' %}selected{% endif %}>All Documents</option>
+            <option value="listed" {% if show_listed == 'listed' %}selected{% endif %}>Listed (tagged)</option>
+            <option value="unlisted" {% if show_listed == 'unlisted' %}selected{% endif %}>Unlisted</option>
+        </select>
+        <button type="submit" class="btn btn-secondary">Filter</button>
+    </form>
+    
+    {% if documents %}
+    <p style="margin-bottom: 1rem; color: var(--gray-600); font-size: 0.875rem;">
+        Showing {{ documents|length }} of {{ documents_total }} documents
+    </p>
+    
+    <div class="doc-grid">
+        {% for doc in documents %}
+        <div class="doc-card {% if doc.is_listed %}listed{% else %}unlisted{% endif %}" id="doc-{{ doc.id }}">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                <span class="doc-title">{{ doc.title|truncatechars:50 }}</span>
+                <span class="status-badge {% if doc.is_listed %}success{% else %}secondary{% endif %}">
+                    {% if doc.is_listed %}Listed{% else %}Unlisted{% endif %}
+                </span>
+            </div>
+            <div class="doc-meta">
+                📅 {{ doc.created|slice:":10" }} &nbsp;|&nbsp; ID: {{ doc.id }}
+            </div>
+            <div class="doc-actions">
+                <a href="{{ paperless_url }}/documents/{{ doc.id }}" target="_blank" class="btn btn-sm btn-outline" style="flex: 1; text-align: center;">View</a>
+                {% if doc.is_listed %}
+                <button type="button" class="toggle-btn unlist" onclick="toggleDocument({{ doc.id }}, 'unlist')">➖ Unlist</button>
+                {% else %}
+                <button type="button" class="toggle-btn list" onclick="toggleDocument({{ doc.id }}, 'list')">➕ List</button>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    
+    {% if documents_total_pages > 1 %}
+    <div class="pagination">
+        {% if documents_has_prev %}
+        <a href="?tab=documents&doc_page={{ documents_page|add:"-1" }}&doc_search={{ doc_search }}&listed={{ show_listed }}">← Previous</a>
+        {% endif %}
+        <span class="current">Page {{ documents_page }} of {{ documents_total_pages }}</span>
+        {% if documents_has_next %}
+        <a href="?tab=documents&doc_page={{ documents_page|add:"1" }}&doc_search={{ doc_search }}&listed={{ show_listed }}">Next →</a>
+        {% endif %}
+    </div>
+    {% endif %}
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-state-icon">📭</div>
+        <h3>No documents found</h3>
+        <p>Try adjusting your search or filter settings</p>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- ==================== AI QUEUE TAB ==================== -->
+{% if active_tab == 'ai_queue' %}
+<div class="tab-content" id="ai-queue-content">
+    <!-- Queue Stats -->
+    <div class="stats-grid">
+        <div class="stat-card pending">
+            <div class="stat-value">{{ ai_stats.pending }}</div>
+            <div class="stat-label">Pending</div>
+        </div>
+        <div class="stat-card processing">
+            <div class="stat-value">{{ ai_stats.processing }}</div>
+            <div class="stat-label">Processing</div>
+        </div>
+        <div class="stat-card completed">
+            <div class="stat-value">{{ ai_stats.completed }}</div>
+            <div class="stat-label">Completed</div>
+        </div>
+        <div class="stat-card failed">
+            <div class="stat-value">{{ ai_stats.failed }}</div>
+            <div class="stat-label">Failed</div>
+        </div>
+    </div>
+    
+    <div style="background: linear-gradient(135deg, #eff6ff, #dbeafe); border: 1px solid #93c5fd; border-radius: 0.5rem; padding: 1rem; margin-bottom: 1rem;">
+        <div style="display: flex; align-items: flex-start; gap: 1rem;">
+            <span style="font-size: 1.5rem;">📅</span>
+            <div>
+                <h3 style="font-size: 0.875rem; font-weight: 600; color: #1e40af; margin-bottom: 0.25rem;">Processing Schedule</h3>
+                <p style="font-size: 0.875rem; color: #2563eb; margin: 0;">
+                    Jobs are processed automatically based on settings in 
+                    <a href="{% url 'settings' %}#ai-schedule" style="color: #1d4ed8;">Settings → AI Schedule</a>.
+                </p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Filter Tabs -->
+    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem;">
+        <a href="?tab=ai_queue" class="btn btn-sm {% if not ai_status_filter %}btn-primary{% else %}btn-outline{% endif %}">All ({{ ai_stats.total }})</a>
+        <a href="?tab=ai_queue&ai_status=pending" class="btn btn-sm {% if ai_status_filter == 'pending' %}btn-primary{% else %}btn-outline{% endif %}">Pending ({{ ai_stats.pending }})</a>
+        <a href="?tab=ai_queue&ai_status=processing" class="btn btn-sm {% if ai_status_filter == 'processing' %}btn-primary{% else %}btn-outline{% endif %}">Processing ({{ ai_stats.processing }})</a>
+        <a href="?tab=ai_queue&ai_status=completed" class="btn btn-sm {% if ai_status_filter == 'completed' %}btn-primary{% else %}btn-outline{% endif %}">Completed ({{ ai_stats.completed }})</a>
+        <a href="?tab=ai_queue&ai_status=failed" class="btn btn-sm {% if ai_status_filter == 'failed' %}btn-primary{% else %}btn-outline{% endif %}">Failed ({{ ai_stats.failed }})</a>
+    </div>
+    
+    {% if ai_jobs %}
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Document</th>
+                <th>Status</th>
+                <th>Scheduled</th>
+                <th>Retries</th>
+                <th>Error</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for job in ai_jobs %}
+            <tr data-job-id="{{ job.id }}">
+                <td class="text-mono text-sm">#{{ job.id }}</td>
+                <td>
+                    <a href="{% url 'unified_review_detail' 'paperless' job.document_id %}" class="text-link">
+                        {% if job.doc_title %}{{ job.doc_title|truncatechars:35 }}{% else %}Doc #{{ job.document_id }}{% endif %}
+                    </a>
+                </td>
+                <td>
+                    <span class="status-badge {{ job.status|lower }}">{{ job.status }}</span>
+                </td>
+                <td class="text-sm text-muted">{{ job.scheduled_at|date:"M j, Y H:i"|default:"-" }}</td>
+                <td class="text-sm">{{ job.retry_count }}/{{ job.max_retries }}</td>
+                <td>
+                    {% if job.error_message %}
+                    <button class="action-btn action-btn-danger" onclick="showErrorModal({{ job.id }}, '{{ job.error_message|escapejs }}')" title="Click to view full error">
+                        ⚠️ View
+                    </button>
+                    {% else %}
+                    <span class="text-muted">—</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <div style="display: flex; gap: 0.25rem;">
+                        {% if job.status == 'PENDING' %}
+                        <button class="action-btn action-btn-primary" onclick="runJobNow({{ job.id }})" {% if ai_is_processing %}disabled{% endif %} title="Run now">▶️</button>
+                        <button class="action-btn action-btn-outline" onclick="cancelJob({{ job.id }})" title="Cancel">✕</button>
+                        {% endif %}
+                        {% if job.status == 'FAILED' %}
+                        <button class="action-btn action-btn-outline" onclick="retryJob({{ job.id }})" title="Retry">↻</button>
+                        {% endif %}
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    
+    <div class="pagination">
+        {% if ai_has_prev %}
+        <a href="?tab=ai_queue{% if ai_status_filter %}&ai_status={{ ai_status_filter }}{% endif %}&ai_page={{ ai_page|add:'-1' }}">← Previous</a>
+        {% endif %}
+        <span class="current">Page {{ ai_page }}</span>
+        {% if ai_has_next %}
+        <a href="?tab=ai_queue{% if ai_status_filter %}&ai_status={{ ai_status_filter }}{% endif %}&ai_page={{ ai_page|add:'1' }}">Next →</a>
+        {% endif %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-state-icon">🤖</div>
+        <h3>No jobs{% if ai_status_filter %} with status "{{ ai_status_filter }}"{% endif %}</h3>
+        <p>AI jobs will appear here when documents are extracted with AI enabled.</p>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- ==================== AUDIT TRAIL TAB ==================== -->
+{% if active_tab == 'audit' %}
+<div class="tab-content" id="audit-content">
+    <form method="get" class="filter-bar">
+        <input type="hidden" name="tab" value="audit">
+        <div style="display: flex; flex-direction: column; gap: 0.25rem;">
+            <label style="font-size: 0.75rem; color: var(--gray-500);">Document ID</label>
+            <input type="number" name="audit_document_id" value="{{ audit_filter_document }}" placeholder="Filter by doc..." style="width: 120px;">
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 0.25rem;">
+            <label style="font-size: 0.75rem; color: var(--gray-500);">Firefly ID</label>
+            <input type="number" name="audit_firefly_id" value="{{ audit_filter_firefly }}" placeholder="Filter by tx..." style="width: 120px;">
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 0.25rem;">
+            <label style="font-size: 0.75rem; color: var(--gray-500);">Decision Source</label>
+            <select name="audit_source">
+                <option value="">All Sources</option>
+                <option value="USER" {% if audit_filter_source == "USER" %}selected{% endif %}>User</option>
+                <option value="RULES" {% if audit_filter_source == "RULES" %}selected{% endif %}>Rules</option>
+                <option value="LLM" {% if audit_filter_source == "LLM" %}selected{% endif %}>LLM</option>
+                <option value="AUTO" {% if audit_filter_source == "AUTO" %}selected{% endif %}>Auto</option>
+            </select>
+        </div>
+        <button type="submit" class="btn btn-primary" style="align-self: flex-end;">Filter</button>
+    </form>
+    
+    {% if audit_runs %}
+    <div class="card">
+        <div class="card-header">
+            <h2>📜 Audit Trail ({{ audit_total_count }} runs)</h2>
+        </div>
+        <table class="data-table" style="box-shadow: none; border-radius: 0;">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Timestamp</th>
+                    <th>Document</th>
+                    <th>Firefly TX</th>
+                    <th>State</th>
+                    <th>Source</th>
+                    <th>Action</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for run in audit_runs %}
+                <tr>
+                    <td class="text-mono text-sm">#{{ run.id }}</td>
+                    <td class="text-sm">{{ run.run_timestamp|slice:":19" }}</td>
+                    <td>
+                        {% if run.document_id %}
+                        <a href="{% url 'unified_review_detail' 'paperless' run.document_id %}" class="text-link">Doc #{{ run.document_id }}</a>
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if run.firefly_id %}
+                        <a href="{{ firefly_url }}/transactions/show/{{ run.firefly_id }}" target="_blank" class="text-link">TX #{{ run.firefly_id }}</a>
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="status-badge {% if run.final_state == 'LINKED' or run.final_state == 'COMPLETED' %}success{% elif run.final_state == 'REJECTED' or run.final_state == 'FAILED' %}danger{% elif run.final_state == 'PENDING' %}warning{% else %}info{% endif %}">{{ run.final_state }}</span>
+                    </td>
+                    <td>
+                        {% if run.decision_source %}
+                        <span class="source-badge {{ run.decision_source }}">{{ run.decision_source }}</span>
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-sm">{{ run.firefly_write_action|default:"-" }}</td>
+                    <td>
+                        <a href="{% url 'audit_trail_detail' run.id %}" class="action-btn action-btn-outline" title="View Details">👁</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    
+    <div class="pagination">
+        {% if audit_has_prev %}
+        <a href="?tab=audit&audit_page={{ audit_page|add:"-1" }}{% if audit_filter_document %}&audit_document_id={{ audit_filter_document }}{% endif %}{% if audit_filter_firefly %}&audit_firefly_id={{ audit_filter_firefly }}{% endif %}{% if audit_filter_source %}&audit_source={{ audit_filter_source }}{% endif %}">← Previous</a>
+        {% endif %}
+        <span class="current">Page {{ audit_page }} of {{ audit_total_pages }}</span>
+        {% if audit_has_next %}
+        <a href="?tab=audit&audit_page={{ audit_page|add:"1" }}{% if audit_filter_document %}&audit_document_id={{ audit_filter_document }}{% endif %}{% if audit_filter_firefly %}&audit_firefly_id={{ audit_filter_firefly }}{% endif %}{% if audit_filter_source %}&audit_source={{ audit_filter_source }}{% endif %}">Next →</a>
+        {% endif %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-state-icon">📜</div>
+        <h3>No audit records{% if audit_filter_document or audit_filter_firefly or audit_filter_source %} matching filters{% endif %}</h3>
+        <p>Interpretation runs will be recorded here as documents are processed.</p>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- Error Modal -->
+<div id="errorModal" class="error-modal-overlay" onclick="closeErrorModal(event)">
+    <div class="error-modal" onclick="event.stopPropagation()">
+        <div class="error-modal-header">
+            <h3><span>⚠️</span> Error Details</h3>
+            <button class="error-modal-close" onclick="closeErrorModal()">&times;</button>
+        </div>
+        <div class="error-modal-body">
+            <div style="margin-bottom: 1rem; font-size: 0.875rem; color: var(--gray-600);">
+                Job ID: <strong id="errorJobId"></strong>
+            </div>
+            <pre id="errorContent"></pre>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Error modal functions
+function showErrorModal(jobId, errorMessage) {
+    const modal = document.getElementById('errorModal');
+    document.getElementById('errorJobId').textContent = '#' + jobId;
+    document.getElementById('errorContent').textContent = errorMessage;
+    modal.classList.add('active');
+    document.body.style.overflow = 'hidden';
+}
+
+function closeErrorModal(event) {
+    if (event && event.target !== event.currentTarget) return;
+    document.getElementById('errorModal').classList.remove('active');
+    document.body.style.overflow = '';
+}
+
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeErrorModal();
+});
+
+// AI Queue actions
+function cancelJob(jobId) {
+    if (!confirm('Cancel this AI job?')) return;
+    
+    fetch('{% url "ai_queue_action" %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRFToken': '{{ csrf_token }}'
+        },
+        body: `action=cancel&job_id=${jobId}`
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) location.reload();
+        else alert('Failed: ' + data.error);
+    })
+    .catch(e => alert('Error: ' + e));
+}
+
+function retryJob(jobId) {
+    if (!confirm('Retry this failed AI job?')) return;
+    
+    fetch('{% url "ai_queue_action" %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRFToken': '{{ csrf_token }}'
+        },
+        body: `action=retry&job_id=${jobId}`
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) location.reload();
+        else alert('Failed: ' + data.error);
+    })
+    .catch(e => alert('Error: ' + e));
+}
+
+function runJobNow(jobId) {
+    if (!confirm('Run this AI job immediately?')) return;
+    
+    const btn = event.target;
+    btn.disabled = true;
+    btn.textContent = '⏳';
+    
+    fetch('{% url "ai_queue_action" %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRFToken': '{{ csrf_token }}'
+        },
+        body: `action=run_now&job_id=${jobId}`
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            setTimeout(() => location.reload(), 500);
+        } else {
+            alert('Failed: ' + data.error);
+            location.reload();
+        }
+    })
+    .catch(e => {
+        alert('Error: ' + e);
+        location.reload();
+    });
+}
+
+// Document toggle
+function toggleDocument(docId, action) {
+    const card = document.getElementById('doc-' + docId);
+    const btn = card.querySelector('.toggle-btn');
+    
+    btn.disabled = true;
+    btn.textContent = 'Working...';
+    
+    fetch('{% url "toggle_listing" document_id=0 %}'.replace('0', docId), {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRFToken': '{{ csrf_token }}'
+        },
+        body: 'action=' + action
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            const indicator = card.querySelector('.status-badge');
+            if (action === 'list') {
+                card.classList.remove('unlisted');
+                card.classList.add('listed');
+                indicator.classList.remove('secondary');
+                indicator.classList.add('success');
+                indicator.textContent = 'Listed';
+                btn.className = 'toggle-btn unlist';
+                btn.textContent = '➖ Unlist';
+                btn.onclick = function() { toggleDocument(docId, 'unlist'); };
+            } else {
+                card.classList.remove('listed');
+                card.classList.add('unlisted');
+                indicator.classList.remove('success');
+                indicator.classList.add('secondary');
+                indicator.textContent = 'Unlisted';
+                btn.className = 'toggle-btn list';
+                btn.textContent = '➕ List';
+                btn.onclick = function() { toggleDocument(docId, 'list'); };
+            }
+        } else {
+            alert('Error: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        alert('Error: ' + error);
+    })
+    .finally(() => {
+        btn.disabled = false;
+    });
+}
+</script>
+{% endblock %}

@@ -480,12 +480,8 @@
             <nav class="main-nav">
                 {% if user.is_authenticated %}
                 <a href="{% url 'home' %}" {% if request.path == '/' %}class="active"{% endif %} title="Dashboard overview">🏠 Home</a>
-                <a href="{% url 'unified_review_list' %}" {% if '/unified-review' in request.path or '/review' in request.path and '/reconciliation' not in request.path %}class="active"{% endif %} title="Review and link documents">📝 Review & Link</a>
-                <a href="{% url 'import_queue' %}" {% if '/import' in request.path %}class="active"{% endif %} title="Import approved transactions">📤 Import</a>
-                <a href="{% url 'archive' %}" {% if '/archive' in request.path %}class="active"{% endif %} title="View processed documents">📁 Archive</a>
-                <a href="{% url 'document_browser' %}" {% if '/documents' in request.path %}class="active"{% endif %} title="Browse and manage documents">📄 Documents</a>
-                <a href="{% url 'ai_queue_list' %}" {% if '/ai-queue' in request.path %}class="active"{% endif %} title="AI job queue">🤖 AI Queue</a>
-                <a href="{% url 'audit_trail_list' %}" {% if '/audit' in request.path %}class="active"{% endif %} title="View audit trail">📋 Audit</a>
+                <a href="{% url 'unified_review_list' %}" {% if '/unified-review' in request.path or '/review' in request.path and '/reconciliation' not in request.path %}class="active"{% endif %} title="Review, link and import documents">📝 Review & Import</a>
+                <a href="{% url 'processing_history' %}" {% if '/processing-history' in request.path or '/archive' in request.path or '/ai-queue' in request.path or '/audit' in request.path or '/documents' in request.path %}class="active"{% endif %} title="View history, AI queue, audit trail">📊 History</a>
                 {% endif %}
             </nav>
             <div class="user-menu">

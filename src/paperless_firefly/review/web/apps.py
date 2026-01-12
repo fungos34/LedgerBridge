@@ -32,8 +32,17 @@ class WebConfig(AppConfig):
     def ready(self):
         """Called when Django is ready - start background worker if enabled."""
         # Only start in main process, not in Django management commands or reloader
-        # Check RUN_MAIN to avoid duplicate workers in auto-reload mode
-        if os.environ.get("RUN_MAIN") == "true" or not os.environ.get("DJANGO_AUTORELOAD"):
+        # RUN_MAIN is set to "true" when running with auto-reload (the child process)
+        # When not using auto-reload, neither RUN_MAIN nor DJANGO_AUTORELOAD is set
+        run_main = os.environ.get("RUN_MAIN")
+        autoreload = os.environ.get("DJANGO_AUTORELOAD")
+
+        # Start worker if:
+        # 1. RUN_MAIN is "true" (child process in auto-reload mode), OR
+        # 2. Neither RUN_MAIN nor DJANGO_AUTORELOAD is set (normal run without reload)
+        should_start = (run_main == "true") or (run_main is None and autoreload is None)
+
+        if should_start:
             self._start_ai_queue_worker()
 
     def _start_ai_queue_worker(self):
@@ -45,11 +54,19 @@ class WebConfig(AppConfig):
 
         # Don't start during Django setup commands (migrate, collectstatic, etc.)
         import sys
+
         if len(sys.argv) > 1 and sys.argv[1] in (
-            "migrate", "makemigrations", "collectstatic", "createsuperuser",
-            "shell", "dbshell", "check", "test", "help"
+            "migrate",
+            "makemigrations",
+            "collectstatic",
+            "createsuperuser",
+            "shell",
+            "dbshell",
+            "check",
+            "test",
+            "help",
         ):
-            logger.debug("Skipping AI worker start for management command")
+            logger.info("Skipping AI worker start for management command: %s", sys.argv[1])
             return
 
         _ai_worker_started = True
@@ -67,16 +84,17 @@ def _ai_queue_worker_loop():
     # Wait a bit for Django to fully initialize
     time.sleep(5)
 
-    logger.info("AI queue worker starting...")
+    logger.info("AI queue worker loop starting - will check for pending jobs")
 
     while not _ai_worker_shutdown.is_set():
         try:
             _process_ai_queue_batch()
         except Exception as e:
-            logger.error(f"Error in AI queue worker: {e}")
+            logger.error(f"Error in AI queue worker: {e}", exc_info=True)
 
         # Get user settings for interval
         interval_seconds = _get_processing_interval()
+        logger.info(f"AI worker sleeping for {interval_seconds} seconds before next check")
 
         # Sleep in small increments so we can respond to shutdown quickly
         sleep_until = time.time() + interval_seconds
@@ -93,12 +111,14 @@ def _get_processing_interval() -> int:
 
         profile = UserProfile.objects.first()
         if profile and profile.ai_schedule_enabled:
-            return profile.ai_schedule_interval_minutes * 60
-    except Exception:
-        pass
+            interval = profile.ai_schedule_interval_minutes * 60
+            logger.debug(f"AI worker interval from profile: {interval} seconds")
+            return interval
+    except Exception as e:
+        logger.debug(f"Could not get interval from profile: {e}")
 
-    # Default: 60 minutes
-    return 60 * 60
+    # Default: 5 minutes (reduced from 60 for more responsive processing)
+    return 5 * 60
 
 
 def _is_within_active_hours() -> bool:
@@ -109,9 +129,15 @@ def _is_within_active_hours() -> bool:
         profile = UserProfile.objects.first()
         if profile:
             current_hour = datetime.now().hour
-            return profile.ai_schedule_start_hour <= current_hour < profile.ai_schedule_end_hour
-    except Exception:
-        pass
+            within = profile.ai_schedule_start_hour <= current_hour < profile.ai_schedule_end_hour
+            if not within:
+                logger.info(
+                    f"Outside active hours: current={current_hour}, "
+                    f"active={profile.ai_schedule_start_hour}-{profile.ai_schedule_end_hour}"
+                )
+            return within
+    except Exception as e:
+        logger.debug(f"Could not check active hours: {e}")
 
     return True  # Default: always active
 
@@ -123,43 +149,47 @@ def _is_ai_schedule_enabled() -> bool:
 
         profile = UserProfile.objects.first()
         if profile:
-            return profile.ai_schedule_enabled
-    except Exception:
-        pass
+            enabled = profile.ai_schedule_enabled
+            if not enabled:
+                logger.info("AI schedule is disabled in user settings")
+            return enabled
+        else:
+            logger.info("No UserProfile found - AI schedule defaults to enabled")
+    except Exception as e:
+        logger.warning(f"Could not check AI schedule setting: {e}")
 
     return True  # Default: enabled
 
 
 def _process_ai_queue_batch():
     """Process a batch of pending AI jobs."""
+    logger.info("AI worker checking for pending jobs...")
+
     # Check if scheduling is enabled
     if not _is_ai_schedule_enabled():
-        logger.debug("AI queue processing disabled by user")
         return
 
     # Check if within active hours
     if not _is_within_active_hours():
-        logger.debug("Outside AI queue active hours")
         return
 
     try:
         # Get dependencies
-        from paperless_firefly.config import Config, load_config
-        from paperless_firefly.spark_ai.service import SparkAIService
         from paperless_firefly.paperless_client.client import PaperlessClient
-        from paperless_firefly.state_store.sqlite_store import StateStore
-        from paperless_firefly.services.ai_queue import AIJobQueueService
         from paperless_firefly.review.web.models import UserProfile
+        from paperless_firefly.services.ai_queue import AIJobQueueService
+        from paperless_firefly.spark_ai.service import SparkAIService
+        from paperless_firefly.state_store.sqlite_store import StateStore
 
         # Load config
         config = _load_config()
         if not config:
-            logger.debug("No config available for AI queue processing")
+            logger.warning("No config available for AI queue processing - check config.yaml")
             return
 
         # Check if LLM is configured
         if not hasattr(config, "llm") or not config.llm or not config.llm.enabled:
-            logger.debug("LLM not enabled in config")
+            logger.info("LLM not enabled in config - skipping AI queue processing")
             return
 
         # Get user settings
@@ -168,6 +198,7 @@ def _process_ai_queue_batch():
             profile = UserProfile.objects.first()
             if profile:
                 batch_size = profile.ai_schedule_batch_size
+                logger.debug(f"Using batch size from profile: {batch_size}")
         except Exception:
             pass
 
@@ -189,7 +220,7 @@ def _process_ai_queue_batch():
         jobs = state_store.get_next_ai_jobs(limit=batch_size, check_schedule=False)
 
         if not jobs:
-            logger.debug("No pending AI jobs in queue")
+            logger.info("No pending AI jobs in queue")
             return
 
         logger.info(f"Processing {len(jobs)} AI job(s) from queue")
@@ -215,14 +246,14 @@ def _process_ai_queue_batch():
                     logger.warning(f"AI job #{job_id} failed")
 
             except Exception as e:
-                logger.error(f"Error processing AI job #{job_id}: {e}")
+                logger.error(f"Error processing AI job #{job_id}: {e}", exc_info=True)
                 try:
                     state_store.fail_ai_job(job_id, str(e), can_retry=True)
                 except Exception:
                     pass
 
     except Exception as e:
-        logger.error(f"Error in AI queue batch processing: {e}")
+        logger.error(f"Error in AI queue batch processing: {e}", exc_info=True)
 
 
 def _load_config():
@@ -233,13 +264,15 @@ def _load_config():
         # Try default locations
         for path in [Path("config.yaml"), Path("/app/config/config.yaml")]:
             if path.exists():
+                logger.debug(f"Loading config from {path}")
                 return load_config(path)
 
         # Fall back to environment-based config
+        logger.debug("Attempting to load config from environment")
         return Config.from_env()
 
     except Exception as e:
-        logger.debug(f"Could not load config: {e}")
+        logger.warning(f"Could not load config: {e}")
         return None
 
 

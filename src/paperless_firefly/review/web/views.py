@@ -21,7 +21,7 @@ from django.views.decorators.http import require_http_methods, require_POST
 from ...firefly_client import FireflyClient
 from ...schemas.dedupe import generate_external_id
 from ...schemas.finance_extraction import FinanceExtraction
-from ...state_store import ExtractionRecord, StateStore
+from ...state_store import StateStore
 from ..workflow import ReviewDecision
 
 logger = logging.getLogger(__name__)
@@ -674,6 +674,7 @@ def _is_llm_enabled_for_user(request: HttpRequest) -> bool:
     Returns True if any of these enables LLM.
     """
     import os
+
     from .models import UserProfile
 
     # Check environment variable first (takes precedence)
@@ -1267,7 +1268,7 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
                         conn = store._get_connection()
                         try:
                             ff_row = conn.execute(
-                                """SELECT firefly_id, amount, date, description, 
+                                """SELECT firefly_id, amount, date, description,
                                           source_account, destination_account, category_name
                                    FROM firefly_cache WHERE firefly_id = ?""",
                                 (firefly_id,),
@@ -2704,7 +2705,7 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
         router = ExtractorRouter()
 
         # Get configuration
-        from ...config import Config, load_config
+        from ...config import load_config
 
         config = load_config(_get_config_path())
 
@@ -3393,17 +3394,17 @@ def sync_firefly_transactions(request: HttpRequest) -> HttpResponse:
             synced = 0
             need_external_id: list[tuple[int, str]] = []  # (firefly_id, computed_external_id)
             current_firefly_ids: set[int] = set()
-            
+
             for tx in transactions:
                 current_firefly_ids.add(tx.id)
-                
+
                 # Use the effective external_id (stored or computed)
                 effective_external_id = tx.effective_external_id
-                
+
                 # Track transactions that need external_id assignment
                 if not tx.external_id and tx.computed_external_id:
                     need_external_id.append((tx.id, tx.computed_external_id))
-                
+
                 store.upsert_firefly_cache(
                     firefly_id=tx.id,
                     type_=tx.type,
@@ -4040,10 +4041,111 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
         "firefly_matched": len([r for r in firefly_records if r.get("is_linked")]),
     }
 
+    # ---- Import Queue Data (merged from import_queue view) ----
+    ready_items = []
+    failed_items = []
+    recent_imports = []
+
+    conn = store._get_connection()
+    try:
+        # Get extractions ready for import: must be linked to Firefly or marked as orphan
+        extraction_rows = conn.execute(
+            """
+            SELECT e.*, i.status as import_status, i.error_message as import_error, l.firefly_id, l.link_type
+            FROM extractions e
+            LEFT JOIN imports i ON e.external_id = i.external_id
+            LEFT JOIN linkage l ON e.id = l.extraction_id
+            WHERE (i.id IS NULL OR i.status = 'FAILED')
+            AND (e.review_state = 'AUTO' OR e.review_decision IN ('ACCEPTED', 'EDITED', 'ORPHAN_CONFIRMED'))
+            AND (
+                (l.firefly_id IS NOT NULL AND l.link_type = 'LINKED')
+                OR (l.link_type = 'ORPHAN')
+            )
+            ORDER BY e.created_at DESC
+        """
+        ).fetchall()
+
+        for row in extraction_rows:
+            try:
+                data = json.loads(row["extraction_json"])
+                extraction = FinanceExtraction.from_dict(data)
+                item = {
+                    "id": row["id"],
+                    "document_id": row["document_id"],
+                    "external_id": row["external_id"],
+                    "title": extraction.paperless_title,
+                    "amount": extraction.proposal.amount,
+                    "currency": extraction.proposal.currency,
+                    "date": extraction.proposal.date,
+                    "vendor": extraction.proposal.destination_account,
+                    "source_account": extraction.proposal.source_account or "Default",
+                    "review_state": row["review_state"],
+                    "review_decision": row["review_decision"],
+                    "link_type": row["link_type"],
+                    "firefly_id": row["firefly_id"],
+                }
+                # Only show as ready if linked or orphan
+                if row["link_type"] == "ORPHAN":
+                    item["orphaned"] = True
+                elif row["link_type"] == "LINKED" and row["firefly_id"]:
+                    item["linked"] = True
+                else:
+                    continue  # Skip if not linked or orphan
+                if row["import_status"] == "FAILED":
+                    item["error_message"] = row["import_error"]
+                    failed_items.append(item)
+                else:
+                    ready_items.append(item)
+            except Exception as e:
+                logger.error(f"Error parsing extraction {row['id']}: {e}")
+
+        # Get recent SUCCESSFUL imports only (for history display)
+        import_rows = conn.execute(
+            """
+            SELECT i.*, e.extraction_json
+            FROM imports i
+            LEFT JOIN extractions e ON i.external_id = e.external_id
+            WHERE i.status = 'IMPORTED'
+            ORDER BY i.created_at DESC LIMIT 10
+        """
+        ).fetchall()
+
+        for irow in import_rows:
+            # Try to get title from extraction
+            title = None
+            if irow["extraction_json"]:
+                try:
+                    ext_data = json.loads(irow["extraction_json"])
+                    title = ext_data.get("paperless_title")
+                except (json.JSONDecodeError, KeyError, TypeError):
+                    pass
+
+            recent_imports.append(
+                {
+                    "external_id": irow["external_id"],
+                    "document_id": irow["document_id"],
+                    "title": title,
+                    "status": irow["status"],
+                    "firefly_id": irow["firefly_id"],
+                    "error_message": irow["error_message"],
+                    "created_at": irow["created_at"],
+                }
+            )
+    except Exception as e:
+        logger.error(f"Error loading import queue data: {e}")
+    finally:
+        conn.close()
+
     context = {
         "paperless_records": paperless_records,
         "firefly_records": firefly_records,
         "stats": stats,
+        # Import queue data
+        "ready_items": ready_items,
+        "failed_items": failed_items,
+        "recent_imports": recent_imports,
+        "import_status": _import_status,
+        "debug_mode": _is_debug_mode(),
         **_get_external_urls(request.user if hasattr(request, "user") else None),
     }
 
@@ -4816,9 +4918,10 @@ def api_suggest_splits(request: HttpRequest, document_id: int) -> JsonResponse:
         JSON response with split suggestions.
     """
     from pathlib import Path
+
     from ...config import load_config
-    from ...spark_ai import SparkAIService
     from ...firefly_client import FireflyClient
+    from ...spark_ai import SparkAIService
 
     store = _get_store()
 
@@ -4960,7 +5063,8 @@ def api_chat(request: HttpRequest) -> JsonResponse:
         JSON response with chatbot answer.
     """
     from pathlib import Path
-    from ...config import load_config, LLMConfig
+
+    from ...config import load_config
     from ...spark_ai import SparkAIService
     from .models import UserProfile
 
@@ -5083,7 +5187,7 @@ def _run_ai_job_now(request: HttpRequest, store: StateStore, job: dict) -> bool:
 
     job_id = job["id"]
     document_id = job["document_id"]
-    extraction_id = job.get("extraction_id")
+    # Note: extraction_id is stored in job but we fetch extraction by document_id instead
 
     # Check if AI is opted out for this document
     try:
@@ -5344,6 +5448,277 @@ def ai_queue_list(request: HttpRequest) -> HttpResponse:
         **_get_external_urls(request.user if hasattr(request, "user") else None),
     }
     return render(request, "review/ai_queue.html", context)
+
+
+# ============================================================================
+# Processing History View (Unified Archive + Documents + AI Queue + Audit)
+# ============================================================================
+
+
+@login_required
+def processing_history(request: HttpRequest) -> HttpResponse:
+    """Unified Processing History combining Archive, Documents, AI Queue, and Audit.
+
+    Provides a tabbed interface for all historical and processing views:
+    - Archive: Imported, rejected, failed extractions
+    - Documents: Paperless document browser with list/unlist
+    - AI Queue: AI job queue with status and actions
+    - Audit Trail: Full interpretation run history
+    """
+    store = _get_store()
+
+    # Get active tab from query params
+    active_tab = request.GET.get("tab", "archive")
+
+    # ---- Archive Data ----
+    archive_items = []
+    if active_tab == "archive":
+        processed = store.get_processed_extractions()
+        for row in processed:
+            try:
+                data = json.loads(row["extraction_json"])
+                extraction = FinanceExtraction.from_dict(data)
+
+                # Determine status for display
+                status = "unknown"
+                status_class = "secondary"
+                if row["import_status"] == "IMPORTED":
+                    status = "Imported"
+                    status_class = "success"
+                elif row["import_status"] == "FAILED":
+                    status = "Failed"
+                    status_class = "danger"
+                elif row["review_decision"] == "REJECTED":
+                    status = "Rejected"
+                    status_class = "warning"
+                elif row["review_decision"] in ("ACCEPTED", "EDITED"):
+                    status = "Approved (pending import)"
+                    status_class = "info"
+
+                archive_items.append(
+                    {
+                        "id": row["id"],
+                        "document_id": row["document_id"],
+                        "external_id": row["external_id"],
+                        "title": extraction.paperless_title,
+                        "amount": extraction.proposal.amount,
+                        "currency": extraction.proposal.currency,
+                        "date": extraction.proposal.date,
+                        "vendor": extraction.proposal.destination_account,
+                        "status": status,
+                        "status_class": status_class,
+                        "review_decision": row["review_decision"],
+                        "import_status": row["import_status"],
+                        "firefly_id": row["firefly_id"],
+                        "import_error": row["import_error"],
+                        "reviewed_at": row["reviewed_at"],
+                        "created_at": row["created_at"],
+                    }
+                )
+            except Exception as e:
+                logger.error(f"Error parsing extraction {row['id']}: {e}")
+
+    # ---- Documents Data ----
+    documents = []
+    documents_total = 0
+    documents_page = 1
+    documents_total_pages = 1
+    filter_tag = getattr(settings, "PAPERLESS_FILTER_TAG", "finance/inbox")
+    doc_search = ""
+    show_listed = "all"
+
+    if active_tab == "documents":
+        session = _get_paperless_session(request)
+        doc_search = request.GET.get("doc_search", "")
+        show_listed = request.GET.get("listed", "all")
+        documents_page = int(request.GET.get("doc_page", 1))
+        page_size = 25
+        filter_tag_id = None
+
+        try:
+            # First, get/create the filter tag ID
+            tags_resp = session.get(f"{settings.PAPERLESS_BASE_URL}/api/tags/")
+            if tags_resp.ok:
+                tags_data = tags_resp.json()
+                for tag in tags_data.get("results", []):
+                    if tag.get("name") == filter_tag:
+                        filter_tag_id = tag.get("id")
+                        break
+
+            # Build query params
+            params = {
+                "page": documents_page,
+                "page_size": page_size,
+                "ordering": "-created",
+            }
+
+            if doc_search:
+                params["query"] = doc_search
+
+            if show_listed == "listed" and filter_tag_id:
+                params["tags__id__all"] = filter_tag_id
+            elif show_listed == "unlisted" and filter_tag_id:
+                params["tags__id__none"] = filter_tag_id
+
+            resp = session.get(f"{settings.PAPERLESS_BASE_URL}/api/documents/", params=params)
+            if resp.ok:
+                data = resp.json()
+                documents_total = data.get("count", 0)
+                documents_total_pages = (documents_total + page_size - 1) // page_size
+
+                for doc in data.get("results", []):
+                    doc_tags = doc.get("tags", [])
+                    is_listed = filter_tag_id in doc_tags if filter_tag_id else False
+
+                    documents.append(
+                        {
+                            "id": doc.get("id"),
+                            "title": doc.get("title"),
+                            "created": doc.get("created"),
+                            "is_listed": is_listed,
+                        }
+                    )
+        except Exception as e:
+            logger.error(f"Error fetching documents: {e}")
+
+    # ---- AI Queue Data ----
+    ai_jobs = []
+    ai_stats = {"pending": 0, "processing": 0, "completed": 0, "failed": 0, "total": 0}
+    ai_status_filter = None
+    ai_page = 1
+    ai_is_processing = False
+
+    if active_tab == "ai_queue":
+        ai_status_filter = request.GET.get("ai_status", None)
+        ai_page = int(request.GET.get("ai_page", 1))
+        per_page = 50
+        offset = (ai_page - 1) * per_page
+
+        ai_jobs = store.get_ai_jobs_list(
+            status=ai_status_filter,
+            limit=per_page,
+            offset=offset,
+        )
+
+        # Parse datetime strings
+        for job in ai_jobs:
+            for date_field in ["scheduled_at", "started_at", "completed_at"]:
+                if job.get(date_field):
+                    try:
+                        from datetime import datetime as dt
+
+                        dt_str = job[date_field]
+                        for fmt in [
+                            "%Y-%m-%dT%H:%M:%S.%f",
+                            "%Y-%m-%dT%H:%M:%S",
+                            "%Y-%m-%d %H:%M:%S.%f",
+                            "%Y-%m-%d %H:%M:%S",
+                        ]:
+                            try:
+                                job[date_field] = dt.strptime(dt_str[:26], fmt)
+                                break
+                            except ValueError:
+                                continue
+                    except Exception:
+                        pass
+
+        ai_stats = store.get_ai_queue_stats()
+        ai_is_processing = ai_stats.get("processing", 0) > 0
+
+    # ---- Audit Trail Data ----
+    audit_runs = []
+    audit_total_count = 0
+    audit_page = 1
+    audit_total_pages = 1
+    audit_filter_document = ""
+    audit_filter_firefly = ""
+    audit_filter_source = ""
+
+    if active_tab == "audit":
+        audit_page = int(request.GET.get("audit_page", 1))
+        page_size = 50
+
+        audit_filter_document = request.GET.get("audit_document_id", "")
+        audit_filter_firefly = request.GET.get("audit_firefly_id", "")
+        audit_filter_source = request.GET.get("audit_source", "")
+
+        conn = store._get_connection()
+        try:
+            query = "SELECT * FROM interpretation_runs WHERE 1=1"
+            params = []
+
+            if audit_filter_document:
+                query += " AND document_id = ?"
+                params.append(int(audit_filter_document))
+
+            if audit_filter_firefly:
+                query += " AND firefly_id = ?"
+                params.append(int(audit_filter_firefly))
+
+            if audit_filter_source:
+                query += " AND decision_source = ?"
+                params.append(audit_filter_source)
+
+            count_query = query.replace("SELECT *", "SELECT COUNT(*)")
+            audit_total_count = conn.execute(count_query, params).fetchone()[0]
+
+            query += " ORDER BY run_timestamp DESC LIMIT ? OFFSET ?"
+            params.extend([page_size, (audit_page - 1) * page_size])
+
+            rows = conn.execute(query, params).fetchall()
+            audit_runs = [dict(row) for row in rows]
+
+            audit_total_pages = (audit_total_count + page_size - 1) // page_size
+        finally:
+            conn.close()
+
+    # Count stats for tab badges
+    archive_count = len(archive_items) if active_tab == "archive" else None
+    if archive_count is None:
+        try:
+            processed = store.get_processed_extractions()
+            archive_count = len(processed)
+        except Exception:
+            archive_count = 0
+
+    context = {
+        "active_tab": active_tab,
+        # Archive
+        "archive_items": archive_items,
+        "archive_count": archive_count,
+        # Documents
+        "documents": documents,
+        "documents_total": documents_total,
+        "documents_page": documents_page,
+        "documents_total_pages": documents_total_pages,
+        "documents_has_prev": documents_page > 1,
+        "documents_has_next": documents_page < documents_total_pages,
+        "filter_tag": filter_tag,
+        "doc_search": doc_search,
+        "show_listed": show_listed,
+        # AI Queue
+        "ai_jobs": ai_jobs,
+        "ai_stats": ai_stats,
+        "ai_status_filter": ai_status_filter,
+        "ai_page": ai_page,
+        "ai_has_next": len(ai_jobs) == 50,
+        "ai_has_prev": ai_page > 1,
+        "ai_is_processing": ai_is_processing,
+        # Audit Trail
+        "audit_runs": audit_runs,
+        "audit_page": audit_page,
+        "audit_total_pages": audit_total_pages,
+        "audit_total_count": audit_total_count,
+        "audit_has_prev": audit_page > 1,
+        "audit_has_next": audit_page < audit_total_pages,
+        "audit_filter_document": audit_filter_document,
+        "audit_filter_firefly": audit_filter_firefly,
+        "audit_filter_source": audit_filter_source,
+        # General
+        "debug_mode": _is_debug_mode(),
+        **_get_external_urls(request.user if hasattr(request, "user") else None),
+    }
+    return render(request, "review/processing_history.html", context)
 
 
 @login_required

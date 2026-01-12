@@ -620,10 +620,210 @@
                 {% csrf_token %}
                 <button type="submit" class="btn btn-primary">🔗 Run Auto-Match</button>
             </form>
-            <a href="{% url 'import_queue' %}" class="btn btn-success">📤 Import Queue</a>
         </div>
     </div>
 </div>
+
+<!-- ==================== IMPORT QUEUE SECTION ==================== -->
+
+{% if import_status.running %}
+<div class="status-banner running" style="background: #dbeafe; border: 1px solid #93c5fd; border-radius: 0.5rem; padding: 1rem; margin: 1.5rem 0; display: flex; align-items: center; gap: 1rem;">
+    <span style="font-size: 1.25rem;">🔄</span>
+    <div>
+        <strong style="color: #1e40af;">Import in progress...</strong>
+        <div style="color: #3b82f6; font-size: 0.875rem;">{{ import_status.progress }}</div>
+    </div>
+</div>
+{% elif import_status.error %}
+<div class="status-banner error" style="background: #fee2e2; border: 1px solid #fecaca; border-radius: 0.5rem; padding: 1rem; margin: 1.5rem 0; display: flex; align-items: center; gap: 1rem;">
+    <span style="font-size: 1.25rem;">❌</span>
+    <div style="flex: 1;">
+        <strong style="color: #991b1b;">Import failed</strong>
+        <div style="color: #dc2626; font-size: 0.875rem;">{{ import_status.error }}</div>
+        {% if debug_mode and import_status.traceback %}
+        <details style="margin-top: 0.5rem;">
+            <summary style="cursor: pointer; font-size: 0.85rem; color: #dc2626;">🔍 Show detailed traceback</summary>
+            <pre style="margin-top: 0.5rem; padding: 0.75rem; background: #fef2f2; border-radius: 0.25rem; font-size: 0.75rem; overflow-x: auto; white-space: pre-wrap; word-wrap: break-word;">{{ import_status.traceback }}</pre>
+        </details>
+        {% endif %}
+    </div>
+</div>
+{% elif import_status.result %}
+<div class="status-banner success" style="background: #d1fae5; border: 1px solid #a7f3d0; border-radius: 0.5rem; padding: 1rem; margin: 1.5rem 0; display: flex; align-items: center; gap: 1rem;">
+    <span style="font-size: 1.25rem;">✅</span>
+    <div style="color: #065f46;">{{ import_status.result }}</div>
+</div>
+{% endif %}
+
+{% if failed_items %}
+<div class="card" style="margin-bottom: 1.5rem; border-left: 4px solid #dc2626;">
+    <div class="card-header" style="background: #fef2f2;">
+        <h2 style="color: #991b1b;">⚠️ Failed Imports ({{ failed_items|length }})</h2>
+    </div>
+    
+    <table style="width: 100%; border-collapse: collapse;">
+        <thead>
+            <tr style="background: #fef2f2;">
+                <th style="padding: 0.75rem; text-align: left; font-size: 0.75rem; font-weight: 600;">Document</th>
+                <th style="padding: 0.75rem; text-align: left; font-size: 0.75rem; font-weight: 600;">Amount</th>
+                <th style="padding: 0.75rem; text-align: left; font-size: 0.75rem; font-weight: 600;">Date</th>
+                <th style="padding: 0.75rem; text-align: left; font-size: 0.75rem; font-weight: 600;">Error</th>
+                <th style="padding: 0.75rem; text-align: left; font-size: 0.75rem; font-weight: 600;">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in failed_items %}
+            <tr style="border-bottom: 1px solid #fee2e2;">
+                <td style="padding: 0.75rem;">
+                    <a href="{% url 'unified_review_detail' 'paperless' item.document_id %}" style="color: #2563eb; text-decoration: none;">{{ item.title|truncatechars:40 }}</a>
+                </td>
+                <td style="padding: 0.75rem; font-family: monospace; font-size: 0.875rem;">{{ item.amount }} {{ item.currency }}</td>
+                <td style="padding: 0.75rem; font-size: 0.875rem;">{{ item.date }}</td>
+                <td style="padding: 0.75rem; max-width: 300px; overflow: hidden; text-overflow: ellipsis; color: #991b1b; font-size: 0.75rem;">
+                    {{ item.error_message|default:"Unknown error" }}
+                </td>
+                <td style="padding: 0.75rem;">
+                    <form method="post" action="{% url 'dismiss_import' item.external_id %}" style="display: inline;">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-sm" style="background: #fee2e2; color: #991b1b; padding: 0.25rem 0.5rem; border-radius: 0.25rem; border: 1px solid #fecaca; cursor: pointer; font-size: 0.75rem;" title="Reject this extraction and remove from retry queue">
+                            ✕ Dismiss
+                        </button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div style="padding: 0.75rem 1rem; background: #fef2f2; font-size: 0.875rem; color: #7f1d1d;">
+        💡 Tip: These items will be retried when you click "Import All". Click "Dismiss" to reject and skip permanently.
+    </div>
+</div>
+{% endif %}
+
+<div class="card">
+    <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+        <h2>📤 Import Queue ({{ ready_items|length }})</h2>
+        <form method="post" action="{% url 'run_import' %}" style="display: inline;">
+            {% csrf_token %}
+            {% if ready_items or failed_items %}
+            <button type="submit" class="btn btn-success" {% if import_status.running %}disabled{% endif %}>
+                {% if import_status.running %}
+                ⏳ Importing...
+                {% else %}
+                Import All to Firefly ({{ ready_items|length|add:failed_items|length }}) →
+                {% endif %}
+            </button>
+            {% else %}
+            <button type="button" class="btn btn-success" disabled style="opacity: 0.5; cursor: not-allowed;">
+                Import All to Firefly →
+            </button>
+            {% endif %}
+        </form>
+    </div>
+    
+    {% if ready_items %}
+    <table style="width: 100%; border-collapse: collapse;">
+        <thead>
+            <tr style="background: var(--gray-50);">
+                <th style="padding: 0.75rem; text-align: left; font-size: 0.75rem; font-weight: 600;">Document</th>
+                <th style="padding: 0.75rem; text-align: left; font-size: 0.75rem; font-weight: 600;">Amount</th>
+                <th style="padding: 0.75rem; text-align: left; font-size: 0.75rem; font-weight: 600;">Date</th>
+                <th style="padding: 0.75rem; text-align: left; font-size: 0.75rem; font-weight: 600;">Vendor</th>
+                <th style="padding: 0.75rem; text-align: left; font-size: 0.75rem; font-weight: 600;">Source</th>
+                <th style="padding: 0.75rem; text-align: left; font-size: 0.75rem; font-weight: 600;">Status</th>
+                <th style="padding: 0.75rem; text-align: left; font-size: 0.75rem; font-weight: 600;">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in ready_items %}
+            <tr style="border-bottom: 1px solid var(--gray-100);">
+                <td style="padding: 0.75rem;">
+                    <a href="{% url 'unified_review_detail' 'paperless' item.document_id %}" style="color: #2563eb; text-decoration: none;">{{ item.title|truncatechars:40 }}</a>
+                </td>
+                <td style="padding: 0.75rem; font-family: monospace; font-size: 0.875rem;">{{ item.amount }} {{ item.currency }}</td>
+                <td style="padding: 0.75rem; font-size: 0.875rem;">{{ item.date }}</td>
+                <td style="padding: 0.75rem; font-size: 0.875rem;">{{ item.vendor|default:"-" }}</td>
+                <td style="padding: 0.75rem; font-size: 0.875rem;">{{ item.source_account }}</td>
+                <td style="padding: 0.75rem;">
+                    {% if item.review_state == 'AUTO' %}
+                    <span style="display: inline-block; padding: 0.125rem 0.5rem; border-radius: 9999px; font-size: 0.625rem; font-weight: 500; background: #dbeafe; color: #1e40af;">AUTO</span>
+                    {% elif item.review_decision == 'ACCEPTED' %}
+                    <span style="display: inline-block; padding: 0.125rem 0.5rem; border-radius: 9999px; font-size: 0.625rem; font-weight: 500; background: #dcfce7; color: #166534;">Accepted</span>
+                    {% elif item.review_decision == 'EDITED' %}
+                    <span style="display: inline-block; padding: 0.125rem 0.5rem; border-radius: 9999px; font-size: 0.625rem; font-weight: 500; background: #fef3c7; color: #92400e;">Edited</span>
+                    {% endif %}
+                </td>
+                <td style="padding: 0.75rem;">
+                    {% if item.review_decision %}
+                    <form method="post" action="{% url 'reset_extraction' item.id %}" style="display: inline;">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-sm btn-outline" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;" title="Reset to re-review this extraction" onclick="return confirm('Reset this extraction to re-review it?')">
+                            🔄 Reset
+                        </button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div style="text-align: center; padding: 2rem; color: var(--gray-500);">
+        <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">📭</div>
+        <div>No transactions ready for import</div>
+        <p style="font-size: 0.875rem; margin-top: 0.5rem;">Review and link documents above to queue them for import</p>
+    </div>
+    {% endif %}
+</div>
+
+{% if recent_imports %}
+<div class="card" style="margin-top: 1.5rem;">
+    <div class="card-header">
+        <h2>✅ Recently Imported</h2>
+    </div>
+    <table style="width: 100%; border-collapse: collapse;">
+        <thead>
+            <tr style="background: var(--gray-50);">
+                <th style="padding: 0.75rem; text-align: left; font-size: 0.75rem; font-weight: 600;">Document</th>
+                <th style="padding: 0.75rem; text-align: left; font-size: 0.75rem; font-weight: 600;">Firefly Transaction</th>
+                <th style="padding: 0.75rem; text-align: left; font-size: 0.75rem; font-weight: 600;">Imported At</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for imp in recent_imports %}
+            <tr style="border-bottom: 1px solid var(--gray-100);">
+                <td style="padding: 0.75rem;">
+                    <a href="{{ paperless_url }}/documents/{{ imp.document_id }}" target="_blank" title="Open in Paperless" style="color: #2563eb; text-decoration: none;">
+                        📄 {% if imp.title %}{{ imp.title|truncatechars:35 }}{% else %}Doc #{{ imp.document_id }}{% endif %}
+                    </a>
+                </td>
+                <td style="padding: 0.75rem;">
+                    {% if imp.firefly_id %}
+                    <a href="{{ firefly_url }}/transactions/show/{{ imp.firefly_id }}" target="_blank" style="color: #2563eb; text-decoration: none;">
+                        💰 View Transaction #{{ imp.firefly_id }}
+                    </a>
+                    {% else %}
+                    -
+                    {% endif %}
+                </td>
+                <td style="padding: 0.75rem; font-size: 0.875rem; color: var(--gray-600);">{{ imp.created_at|slice:":19" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{% if import_status.running %}
+<script>
+// Auto-refresh while import is running
+setTimeout(function() {
+    window.location.reload();
+}, 3000);
+</script>
+{% endif %}
+
+<!-- ==================== END IMPORT QUEUE SECTION ==================== -->
 
 <script>
 // Close dropdowns when clicking outside
