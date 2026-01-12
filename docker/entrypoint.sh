@@ -216,14 +216,14 @@ run_server() {
         log_info "Using Gunicorn (production WSGI server)"
         log_info "  Workers: ${GUNICORN_WORKERS:-4}"
         log_info "  Threads: ${GUNICORN_THREADS:-2}"
-        log_info "  Timeout: ${GUNICORN_TIMEOUT:-120}s"
+        log_info "  Timeout: ${GUNICORN_TIMEOUT:-600}s"
         
         # Run with gunicorn for production
         exec gunicorn \
             --bind "${HOST}:${PORT}" \
             --workers "${GUNICORN_WORKERS:-4}" \
             --threads "${GUNICORN_THREADS:-2}" \
-            --timeout "${GUNICORN_TIMEOUT:-120}" \
+            --timeout "${GUNICORN_TIMEOUT:-600}" \
             --access-logfile - \
             --error-logfile - \
             --log-level info \

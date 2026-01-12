@@ -1563,12 +1563,14 @@ function rerunInterpretation() {
                     throw new Error(data.error || `Server error: ${response.status}`);
                 });
             }
-            // Server returned HTML error page (timeout, 500, etc.)
-            if (response.status === 524 || response.status === 504 || response.status === 502) {
-                throw new Error(`Server gateway timeout (${response.status}). The AI request is taking too long. Try increasing the timeout in Settings or try again later.`);
-            } else if (response.status === 500) {
+            // Handle actual server errors (not gateway timeouts - those are still processing)
+            if (response.status === 500) {
                 throw new Error('Server error occurred. Check server logs for details.');
+            } else if (response.status >= 400 && response.status < 500) {
+                throw new Error(`Client error: ${response.status} ${response.statusText}`);
             } else {
+                // For 502/504/524, don't immediately fail - the backend might still be processing
+                // The AbortController timeout will handle actual timeouts
                 throw new Error(`Server error: ${response.status} ${response.statusText}`);
             }
         }
