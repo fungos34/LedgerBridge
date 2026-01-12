@@ -5213,12 +5213,16 @@ def ai_queue_action(request: HttpRequest) -> JsonResponse:
 @login_required
 @require_POST
 def ai_queue_schedule(request: HttpRequest) -> JsonResponse:
-    """Manually schedule an AI job for a document."""
+    """Manually schedule an AI job for a document.
+    
+    Supports run_immediately=true to execute the job synchronously.
+    """
     store = _get_store()
     
     document_id = request.POST.get("document_id")
     extraction_id = request.POST.get("extraction_id")
     priority = int(request.POST.get("priority", 0))
+    run_immediately = request.POST.get("run_immediately", "").lower() in ("true", "1", "yes")
     
     if not document_id:
         return JsonResponse({
@@ -5230,6 +5234,19 @@ def ai_queue_schedule(request: HttpRequest) -> JsonResponse:
         document_id = int(document_id)
         extraction_id = int(extraction_id) if extraction_id else None
         
+        # Check if there's an existing pending/processing job
+        existing_job = store.get_ai_job_by_document(document_id, active_only=True)
+        if existing_job:
+            # Cancel existing pending job so we can create a new one
+            if existing_job["status"] == "PENDING":
+                store.cancel_ai_job(existing_job["id"])
+            elif existing_job["status"] == "PROCESSING":
+                return JsonResponse({
+                    "success": False,
+                    "error": "A job is already processing for this document",
+                    "status": "PROCESSING"
+                }, status=409)
+        
         job_id = store.schedule_ai_job(
             document_id=document_id,
             extraction_id=extraction_id,
@@ -5238,16 +5255,34 @@ def ai_queue_schedule(request: HttpRequest) -> JsonResponse:
         )
         
         if job_id:
+            result_status = "PENDING"
+            result_message = f"AI job #{job_id} scheduled for document {document_id}"
+            
+            # If run_immediately, execute the job now
+            if run_immediately:
+                job = store.get_ai_job(job_id)
+                if job:
+                    success = _run_ai_job_now(request, store, job)
+                    if success:
+                        result_status = "COMPLETED"
+                        result_message = f"AI job #{job_id} completed successfully"
+                    else:
+                        # Get the updated job status
+                        updated_job = store.get_ai_job(job_id)
+                        result_status = updated_job.get("status", "FAILED") if updated_job else "FAILED"
+                        result_message = updated_job.get("error_message", "Job failed") if updated_job else "Job failed"
+            
             return JsonResponse({
                 "success": True,
                 "job_id": job_id,
-                "message": f"AI job #{job_id} scheduled for document {document_id}"
+                "status": result_status,
+                "message": result_message
             })
         else:
             return JsonResponse({
                 "success": False,
-                "error": "Job already exists for this document"
-            }, status=409)
+                "error": "Could not schedule job"
+            }, status=500)
             
     except Exception as e:
         logger.exception(f"Error scheduling AI job: {e}")

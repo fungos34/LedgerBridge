@@ -1848,7 +1848,7 @@ function toggleLlmOptOut(enableAi) {
     });
 }
 
-// Re-run interpretation with progress tracking
+// Re-run interpretation - schedules job to AI queue
 const LLM_TIMEOUT_SECONDS = {{ llm_timeout_seconds|default:60 }};
 let aiProgressInterval = null;
 let aiAbortController = null;
@@ -1859,123 +1859,89 @@ function rerunInterpretation() {
     return;
     {% endif %}
     
-    if (!confirm('Re-run AI interpretation for this document? The AI will analyze all fields and provide suggestions.')) {
+    if (!confirm('Schedule AI interpretation for this document?\n\nThe AI job will be added to the queue and processed in the background. Refresh the page to see results when complete.')) {
         return;
     }
     
     const btn = event.target;
     const originalText = btn.textContent;
-    btn.textContent = '⏳ Processing...';
+    btn.textContent = '⏳ Scheduling...';
     btn.disabled = true;
-    
-    // Show progress modal
-    showAIProgressModal(LLM_TIMEOUT_SECONDS);
-    
-    // Create abort controller for timeout
-    aiAbortController = new AbortController();
-    const timeoutId = setTimeout(() => {
-        aiAbortController.abort();
-    }, (LLM_TIMEOUT_SECONDS + 5) * 1000); // Extra 5 seconds for network
     
     const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
     
-    fetch('{% url "rerun_interpretation" record.extraction_id|default:0 %}', {
+    // Schedule to AI queue instead of running synchronously
+    fetch('{% url "ai_queue_schedule" %}', {
         method: 'POST',
         headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
             'X-CSRFToken': csrfToken,
-            'X-Requested-With': 'XMLHttpRequest',
-            'Accept': 'application/json'
+            'X-Requested-With': 'XMLHttpRequest'
         },
-        signal: aiAbortController.signal
+        body: new URLSearchParams({
+            'document_id': '{{ record.document_id }}',
+            'priority': '10',  // Higher priority for user-triggered
+            'run_immediately': 'true'
+        })
     })
-    .then(response => {
-        clearTimeout(timeoutId);
-        hideAIProgressModal();
-        
-        // Check if response is OK first
-        if (!response.ok) {
-            // Try to get error from JSON body if possible
-            const contentType = response.headers.get('content-type');
-            if (contentType && contentType.includes('application/json')) {
-                return response.json().then(data => {
-                    throw new Error(data.error || `Server error: ${response.status}`);
-                });
-            }
-            // Handle actual server errors (not gateway timeouts - those are still processing)
-            if (response.status === 500) {
-                throw new Error('Server error occurred. Check server logs for details.');
-            } else if (response.status >= 400 && response.status < 500) {
-                throw new Error(`Client error: ${response.status} ${response.statusText}`);
-            } else {
-                // For 502/504/524, don't immediately fail - the backend might still be processing
-                // The AbortController timeout will handle actual timeouts
-                throw new Error(`Server error: ${response.status} ${response.statusText}`);
-            }
-        }
-        
-        const contentType = response.headers.get('content-type');
-        if (!contentType || !contentType.includes('application/json')) {
-            // This shouldn't happen for successful responses but handle it gracefully
-            throw new Error('Server returned unexpected response format. The server may be overloaded. Please try again.');
-        }
-        return response.json();
-    })
+    .then(response => response.json())
     .then(data => {
         btn.textContent = originalText;
         btn.disabled = false;
         
         if (data.success) {
-            // Apply suggestions dynamically to form fields
-            if (data.suggestions) {
-                applySuggestionsToForm(data.suggestions);
-                showSuggestionsSummary(data.suggestions, data.message);
-            } else if (data.suggestion) {
-                // Backward compatibility: single category suggestion
-                applySuggestionsToForm({
-                    category: {
-                        value: data.suggestion.category,
-                        confidence: data.suggestion.confidence,
-                        reason: ''
-                    }
-                });
-                showSuggestionsSummary({category: data.suggestion}, data.message);
-            } else {
-                showNotification(
-                    'AI Analysis Complete',
-                    data.message || 'AI completed but returned no high-confidence suggestions.',
-                    'warning'
-                );
+            // Update the AI job status badge
+            updateAiJobStatusBadge(data.status || 'PENDING');
+            
+            showNotification(
+                '🤖 AI Job Scheduled',
+                data.message || 'AI interpretation has been scheduled. Refresh the page to see results when complete.',
+                'success'
+            );
+            
+            // If run_immediately was successful and job completed, reload to show results
+            if (data.status === 'COMPLETED') {
+                setTimeout(() => {
+                    location.reload();
+                }, 1500);
             }
         } else {
             showNotification(
-                'AI Interpretation Failed',
-                data.error || 'Unknown error occurred.',
+                'Scheduling Failed',
+                data.error || 'Could not schedule AI job. Please try again.',
                 'error'
             );
         }
     })
     .catch(error => {
-        clearTimeout(timeoutId);
-        hideAIProgressModal();
         btn.textContent = originalText;
         btn.disabled = false;
-        
-        if (error.name === 'AbortError') {
-            showNotification(
-                'AI Request Timed Out',
-                `The AI request took longer than ${LLM_TIMEOUT_SECONDS} seconds. The server may still be processing. Try again or check Settings to increase the timeout.`,
-                'error'
-            );
-        } else {
-            showNotification(
-                'Connection Error',
-                error.message || 'Network error occurred.',
-                'error'
-            );
-        }
+        showNotification(
+            'Error',
+            'Failed to schedule AI job: ' + error.message,
+            'error'
+        );
     });
 }
 
+// Update the AI job status badge in the UI
+function updateAiJobStatusBadge(status) {
+    const badge = document.querySelector('.ai-job-badge');
+    if (badge) {
+        badge.className = 'ai-job-badge ' + status.toLowerCase();
+        if (status === 'PENDING') {
+            badge.innerHTML = '⏳ Scheduled';
+        } else if (status === 'PROCESSING') {
+            badge.innerHTML = '⚙️ Processing';
+        } else if (status === 'COMPLETED') {
+            badge.innerHTML = '✅ Completed';
+        } else if (status === 'FAILED') {
+            badge.innerHTML = '❌ Failed';
+        }
+    }
+}
+
+// AI Progress Modal (kept for other uses)
 function showAIProgressModal(timeoutSeconds) {
     // Remove existing modal if any
     hideAIProgressModal();
