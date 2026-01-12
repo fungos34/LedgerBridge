@@ -10,8 +10,10 @@ import pytest
 from paperless_firefly.spark_ai.prompts import PROMPT_VERSION, CategoryPrompt, ChatPrompt, SplitPrompt
 from paperless_firefly.spark_ai.service import (
     CategorySuggestion,
+    FieldSuggestion,
     SparkAIService,
     SplitSuggestion,
+    TransactionReviewSuggestion,
 )
 from paperless_firefly.state_store import StateStore
 
@@ -770,4 +772,297 @@ class TestSparkAIService:
             # The amount should be normalized to float
             if result and result.splits:
                 assert result.splits[0]["amount"] == 12.50
+
+
+class TestSuggestForReview:
+    """Tests for the comprehensive suggest_for_review method."""
+
+    @pytest.fixture
+    def store(self, tmp_path) -> StateStore:
+        """Create a fresh StateStore for each test."""
+        db_path = tmp_path / "test.db"
+        return StateStore(str(db_path), run_migrations=True)
+
+    @pytest.fixture
+    def mock_config_enabled(self) -> MagicMock:
+        """Create mock config with LLM enabled."""
+        config = MagicMock()
+        config.llm.enabled = True
+        config.llm.ollama_url = "http://localhost:11434"
+        config.llm.model_fast = "qwen2.5:7b"
+        config.llm.model_fallback = "qwen2.5:14b"
+        config.llm.green_threshold = 0.90
+        config.llm.calibration_count = 50
+        config.llm.timeout_seconds = 30
+        config.llm.max_concurrent = 2
+        config.llm.auth_header = None
+        return config
+
+    @pytest.fixture
+    def mock_config_disabled(self) -> MagicMock:
+        """Create mock config with LLM disabled."""
+        config = MagicMock()
+        config.llm.enabled = False
+        config.llm.ollama_url = "http://localhost:11434"
+        config.llm.timeout_seconds = 30
+        config.llm.max_concurrent = 2
+        config.llm.auth_header = None
+        return config
+
+    @pytest.fixture
+    def categories(self) -> list[str]:
+        """Test categories including Electronics for split tests."""
+        return ["Shopping", "Groceries", "Dining", "Transportation", "Bills", "Electronics"]
+
+    @patch.object(SparkAIService, '_call_ollama')
+    def test_suggest_for_review_returns_all_fields(
+        self, mock_call: MagicMock, store: StateStore, mock_config_enabled: MagicMock, categories: list[str]
+    ) -> None:
+        """Test suggest_for_review returns suggestions for all requested fields."""
+        mock_call.return_value = {
+            "content": json.dumps({
+                "suggestions": {
+                    "category": {"value": "Groceries", "confidence": 0.95, "reason": "Food items detected"},
+                    "description": {"value": "Grocery shopping at Lidl", "confidence": 0.85, "reason": "Based on receipt header"},
+                    "destination_account": {"value": "Lidl Store", "confidence": 0.90, "reason": "Vendor name from header"},
+                    "transaction_type": {"value": "withdrawal", "confidence": 0.99, "reason": "This is a purchase"}
+                },
+                "overall_confidence": 0.90,
+                "analysis_notes": "Clear receipt with itemized list"
+            }),
+            "model": "qwen2.5:14b"
+        }
+        
+        service = SparkAIService(store, mock_config_enabled, categories)
+        result = service.suggest_for_review(
+            amount="45.99",
+            date="2025-01-15",
+            vendor="Lidl",
+            description="Purchase",
+            document_content="LIDL\nMilk 2.99\nBread 1.50\nTotal 45.99",
+            use_cache=False
+        )
+        
+        assert result is not None
+        assert isinstance(result, TransactionReviewSuggestion)
+        
+        # Verify all field suggestions are present
+        assert "category" in result.suggestions
+        assert result.suggestions["category"].value == "Groceries"
+        assert result.suggestions["category"].confidence == 0.95
+        
+        assert "description" in result.suggestions
+        assert result.suggestions["description"].value == "Grocery shopping at Lidl"
+        
+        assert "destination_account" in result.suggestions
+        assert result.suggestions["destination_account"].value == "Lidl Store"
+        
+        assert "transaction_type" in result.suggestions
+        assert result.suggestions["transaction_type"].value == "withdrawal"
+
+    @patch.object(SparkAIService, '_call_ollama')
+    def test_suggest_for_review_with_split_transactions(
+        self, mock_call: MagicMock, store: StateStore, mock_config_enabled: MagicMock, categories: list[str]
+    ) -> None:
+        """Test suggest_for_review handles split transaction suggestions."""
+        mock_call.return_value = {
+            "content": json.dumps({
+                "suggestions": {
+                    "category": {"value": "Shopping", "confidence": 0.80, "reason": "Mixed categories"},
+                    "description": {"value": "Multi-category shopping", "confidence": 0.85, "reason": "Multiple item types"},
+                    "destination_account": {"value": "Supermarket", "confidence": 0.90, "reason": "Store name"},
+                    "transaction_type": {"value": "withdrawal", "confidence": 0.99, "reason": "Purchase"}
+                },
+                "split_transactions": [
+                    {"amount": 25.50, "description": "Food items (milk, bread, eggs)", "category": "Groceries"},
+                    {"amount": 15.00, "description": "Cleaning supplies", "category": "Shopping"},
+                    {"amount": 9.49, "description": "Electronics", "category": "Electronics"}
+                ],
+                "overall_confidence": 0.85,
+                "analysis_notes": "Receipt with multiple categories detected"
+            }),
+            "model": "qwen2.5:14b"
+        }
+        
+        service = SparkAIService(store, mock_config_enabled, categories)
+        result = service.suggest_for_review(
+            amount="49.99",
+            date="2025-01-15",
+            vendor="Supermarket",
+            document_content="Supermarket\nMilk 2.99\nCleaning spray 15.00\nUSB Cable 9.49\nTotal 49.99",
+            use_cache=False
+        )
+        
+        assert result is not None
+        assert result.split_transactions is not None
+        assert len(result.split_transactions) == 3
+        
+        # Verify split details
+        assert result.split_transactions[0]["amount"] == 25.50
+        assert result.split_transactions[0]["category"] == "Groceries"
+        assert result.split_transactions[1]["amount"] == 15.00
+        assert result.split_transactions[1]["category"] == "Shopping"
+        assert result.split_transactions[2]["amount"] == 9.49
+
+    @patch.object(SparkAIService, '_call_ollama')
+    def test_suggest_for_review_invalid_category_rejected(
+        self, mock_call: MagicMock, store: StateStore, mock_config_enabled: MagicMock, categories: list[str]
+    ) -> None:
+        """Test suggest_for_review rejects invalid category suggestions."""
+        mock_call.return_value = {
+            "content": json.dumps({
+                "suggestions": {
+                    "category": {"value": "InvalidCategory", "confidence": 0.95, "reason": "Test"},
+                    "description": {"value": "Valid description", "confidence": 0.85, "reason": "Test"}
+                },
+                "overall_confidence": 0.90,
+                "analysis_notes": "Test"
+            }),
+            "model": "qwen2.5:14b"
+        }
+        
+        service = SparkAIService(store, mock_config_enabled, categories)
+        result = service.suggest_for_review(
+            amount="10.00",
+            date="2025-01-15",
+            use_cache=False
+        )
+        
+        assert result is not None
+        # Category should be rejected as invalid
+        assert "category" not in result.suggestions
+        # But other valid fields should still be present
+        assert "description" in result.suggestions
+        assert result.suggestions["description"].value == "Valid description"
+
+    @patch.object(SparkAIService, '_call_ollama')
+    def test_suggest_for_review_invalid_transaction_type_rejected(
+        self, mock_call: MagicMock, store: StateStore, mock_config_enabled: MagicMock, categories: list[str]
+    ) -> None:
+        """Test suggest_for_review rejects invalid transaction_type suggestions."""
+        mock_call.return_value = {
+            "content": json.dumps({
+                "suggestions": {
+                    "category": {"value": "Groceries", "confidence": 0.95, "reason": "Test"},
+                    "transaction_type": {"value": "payment", "confidence": 0.80, "reason": "Invalid type"}
+                },
+                "overall_confidence": 0.90,
+                "analysis_notes": "Test"
+            }),
+            "model": "qwen2.5:14b"
+        }
+        
+        service = SparkAIService(store, mock_config_enabled, categories)
+        result = service.suggest_for_review(
+            amount="10.00",
+            date="2025-01-15",
+            use_cache=False
+        )
+        
+        assert result is not None
+        # Invalid transaction_type should be rejected
+        assert "transaction_type" not in result.suggestions
+        # Valid category should still be present
+        assert "category" in result.suggestions
+
+    def test_suggest_for_review_disabled_returns_none(
+        self, store: StateStore, mock_config_disabled: MagicMock, categories: list[str]
+    ) -> None:
+        """Test suggest_for_review returns None when LLM is disabled."""
+        service = SparkAIService(store, mock_config_disabled, categories)
+        
+        result = service.suggest_for_review(
+            amount="10.00",
+            date="2025-01-15"
+        )
+        
+        assert result is None
+
+    @patch.object(SparkAIService, '_call_ollama')
+    def test_suggest_for_review_caches_result(
+        self, mock_call: MagicMock, store: StateStore, mock_config_enabled: MagicMock, categories: list[str]
+    ) -> None:
+        """Test suggest_for_review uses cache for repeated calls."""
+        mock_call.return_value = {
+            "content": json.dumps({
+                "suggestions": {
+                    "category": {"value": "Groceries", "confidence": 0.95, "reason": "Test"}
+                },
+                "overall_confidence": 0.90,
+                "analysis_notes": "Test"
+            }),
+            "model": "qwen2.5:14b"
+        }
+        
+        service = SparkAIService(store, mock_config_enabled, categories)
+        
+        # First call - should hit LLM
+        result1 = service.suggest_for_review(
+            amount="10.00",
+            date="2025-01-15",
+            vendor="Test",
+            use_cache=True
+        )
+        
+        # Second call with same params - should use cache
+        result2 = service.suggest_for_review(
+            amount="10.00",
+            date="2025-01-15",
+            vendor="Test",
+            use_cache=True
+        )
+        
+        # LLM should only be called once
+        assert mock_call.call_count == 1
+        
+        # Both results should be valid
+        assert result1 is not None
+        assert result2 is not None
+        assert result2.from_cache is True
+
+    @patch.object(SparkAIService, '_call_ollama')
+    def test_suggest_for_review_to_dict_structure(
+        self, mock_call: MagicMock, store: StateStore, mock_config_enabled: MagicMock, categories: list[str]
+    ) -> None:
+        """Test suggest_for_review to_dict produces correct structure for UI."""
+        mock_call.return_value = {
+            "content": json.dumps({
+                "suggestions": {
+                    "category": {"value": "Groceries", "confidence": 0.95, "reason": "Food items"},
+                    "description": {"value": "Test purchase", "confidence": 0.85, "reason": "Based on content"}
+                },
+                "split_transactions": [
+                    {"amount": 10.00, "description": "Item 1", "category": "Groceries"}
+                ],
+                "overall_confidence": 0.90,
+                "analysis_notes": "Test analysis"
+            }),
+            "model": "qwen2.5:14b"
+        }
+        
+        service = SparkAIService(store, mock_config_enabled, categories)
+        result = service.suggest_for_review(
+            amount="10.00",
+            date="2025-01-15",
+            use_cache=False
+        )
+        
+        assert result is not None
+        
+        # Convert to dict for UI consumption
+        data = result.to_dict()
+        
+        # Verify structure matches what UI expects
+        assert "suggestions" in data
+        assert "category" in data["suggestions"]
+        assert "value" in data["suggestions"]["category"]
+        assert "confidence" in data["suggestions"]["category"]
+        assert "reason" in data["suggestions"]["category"]
+        
+        assert "split_transactions" in data
+        assert len(data["split_transactions"]) == 1
+        assert data["split_transactions"][0]["amount"] == 10.00
+        
+        assert "overall_confidence" in data
+        assert "analysis_notes" in data
 

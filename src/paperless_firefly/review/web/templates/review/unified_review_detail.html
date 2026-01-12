@@ -1058,11 +1058,54 @@
                     <div class="form-section">
                         <div class="form-section-title">
                             Split Transaction
+                            {% if ai_suggestions.split_transactions %}
+                            <span class="badge-ai" title="AI suggests splitting this transaction">🤖 AI</span>
+                            {% endif %}
                             <label style="font-weight: normal; font-size: 0.75rem; margin-left: 0.5rem; text-transform: none;">
                                 <input type="checkbox" id="enable_split" onchange="toggleSplitMode(this.checked)">
                                 Enable split booking
                             </label>
                         </div>
+                        <!-- AI Split Suggestion Banner -->
+                        {% if ai_suggestions.split_transactions %}
+                        <div class="ai-split-suggestion" id="ai-split-suggestion-banner" style="
+                            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+                            border: 1px solid #f59e0b;
+                            border-radius: 0.5rem;
+                            padding: 0.75rem 1rem;
+                            margin-bottom: 0.75rem;
+                            display: flex;
+                            align-items: flex-start;
+                            gap: 0.75rem;
+                        ">
+                            <span style="font-size: 1.25rem;">🤖</span>
+                            <div style="flex: 1;">
+                                <div style="font-weight: 600; color: #92400e; margin-bottom: 0.25rem;">
+                                    AI suggests splitting into {{ ai_suggestions.split_transactions|length }} line items
+                                </div>
+                                <div style="font-size: 0.8rem; color: #78350f;">
+                                    {% for split in ai_suggestions.split_transactions %}
+                                    <div style="display: flex; gap: 0.5rem; padding: 0.125rem 0;">
+                                        <span style="font-family: monospace;">€{{ split.amount|floatformat:2 }}</span>
+                                        <span style="color: #92400e;">{{ split.category|default:"Uncategorized" }}</span>
+                                        <span style="color: #a16207;">{{ split.description|truncatechars:40 }}</span>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                            <button type="button" class="btn btn-sm" onclick="applyAiSplits()" style="
+                                background: #f59e0b;
+                                color: white;
+                                border: none;
+                                padding: 0.375rem 0.75rem;
+                                border-radius: 0.375rem;
+                                font-weight: 500;
+                                cursor: pointer;
+                            ">
+                                ✓ Apply Splits
+                            </button>
+                        </div>
+                        {% endif %}
                         <div id="split-container" style="display: none;">
                             <div class="form-help mb-3">
                                 Split this transaction across multiple lines with different categories. 
@@ -2083,6 +2126,21 @@ function applyAllAiSuggestions() {
         }
     }
     
+    // Also apply split transactions if suggested
+    if (suggestions.split_transactions && Array.isArray(suggestions.split_transactions) && suggestions.split_transactions.length > 0) {
+        applySplitSuggestions(suggestions.split_transactions);
+        appliedCount += suggestions.split_transactions.length;
+        
+        // Hide the split suggestion banner
+        const banner = document.getElementById('ai-split-suggestion-banner');
+        if (banner) {
+            banner.innerHTML = '<span style="color: #059669; font-weight: 500;">✓ Split suggestions applied</span>';
+            banner.style.background = 'linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%)';
+            banner.style.borderColor = '#10b981';
+            banner.style.justifyContent = 'center';
+        }
+    }
+    
     if (appliedCount > 0) {
         updateUnsavedIndicator();
         showNotification('AI Suggestions Applied', `Applied ${appliedCount} suggestion(s) to form fields`, 'success');
@@ -2192,6 +2250,30 @@ function applySplitSuggestions(splits) {
         confidence: 0.8,
         reason: 'AI suggested splitting this transaction'
     };
+    
+    // Update unsaved indicator
+    updateUnsavedIndicator();
+}
+
+// Apply AI split suggestions from the loaded ai_suggestions object
+function applyAiSplits() {
+    {% if ai_suggestions.split_transactions %}
+    const splits = {{ ai_suggestions.split_transactions|safe }};
+    applySplitSuggestions(splits);
+    
+    // Hide the suggestion banner
+    const banner = document.getElementById('ai-split-suggestion-banner');
+    if (banner) {
+        banner.innerHTML = '<span style="color: #059669; font-weight: 500;">✓ Split suggestions applied</span>';
+        banner.style.background = 'linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%)';
+        banner.style.borderColor = '#10b981';
+        banner.style.justifyContent = 'center';
+    }
+    
+    showNotification('Splits Applied', `Applied ${splits.length} split line items from AI`, 'success');
+    {% else %}
+    showNotification('No Splits', 'No AI split suggestions available', 'warning');
+    {% endif %}
 }
 
 // Add per-field accept/undo controls

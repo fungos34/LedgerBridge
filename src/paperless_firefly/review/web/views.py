@@ -4240,7 +4240,21 @@ def unified_review_detail(request: HttpRequest, record_type: str, record_id: int
                 # Parse suggestions if completed
                 if ai_job["status"] == "COMPLETED" and ai_job.get("suggestions_json"):
                     try:
-                        ai_suggestions = json.loads(ai_job["suggestions_json"])
+                        raw_suggestions = json.loads(ai_job["suggestions_json"])
+                        # Unwrap the nested structure for template consumption
+                        # TransactionReviewSuggestion.to_dict() produces:
+                        #   {"suggestions": {...}, "split_transactions": [...], ...}
+                        # Template expects:
+                        #   {"category": {...}, "date": {...}, "split_transactions": [...]}
+                        ai_suggestions = raw_suggestions.get("suggestions", {})
+                        # Merge split_transactions into the flat structure
+                        if raw_suggestions.get("split_transactions"):
+                            ai_suggestions["split_transactions"] = raw_suggestions["split_transactions"]
+                        # Also include overall_confidence and analysis_notes for UI
+                        if raw_suggestions.get("overall_confidence"):
+                            ai_suggestions["_overall_confidence"] = raw_suggestions["overall_confidence"]
+                        if raw_suggestions.get("analysis_notes"):
+                            ai_suggestions["_analysis_notes"] = raw_suggestions["analysis_notes"]
                     except json.JSONDecodeError:
                         logger.warning(f"Could not parse AI suggestions for job {ai_job['id']}")
         except Exception as e:
