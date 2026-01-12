@@ -278,6 +278,7 @@ IMPORTANT RULES:
 4. Use linked bank data to verify/correct amounts and dates
 5. Provide confidence scores (0.0-1.0) for each suggestion
 6. Be conservative - if uncertain, keep the original value
+7. If the document shows LINE ITEMS with different categories, suggest split_transactions
 
 Respond in JSON format:
 {
@@ -287,11 +288,17 @@ Respond in JSON format:
         "destination_account": {"value": "Vendor Name", "confidence": 0.80, "reason": "..."},
         "description": {"value": "Description text", "confidence": 0.75, "reason": "..."}
     },
+    "split_transactions": [
+        {"amount": 29.99, "description": "Item 1", "category": "Category1"},
+        {"amount": 15.50, "description": "Item 2", "category": "Category2"}
+    ],
     "overall_confidence": 0.82,
     "analysis_notes": "Brief analysis summary"
 }
 
-Only include fields where you have a meaningful suggestion (confidence > 0.5)."""
+Only include fields where you have a meaningful suggestion (confidence > 0.5).
+Only include split_transactions if the document clearly shows multiple line items with different categories.
+Split amounts should sum to the total transaction amount."""
 
     user_template: str = """Review this transaction and suggest values for the form fields:
 
@@ -323,7 +330,12 @@ AVAILABLE TRANSACTION TYPES:
 - transfer (between own accounts)
 
 Analyze this data and provide suggestions for any fields that could be improved or filled in.
-Prioritize accuracy over completeness - only suggest values you're confident about."""
+Prioritize accuracy over completeness - only suggest values you're confident about.
+
+SPLIT TRANSACTIONS:
+If the document shows multiple line items with different categories (e.g., a receipt with groceries and household items),
+suggest split_transactions with amounts, descriptions, and categories. The amounts should sum to the total.
+Only suggest splits if clearly indicated by the document content."""
 
     def format_user_message(
         self,

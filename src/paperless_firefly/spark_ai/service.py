@@ -113,10 +113,11 @@ class TransactionReviewSuggestion:
     analysis_notes: str
     model: str
     from_cache: bool = False
+    split_transactions: list[dict] | None = None  # [{"amount": float, "description": str, "category": str}]
     
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
-        return {
+        result = {
             "suggestions": {
                 k: v.to_dict() for k, v in self.suggestions.items()
             },
@@ -125,6 +126,9 @@ class TransactionReviewSuggestion:
             "model": self.model,
             "from_cache": self.from_cache,
         }
+        if self.split_transactions:
+            result["split_transactions"] = self.split_transactions
+        return result
 
 
 class LLMConcurrencyLimiter:
@@ -1052,12 +1056,36 @@ class SparkAIService:
                         confidence=float(field_data.get("confidence", 0.5)),
                         reason=str(field_data.get("reason", "")),
                     )
+            
+            # Parse split transactions if present
+            split_transactions = None
+            raw_splits = data.get("split_transactions")
+            if raw_splits and isinstance(raw_splits, list) and len(raw_splits) > 0:
+                # Validate split categories against available categories
+                valid_splits = []
+                for split in raw_splits:
+                    if isinstance(split, dict):
+                        split_cat = split.get("category")
+                        if split_cat and split_cat not in self.categories:
+                            logger.warning(
+                                "LLM suggested invalid split category '%s', skipping",
+                                split_cat,
+                            )
+                            split["category"] = None  # Clear invalid category
+                        valid_splits.append({
+                            "amount": float(split.get("amount", 0)),
+                            "description": str(split.get("description", "")),
+                            "category": split.get("category"),
+                        })
+                if valid_splits:
+                    split_transactions = valid_splits
                     
             review_suggestion = TransactionReviewSuggestion(
                 suggestions=suggestions,
                 overall_confidence=float(data.get("overall_confidence", 0.0)),
                 analysis_notes=str(data.get("analysis_notes", "")),
                 model=result["model"],
+                split_transactions=split_transactions,
             )
             
             # Cache the result

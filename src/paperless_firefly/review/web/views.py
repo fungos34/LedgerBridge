@@ -419,7 +419,9 @@ def user_settings(request: HttpRequest) -> HttpResponse:
         "available_models": available_models,
         "default_ollama_url": getattr(settings, "OLLAMA_URL", "http://localhost:11434"),
         "default_ollama_model": getattr(settings, "OLLAMA_MODEL", "qwen2.5:3b-instruct-q4_K_M"),
-        "default_ollama_model_fallback": getattr(settings, "OLLAMA_MODEL_FALLBACK", "qwen2.5:7b-instruct-q4_K_M"),
+        "default_ollama_model_fallback": getattr(
+            settings, "OLLAMA_MODEL_FALLBACK", "qwen2.5:7b-instruct-q4_K_M"
+        ),
         **_get_external_urls(request.user if hasattr(request, "user") else None),
     }
     return render(request, "review/settings.html", context)
@@ -706,7 +708,7 @@ def review_detail(request: HttpRequest, extraction_id: int) -> HttpResponse:
         logger.warning(f"Could not fetch Firefly categories: {e}")
 
     # Find potential matching Firefly transactions for this document
-    # Per SPARK_EVALUATION_REPORT.md - attempt to match reviewed document to existing Firefly entries
+    # Per SPARK_EVALUATION_REPORT.md: match documents to existing Firefly entries
     matching_transactions = []
     try:
         from ...config import load_config
@@ -1101,15 +1103,32 @@ def save_extraction(request: HttpRequest, extraction_id: int) -> HttpResponse:
         )
         changes.append("external_id")
 
-    decision = ReviewDecision.EDITED if changes else ReviewDecision.ACCEPTED
+    # Check if this is a save-only request (no confirmation)
+    confirm = request.POST.get("confirm", "true").lower() == "true"
+
+    if confirm:
+        # Save AND confirm (mark as reviewed/accepted)
+        decision = ReviewDecision.EDITED if changes else ReviewDecision.ACCEPTED
+    else:
+        # Save only - keep as pending for further review
+        decision = None  # Don't change review decision
 
     updated_json = json.dumps(extraction.to_dict())
-    store.update_extraction_review(extraction_id, decision.value, updated_json)
-
-    pending = store.get_extractions_for_review()
-    if pending:
-        return redirect("detail", extraction_id=pending[0].id)
-    return redirect("list")
+    
+    if decision is not None:
+        store.update_extraction_review(extraction_id, decision.value, updated_json)
+        # Move to next pending item
+        pending = store.get_extractions_for_review()
+        if pending:
+            return redirect("detail", extraction_id=pending[0].id)
+        return redirect("list")
+    else:
+        # Just save the data without changing review status
+        store.update_extraction_data(extraction_id, updated_json)
+        # Stay on current page with success message
+        from django.contrib import messages
+        messages.success(request, "Changes saved. Review and confirm when ready.")
+        return redirect("detail", extraction_id=extraction_id)
 
 
 # ============================================================================
@@ -1332,6 +1351,10 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
                     if review_suggestion:
                         llm_result = review_suggestion.to_dict()
                         all_suggestions = llm_result.get("suggestions", {})
+                        
+                        # Include split transactions if present
+                        if llm_result.get("split_transactions"):
+                            all_suggestions["split_transactions"] = llm_result["split_transactions"]
                         
                         # Extract category for backward compatibility
                         if "category" in all_suggestions:

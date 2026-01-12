@@ -426,6 +426,35 @@ class StateStore:
                     (now, decision, extraction_id),
                 )
 
+    def update_extraction_data(
+        self,
+        extraction_id: int,
+        updated_json: str,
+    ) -> bool:
+        """Update extraction data without changing review status.
+
+        This is used for saving edits without confirming/accepting the extraction.
+
+        Args:
+            extraction_id: The extraction ID to update.
+            updated_json: The updated extraction JSON.
+
+        Returns:
+            True if updated, False if extraction not found.
+        """
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+        with self._transaction() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE extractions
+                SET extraction_json = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (updated_json, now, extraction_id),
+            )
+            return cursor.rowcount > 0
+
     def update_extraction_status(
         self,
         extraction_id: int,

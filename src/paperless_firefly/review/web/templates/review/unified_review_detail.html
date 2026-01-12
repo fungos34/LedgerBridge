@@ -380,6 +380,99 @@
         border-top: 1px solid var(--gray-200);
     }
     
+    /* Prominent Confirm Button */
+    .btn-confirm {
+        font-weight: 600;
+        font-size: 1rem;
+        padding: 0.625rem 1.25rem;
+        background: linear-gradient(135deg, #059669, #047857);
+        border: 2px solid #047857;
+        box-shadow: 0 2px 4px rgba(5, 150, 105, 0.3);
+        transition: all 0.2s ease;
+    }
+    
+    .btn-confirm:hover {
+        background: linear-gradient(135deg, #047857, #065f46);
+        transform: translateY(-1px);
+        box-shadow: 0 4px 8px rgba(5, 150, 105, 0.4);
+    }
+    
+    /* AI Changed Field Highlighting */
+    .ai-modified {
+        background-color: #fffbeb !important;
+        border-color: #f59e0b !important;
+        transition: background-color 0.3s ease;
+    }
+    
+    .ai-modified-container {
+        position: relative;
+    }
+    
+    .ai-field-actions {
+        display: inline-flex;
+        gap: 0.25rem;
+        margin-left: 0.5rem;
+        vertical-align: middle;
+    }
+    
+    .ai-field-actions button {
+        padding: 0.125rem 0.375rem;
+        font-size: 0.65rem;
+        border-radius: 0.25rem;
+        border: 1px solid var(--gray-300);
+        background: white;
+        cursor: pointer;
+        transition: all 0.15s ease;
+    }
+    
+    .ai-field-actions button.accept-ai:hover {
+        background: #dcfce7;
+        border-color: #22c55e;
+    }
+    
+    .ai-field-actions button.undo-ai:hover {
+        background: #fee2e2;
+        border-color: #ef4444;
+    }
+    
+    /* Unsaved changes indicator */
+    .unsaved-indicator {
+        display: none;
+        padding: 0.5rem 1rem;
+        background: #fef3c7;
+        border-bottom: 1px solid #fbbf24;
+        color: #92400e;
+        font-size: 0.875rem;
+        text-align: center;
+    }
+    
+    .unsaved-indicator.visible {
+        display: block;
+    }
+    
+    /* Notification animations */
+    @keyframes slideIn {
+        from {
+            transform: translateX(100%);
+            opacity: 0;
+        }
+        to {
+            transform: translateX(0);
+            opacity: 1;
+        }
+    }
+    
+    @keyframes slideOut {
+        from {
+            transform: translateX(0);
+            opacity: 1;
+        }
+        to {
+            transform: translateX(100%);
+            opacity: 0;
+        }
+    }
+    
     /* Linked Record Info */
     .linked-record-info {
         padding: 1rem 1.25rem;
@@ -494,8 +587,16 @@
     
     <!-- Main Form -->
     <div>
+        <!-- Unsaved Changes Warning Banner -->
+        <div id="unsaved-indicator" class="unsaved-indicator">
+            ⚠️ You have unsaved changes. Save before leaving or they will be lost.
+        </div>
+        
         <form method="post" action="{% if record_type == 'paperless' %}{% url 'save' record.extraction_id %}{% endif %}" id="review-form">
             {% csrf_token %}
+            <!-- Hidden field for confirm flag -->
+            <input type="hidden" name="confirm" id="confirm-flag" value="true">
+            
             <div class="card">
                 <div class="card-header">
                     <h2>{{ record.title|truncatechars:50 }}</h2>
@@ -708,11 +809,15 @@
                 
                 {% if record_type == 'paperless' %}
                 <div class="action-buttons">
-                    <button type="submit" class="btn btn-success" title="Save your edits and accept this transaction">💾 Save & Accept</button>
-                    <button type="submit" formaction="{% url 'accept' record.extraction_id %}" formnovalidate class="btn btn-primary" title="Accept AI-extracted data without changes">✓ Accept As-Is</button>
+                    <button type="button" class="btn btn-outline" onclick="saveWithoutConfirm()" title="Save changes without confirming - stay on this page">
+                        💾 Save
+                    </button>
+                    <button type="submit" class="btn btn-primary btn-confirm" title="Save and confirm - moves to next item">
+                        ✓ Confirm
+                    </button>
+                    <button type="submit" formaction="{% url 'skip' record.extraction_id %}" formnovalidate class="btn btn-secondary" title="Skip for now - review later">Skip →</button>
                     <a href="{% url 'reject' record.extraction_id %}" class="btn btn-danger" 
                        onclick="return confirm('Reject this extraction?')" title="Reject this document">❌ Reject</a>
-                    <button type="submit" formaction="{% url 'skip' record.extraction_id %}" formnovalidate class="btn btn-secondary" title="Skip for now - review later">Skip →</button>
                     {% if record.review_decision %}
                     <a href="{% url 'reset_extraction' record.extraction_id %}" class="btn btn-outline">🔄 Reset</a>
                     {% endif %}
@@ -990,6 +1095,102 @@ const fireflyId = {{ record.id }};
 {% endif %}
 
 let selectedSuggestion = null;
+
+// ============================================
+// Unsaved Changes Tracking
+// ============================================
+let formHasChanges = false;
+let submittingForm = false;
+const originalFormValues = {};
+const aiModifiedFields = {}; // Track AI-modified fields for per-field undo
+
+// Store original form values on load
+function storeOriginalValues() {
+    const form = document.getElementById('review-form');
+    if (!form) return;
+    
+    const inputs = form.querySelectorAll('input:not([type="hidden"]), select, textarea');
+    inputs.forEach(input => {
+        const key = input.id || input.name;
+        if (key) {
+            originalFormValues[key] = input.value;
+        }
+    });
+}
+
+// Check if form has been modified
+function checkForChanges() {
+    const form = document.getElementById('review-form');
+    if (!form) return false;
+    
+    const inputs = form.querySelectorAll('input:not([type="hidden"]), select, textarea');
+    for (const input of inputs) {
+        const key = input.id || input.name;
+        if (key && originalFormValues[key] !== undefined) {
+            if (input.value !== originalFormValues[key]) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// Update unsaved indicator
+function updateUnsavedIndicator() {
+    formHasChanges = checkForChanges();
+    const indicator = document.getElementById('unsaved-indicator');
+    if (indicator) {
+        indicator.classList.toggle('visible', formHasChanges);
+    }
+}
+
+// Warn on page unload if unsaved changes
+window.addEventListener('beforeunload', function(e) {
+    if (formHasChanges && !submittingForm) {
+        e.preventDefault();
+        e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
+        return e.returnValue;
+    }
+});
+
+// Initialize change tracking
+document.addEventListener('DOMContentLoaded', function() {
+    storeOriginalValues();
+    
+    const form = document.getElementById('review-form');
+    if (form) {
+        // Track all input changes
+        form.addEventListener('input', updateUnsavedIndicator);
+        form.addEventListener('change', updateUnsavedIndicator);
+        
+        // Mark as submitting when form is submitted
+        form.addEventListener('submit', function() {
+            submittingForm = true;
+        });
+    }
+    
+    // Allow navigation for skip, reject, reset links
+    document.querySelectorAll('a[href*="/reject"], a[href*="/reset"]').forEach(link => {
+        link.addEventListener('click', function() {
+            submittingForm = true;
+        });
+    });
+});
+
+// ============================================
+// Save Without Confirm
+// ============================================
+function saveWithoutConfirm() {
+    submittingForm = true;
+    const confirmFlag = document.getElementById('confirm-flag');
+    if (confirmFlag) {
+        confirmFlag.value = 'false';
+    }
+    const form = document.getElementById('review-form');
+    if (form) {
+        form.submit();
+    }
+}
 
 // Document viewer toggle
 function toggleDocumentViewer() {
@@ -1296,10 +1497,21 @@ function applySuggestionsToForm(suggestions) {
         'transaction_type': 'transaction_type',
         'destination_account': 'destination_account',
         'description': 'description',
-        'invoice_number': 'invoice_number'
+        'invoice_number': 'invoice_number',
+        'amount': 'amount',
+        'date': 'date',
+        'source_account': 'source_account'
     };
     
+    // Handle split transactions if suggested
+    if (suggestions.split_transactions && Array.isArray(suggestions.split_transactions)) {
+        applySplitSuggestions(suggestions.split_transactions);
+    }
+    
+    // Apply regular field suggestions
     for (const [field, suggestion] of Object.entries(suggestions)) {
+        if (field === 'split_transactions') continue; // Already handled
+        
         const fieldId = fieldMap[field];
         if (!fieldId) continue;
         
@@ -1310,13 +1522,17 @@ function applySuggestionsToForm(suggestions) {
         const confidence = suggestion.confidence || 0;
         if (confidence < 0.5) continue;
         
-        // Highlight the field to show it was updated
-        element.style.transition = 'background-color 0.3s';
-        element.style.backgroundColor = '#e8f5e9';
+        // Store original value for undo
+        const originalValue = element.value;
+        aiModifiedFields[fieldId] = {
+            original: originalValue,
+            suggested: suggestion.value,
+            confidence: confidence,
+            reason: suggestion.reason || ''
+        };
         
-        // Set the value
+        // Set the new value
         if (element.tagName === 'SELECT') {
-            // For select, find and select the option
             const option = Array.from(element.options).find(o => o.value === suggestion.value);
             if (option) {
                 element.value = suggestion.value;
@@ -1325,64 +1541,307 @@ function applySuggestionsToForm(suggestions) {
             element.value = suggestion.value;
         }
         
-        // Add tooltip with reason
-        if (suggestion.reason) {
-            element.title = `AI suggestion (${Math.round(confidence * 100)}%): ${suggestion.reason}`;
-        }
+        // Apply AI-modified styling
+        element.classList.add('ai-modified');
         
-        // Fade out highlight
-        setTimeout(() => {
-            element.style.backgroundColor = '';
-        }, 2000);
-        
-        // Add a small badge next to the field
-        addAISuggestionBadge(element, confidence, suggestion.reason);
-    }
-}
-
-// Add AI badge next to suggested field
-function addAISuggestionBadge(element, confidence, reason) {
-    // Remove existing badge if any
-    const existingBadge = element.parentElement.querySelector('.ai-suggestion-badge');
-    if (existingBadge) {
-        existingBadge.remove();
+        // Add per-field accept/undo controls
+        addAIFieldControls(element, fieldId, confidence, suggestion.reason);
     }
     
+    // Update unsaved indicator
+    updateUnsavedIndicator();
+}
+
+// Apply split transaction suggestions
+function applySplitSuggestions(splits) {
+    if (!splits || splits.length === 0) return;
+    
+    // Enable split mode
+    const checkbox = document.getElementById('enable_split');
+    if (checkbox && !checkbox.checked) {
+        checkbox.checked = true;
+        toggleSplitMode(true);
+    }
+    
+    // Clear existing line items
+    lineItems = [];
+    lineItemCounter = 0;
+    
+    // Add suggested splits
+    splits.forEach((split, idx) => {
+        const id = ++lineItemCounter;
+        lineItems.push({
+            id: id,
+            amount: parseFloat(split.amount) || 0,
+            description: split.description || '',
+            category: split.category || ''
+        });
+    });
+    
+    // Render the line items
+    renderLineItems();
+    
+    // Store for undo
+    aiModifiedFields['split_transactions'] = {
+        original: [],
+        suggested: splits,
+        confidence: 0.8,
+        reason: 'AI suggested splitting this transaction'
+    };
+}
+
+// Add per-field accept/undo controls
+function addAIFieldControls(element, fieldId, confidence, reason) {
+    // Remove any existing controls
+    const existingControls = element.parentElement.querySelector('.ai-field-controls');
+    if (existingControls) {
+        existingControls.remove();
+    }
+    
+    const controlsContainer = document.createElement('div');
+    controlsContainer.className = 'ai-field-controls';
+    controlsContainer.style.cssText = `
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-top: 0.25rem;
+    `;
+    
+    // Badge showing AI suggested
     const badge = document.createElement('span');
     badge.className = 'ai-suggestion-badge';
-    badge.innerHTML = `🤖 ${Math.round(confidence * 100)}%`;
+    badge.innerHTML = `🤖 AI: ${Math.round(confidence * 100)}%`;
     badge.style.cssText = `
         display: inline-block;
-        margin-left: 8px;
         padding: 2px 6px;
-        font-size: 0.7rem;
-        background: #e3f2fd;
-        color: #1976d2;
+        font-size: 0.65rem;
+        background: #fef3c7;
+        color: #92400e;
         border-radius: 4px;
         cursor: help;
     `;
     badge.title = reason || 'AI suggested this value';
     
+    // Accept button
+    const acceptBtn = document.createElement('button');
+    acceptBtn.type = 'button';
+    acceptBtn.className = 'accept-ai';
+    acceptBtn.innerHTML = '✓ Accept';
+    acceptBtn.style.cssText = `
+        padding: 2px 8px;
+        font-size: 0.65rem;
+        background: #dcfce7;
+        color: #166534;
+        border: 1px solid #22c55e;
+        border-radius: 4px;
+        cursor: pointer;
+    `;
+    acceptBtn.onclick = function() {
+        acceptAIField(fieldId);
+    };
+    
+    // Undo button
+    const undoBtn = document.createElement('button');
+    undoBtn.type = 'button';
+    undoBtn.className = 'undo-ai';
+    undoBtn.innerHTML = '↩ Undo';
+    undoBtn.style.cssText = `
+        padding: 2px 8px;
+        font-size: 0.65rem;
+        background: #fee2e2;
+        color: #991b1b;
+        border: 1px solid #ef4444;
+        border-radius: 4px;
+        cursor: pointer;
+    `;
+    undoBtn.onclick = function() {
+        undoAIField(fieldId);
+    };
+    
+    controlsContainer.appendChild(badge);
+    controlsContainer.appendChild(acceptBtn);
+    controlsContainer.appendChild(undoBtn);
+    
     // Insert after the input/select
-    element.insertAdjacentElement('afterend', badge);
+    element.insertAdjacentElement('afterend', controlsContainer);
+}
+
+// Accept AI suggestion (remove undo option, keep value)
+function acceptAIField(fieldId) {
+    const element = document.getElementById(fieldId);
+    if (!element) return;
+    
+    // Remove AI styling
+    element.classList.remove('ai-modified');
+    
+    // Remove controls
+    const controls = element.parentElement.querySelector('.ai-field-controls');
+    if (controls) {
+        controls.remove();
+    }
+    
+    // Mark as accepted (update original values so it's not seen as a change)
+    originalFormValues[fieldId] = element.value;
+    delete aiModifiedFields[fieldId];
+    
+    // Show brief accepted indicator
+    const accepted = document.createElement('span');
+    accepted.innerHTML = '✓ Accepted';
+    accepted.style.cssText = `
+        display: inline-block;
+        margin-left: 8px;
+        padding: 2px 6px;
+        font-size: 0.65rem;
+        background: #dcfce7;
+        color: #166534;
+        border-radius: 4px;
+    `;
+    element.insertAdjacentElement('afterend', accepted);
+    
+    setTimeout(() => {
+        accepted.remove();
+    }, 2000);
+    
+    updateUnsavedIndicator();
+}
+
+// Undo AI suggestion (restore original value)
+function undoAIField(fieldId) {
+    const element = document.getElementById(fieldId);
+    if (!element) return;
+    
+    const fieldData = aiModifiedFields[fieldId];
+    if (!fieldData) return;
+    
+    // Restore original value
+    element.value = fieldData.original;
+    
+    // Remove AI styling
+    element.classList.remove('ai-modified');
+    
+    // Remove controls
+    const controls = element.parentElement.querySelector('.ai-field-controls');
+    if (controls) {
+        controls.remove();
+    }
+    
+    delete aiModifiedFields[fieldId];
+    
+    // Show brief undo indicator
+    const undone = document.createElement('span');
+    undone.innerHTML = '↩ Restored';
+    undone.style.cssText = `
+        display: inline-block;
+        margin-left: 8px;
+        padding: 2px 6px;
+        font-size: 0.65rem;
+        background: #fee2e2;
+        color: #991b1b;
+        border-radius: 4px;
+    `;
+    element.insertAdjacentElement('afterend', undone);
+    
+    setTimeout(() => {
+        undone.remove();
+    }, 2000);
+    
+    updateUnsavedIndicator();
+}
+
+// Add AI badge next to suggested field (legacy - kept for backward compatibility)
+function addAISuggestionBadge(element, confidence, reason) {
+    // Now handled by addAIFieldControls
 }
 
 // Show summary of suggestions
 function showSuggestionsSummary(suggestions, message) {
     const summaryItems = [];
+    let hasChanges = false;
+    
     for (const [field, suggestion] of Object.entries(suggestions)) {
-        if (suggestion.value && suggestion.confidence >= 0.5) {
-            summaryItems.push(`${field}: "${suggestion.value}" (${Math.round(suggestion.confidence * 100)}%)`);
+        if (field === 'split_transactions' && Array.isArray(suggestion)) {
+            summaryItems.push(`Split transactions: ${suggestion.length} splits suggested`);
+            hasChanges = true;
+        } else if (suggestion.value && suggestion.confidence >= 0.5) {
+            summaryItems.push(`• ${field}: "${suggestion.value}" (${Math.round(suggestion.confidence * 100)}%)`);
+            hasChanges = true;
         }
     }
     
-    if (summaryItems.length > 0) {
-        const summaryText = 'AI Suggestions applied:\\n\\n' + summaryItems.join('\\n') + 
-            '\\n\\nFields have been highlighted. Review and adjust as needed.';
-        alert(summaryText);
+    if (hasChanges) {
+        // Use a toast-like notification instead of alert
+        showNotification(
+            '🤖 AI Suggestions Applied',
+            summaryItems.join('\n') + '\n\nReview changes and use Accept/Undo buttons per field.',
+            'info'
+        );
     } else {
-        alert(message || 'AI analysis complete. No high-confidence suggestions to apply.');
+        showNotification(
+            'AI Analysis Complete',
+            message || 'No high-confidence suggestions to apply.',
+            'warning'
+        );
     }
+}
+
+// Show notification toast
+function showNotification(title, message, type) {
+    // Remove existing notification
+    const existing = document.getElementById('ai-notification');
+    if (existing) {
+        existing.remove();
+    }
+    
+    const colors = {
+        'info': { bg: '#eff6ff', border: '#3b82f6', text: '#1e40af' },
+        'success': { bg: '#f0fdf4', border: '#22c55e', text: '#166534' },
+        'warning': { bg: '#fffbeb', border: '#f59e0b', text: '#92400e' },
+        'error': { bg: '#fef2f2', border: '#ef4444', text: '#991b1b' }
+    };
+    const color = colors[type] || colors.info;
+    
+    const notification = document.createElement('div');
+    notification.id = 'ai-notification';
+    notification.style.cssText = `
+        position: fixed;
+        top: 1rem;
+        right: 1rem;
+        max-width: 400px;
+        padding: 1rem;
+        background: ${color.bg};
+        border: 1px solid ${color.border};
+        border-radius: 0.5rem;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        z-index: 9999;
+        animation: slideIn 0.3s ease;
+    `;
+    
+    notification.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: start; gap: 1rem;">
+            <div>
+                <div style="font-weight: 600; color: ${color.text}; margin-bottom: 0.5rem;">${title}</div>
+                <div style="font-size: 0.875rem; color: ${color.text}; white-space: pre-line;">${message}</div>
+            </div>
+            <button onclick="this.parentElement.parentElement.remove()" style="
+                background: none;
+                border: none;
+                font-size: 1.25rem;
+                cursor: pointer;
+                color: ${color.text};
+                line-height: 1;
+            ">×</button>
+        </div>
+    `;
+    
+    document.body.appendChild(notification);
+    
+    // Auto-dismiss after 10 seconds
+    setTimeout(() => {
+        if (notification.parentElement) {
+            notification.style.animation = 'slideOut 0.3s ease forwards';
+            setTimeout(() => notification.remove(), 300);
+        }
+    }, 10000);
 }
 
 function selectSuggestion(element, id, type) {
