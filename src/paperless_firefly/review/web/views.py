@@ -4286,3 +4286,280 @@ def api_unlink(request: HttpRequest) -> JsonResponse:
     except Exception as e:
         logger.error(f"Error removing link: {e}")
         return JsonResponse({"success": False, "error": str(e)}, status=500)
+
+
+# ============================================================================
+# AI/LLM API Endpoints
+# ============================================================================
+
+
+def _load_documentation_context() -> str:
+    """Load documentation files as context for the chatbot.
+    
+    Returns:
+        Combined documentation content.
+    """
+    from pathlib import Path
+    
+    docs_dir = Path(__file__).parent.parent.parent.parent.parent / "docs"
+    doc_files = [
+        "DEVELOPER_GUIDE.md",
+        "DOCKER_QUICK_START.md",
+        "TESTING_GUIDE.md",
+    ]
+    
+    content_parts = []
+    for filename in doc_files:
+        filepath = docs_dir / filename
+        if filepath.exists():
+            try:
+                text = filepath.read_text(encoding="utf-8")
+                # Truncate very long files
+                if len(text) > 10000:
+                    text = text[:10000] + "\n\n[... truncated for brevity ...]"
+                content_parts.append(f"## {filename}\n\n{text}")
+            except Exception as e:
+                logger.warning(f"Could not read {filename}: {e}")
+    
+    return "\n\n---\n\n".join(content_parts) if content_parts else ""
+
+
+@login_required
+@require_http_methods(["POST"])
+def api_suggest_splits(request: HttpRequest, document_id: int) -> JsonResponse:
+    """API endpoint to get AI-suggested split transactions.
+    
+    Uses the SparkAI service to analyze document content and suggest
+    how to split a transaction across categories based on line items.
+    
+    Args:
+        request: HTTP request with optional bank_data in body.
+        document_id: Paperless document ID.
+        
+    Returns:
+        JSON response with split suggestions.
+    """
+    from pathlib import Path
+    from ...config import load_config
+    from ...spark_ai import SparkAIService
+    from ...firefly_client import FireflyClient
+    
+    store = _get_store()
+    
+    try:
+        # Get extraction data
+        extraction = store.get_extraction_by_document(document_id)
+        if not extraction:
+            return JsonResponse({
+                "success": False,
+                "error": "Extraction not found for this document"
+            }, status=404)
+        
+        # Parse extraction JSON
+        try:
+            extraction_data = json.loads(extraction.extraction_json)
+        except (json.JSONDecodeError, TypeError):
+            extraction_data = {}
+        
+        # Get request body for optional bank data
+        bank_data = None
+        if request.body:
+            try:
+                body = json.loads(request.body)
+                bank_data = body.get("bank_data")
+            except json.JSONDecodeError:
+                pass
+        
+        # Get linked bank transaction if available
+        if not bank_data:
+            linkage = store.get_linkage_by_extraction(extraction.id)
+            if linkage and linkage.get("firefly_id"):
+                # Fetch from cache
+                conn = store._get_connection()
+                try:
+                    row = conn.execute(
+                        "SELECT transaction_json FROM firefly_cache WHERE firefly_id = ?",
+                        (linkage["firefly_id"],)
+                    ).fetchone()
+                    if row:
+                        try:
+                            txn_data = json.loads(row["transaction_json"])
+                            bank_data = {
+                                "amount": txn_data.get("amount"),
+                                "date": txn_data.get("date"),
+                                "description": txn_data.get("description"),
+                                "category_name": txn_data.get("category_name"),
+                            }
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                finally:
+                    conn.close()
+        
+        # Load config and create SparkAI service
+        config_path = Path(getattr(settings, "STATE_DB_PATH", "/app/data/state.db")).parent / "config.yaml"
+        if not config_path.exists():
+            config_path = Path("/app/config/config.yaml")
+        
+        if not config_path.exists():
+            return JsonResponse({
+                "success": False,
+                "error": "Configuration file not found"
+            }, status=500)
+        
+        config = load_config(config_path)
+        
+        if not config.llm.enabled:
+            return JsonResponse({
+                "success": False,
+                "error": "LLM service is not enabled in configuration"
+            }, status=400)
+        
+        # Get categories from Firefly
+        categories = []
+        try:
+            firefly = FireflyClient(config.firefly.url, config.firefly.token)
+            categories = firefly.get_categories()
+        except Exception as e:
+            logger.warning(f"Could not fetch Firefly categories: {e}")
+        
+        # Create AI service
+        ai_service = SparkAIService(store, config, categories)
+        
+        # Extract content for analysis
+        amount = extraction_data.get("total_amount") or extraction_data.get("amount", "0")
+        date = extraction_data.get("date", "")
+        vendor = extraction_data.get("vendor") or extraction_data.get("payee", "")
+        description = extraction_data.get("description", "")
+        content = extraction_data.get("ocr_content") or extraction_data.get("content", "")
+        
+        # If we have line items already extracted, format them
+        line_items = extraction_data.get("line_items", [])
+        if line_items and not content:
+            content = "Extracted line items:\n"
+            for item in line_items:
+                content += f"- {item.get('description', 'Item')}: {item.get('amount', '0')}\n"
+        
+        # Get split suggestions
+        suggestion = ai_service.suggest_splits(
+            amount=str(amount),
+            date=str(date),
+            vendor=vendor,
+            description=description,
+            content=content,
+            bank_data=bank_data,
+        )
+        
+        ai_service.close()
+        
+        if not suggestion:
+            return JsonResponse({
+                "success": False,
+                "error": "LLM service failed to generate suggestions"
+            }, status=500)
+        
+        return JsonResponse({
+            "success": True,
+            "suggestion": suggestion.to_dict(),
+        })
+        
+    except Exception as e:
+        logger.exception(f"Error generating split suggestions: {e}")
+        return JsonResponse({
+            "success": False,
+            "error": str(e)
+        }, status=500)
+
+
+@login_required
+@require_http_methods(["POST"])
+def api_chat(request: HttpRequest) -> JsonResponse:
+    """API endpoint for the documentation chatbot.
+    
+    Uses SparkAI service to answer questions about the software
+    with documentation context.
+    
+    Args:
+        request: HTTP request with 'question' in JSON body.
+        
+    Returns:
+        JSON response with chatbot answer.
+    """
+    from pathlib import Path
+    from ...config import load_config
+    from ...spark_ai import SparkAIService
+    
+    store = _get_store()
+    
+    try:
+        # Parse request body
+        if not request.body:
+            return JsonResponse({
+                "success": False,
+                "error": "Request body required"
+            }, status=400)
+        
+        try:
+            body = json.loads(request.body)
+        except json.JSONDecodeError:
+            return JsonResponse({
+                "success": False,
+                "error": "Invalid JSON body"
+            }, status=400)
+        
+        question = body.get("question", "").strip()
+        if not question:
+            return JsonResponse({
+                "success": False,
+                "error": "Question is required"
+            }, status=400)
+        
+        # Load config
+        config_path = Path(getattr(settings, "STATE_DB_PATH", "/app/data/state.db")).parent / "config.yaml"
+        if not config_path.exists():
+            config_path = Path("/app/config/config.yaml")
+        
+        if not config_path.exists():
+            return JsonResponse({
+                "success": False,
+                "error": "Configuration file not found"
+            }, status=500)
+        
+        config = load_config(config_path)
+        
+        if not config.llm.enabled:
+            return JsonResponse({
+                "success": False,
+                "error": "LLM service is not enabled. Enable it in config with llm.enabled: true"
+            }, status=400)
+        
+        # Create AI service (no categories needed for chat)
+        ai_service = SparkAIService(store, config, categories=[])
+        
+        # Load documentation context
+        documentation = _load_documentation_context()
+        
+        # Get response
+        response = ai_service.chat(
+            question=question,
+            documentation=documentation,
+        )
+        
+        ai_service.close()
+        
+        if not response:
+            return JsonResponse({
+                "success": False,
+                "error": "LLM service failed to generate response"
+            }, status=500)
+        
+        return JsonResponse({
+            "success": True,
+            "response": response,
+        })
+        
+    except Exception as e:
+        logger.exception(f"Error in chatbot: {e}")
+        return JsonResponse({
+            "success": False,
+            "error": str(e)
+        }, status=500)

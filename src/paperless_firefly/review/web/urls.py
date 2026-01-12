@@ -160,6 +160,19 @@ urlpatterns = [
         name="rerun_interpretation",
     ),
     # ============================================================================
+    # AI/LLM API Routes
+    # ============================================================================
+    path(
+        "api/ai/suggest-splits/<int:document_id>/",
+        views.api_suggest_splits,
+        name="api_suggest_splits",
+    ),
+    path(
+        "api/ai/chat/",
+        views.api_chat,
+        name="api_chat",
+    ),
+    # ============================================================================
     # Audit Trail Routes (Phase 8)
     # ============================================================================
     path("audit-trail/", views.audit_trail_list, name="audit_trail_list"),

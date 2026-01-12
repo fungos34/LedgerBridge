@@ -517,7 +517,7 @@ class TestMobileFriendly:
         base_template = template_dir / "review" / "base.html"
 
         if base_template.exists():
-            content = base_template.read_text()
+            content = base_template.read_text(encoding="utf-8")
             assert "viewport" in content.lower()
 
     def test_responsive_css_classes(self):
@@ -533,7 +533,7 @@ class TestMobileFriendly:
         base_template = template_dir / "review" / "base.html"
 
         if base_template.exists():
-            content = base_template.read_text()
+            content = base_template.read_text(encoding="utf-8")
             # Check for responsive indicators (media queries or bootstrap classes)
             has_responsive = (
                 "@media" in content or "container" in content or "responsive" in content.lower()

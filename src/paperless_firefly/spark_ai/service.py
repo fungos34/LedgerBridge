@@ -8,6 +8,7 @@ Features:
 - Calibration period before auto-apply
 - Opt-out support for individual extractions
 - Concurrency limiting via semaphore
+- Chatbot for documentation questions
 
 Privacy Constraints (non-negotiable):
 - Never log prompts or raw document content at INFO level
@@ -20,13 +21,19 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import httpx
 
-from paperless_firefly.spark_ai.prompts import PROMPT_VERSION, CategoryPrompt, SplitPrompt
+from paperless_firefly.spark_ai.prompts import (
+    PROMPT_VERSION,
+    CategoryPrompt,
+    ChatPrompt,
+    SplitPrompt,
+)
 
 if TYPE_CHECKING:
     from paperless_firefly.config import Config, LLMConfig
@@ -371,16 +378,21 @@ class SparkAIService:
         vendor: str | None = None,
         description: str | None = None,
         content: str | None = None,
+        bank_data: dict | None = None,
         use_cache: bool = True,
     ) -> SplitSuggestion | None:
-        """Suggest transaction splits.
+        """Suggest transaction splits from OCR content.
+
+        Enhanced to extract line items with prices from OCR text and
+        assign categories based on item descriptions.
 
         Args:
             amount: Total transaction amount.
             date: Transaction date.
             vendor: Vendor or payee name.
             description: Transaction description.
-            content: Additional document content.
+            content: OCR/document content with potential line items.
+            bank_data: Optional linked bank transaction data for context.
             use_cache: Whether to use cached responses.
 
         Returns:
@@ -392,9 +404,10 @@ class SparkAIService:
         if not self.categories:
             return None
 
-        # Build cache key including content hash
+        # Build cache key including content hash and bank data
         content_hash = hashlib.sha256((content or "").encode()).hexdigest()[:8]
-        cache_key = self._build_cache_key("split", amount, date, vendor, description, content_hash)
+        bank_hash = hashlib.sha256(json.dumps(bank_data or {}, sort_keys=True).encode()).hexdigest()[:8]
+        cache_key = self._build_cache_key("split", amount, date, vendor, description, content_hash, bank_hash)
 
         # Check cache
         if use_cache:
@@ -413,7 +426,7 @@ class SparkAIService:
                 except (json.JSONDecodeError, KeyError) as e:
                     logger.warning("Invalid cached split response: %s", e)
 
-        # Build prompt
+        # Build prompt with bank data context
         user_message = self._split_prompt.format_user_message(
             amount=amount,
             date=date,
@@ -421,6 +434,7 @@ class SparkAIService:
             description=description,
             content=content,
             categories=self.categories,
+            bank_data=bank_data,
         )
 
         # Use slow model for splits (more complex reasoning)
@@ -436,37 +450,104 @@ class SparkAIService:
 
         try:
             data = self._parse_json_response(result["content"])
+
+            # Normalize splits data
+            raw_splits = data.get("splits", [])
+            normalized_splits = []
+
+            for split in raw_splits:
+                # Normalize amount - handle string/float/int
+                raw_amount = split.get("amount", 0)
+                if isinstance(raw_amount, str):
+                    # Handle European format (comma as decimal)
+                    raw_amount = raw_amount.replace(",", ".").strip()
+                    # Remove currency symbols
+                    raw_amount = re.sub(r"[€$£]", "", raw_amount).strip()
+                try:
+                    amount = float(raw_amount)
+                except (ValueError, TypeError):
+                    amount = 0.0
+
+                # Normalize category - fuzzy match to available categories
+                raw_category = str(split.get("category", "")).strip()
+                matched_category = self._match_category(raw_category)
+
+                if matched_category and amount > 0:
+                    normalized_splits.append({
+                        "category": matched_category,
+                        "amount": round(amount, 2),
+                        "description": str(split.get("description", "")).strip(),
+                    })
+
             suggestion = SplitSuggestion(
-                should_split=data.get("should_split", False),
-                splits=data.get("splits", []),
+                should_split=data.get("should_split", False) and len(normalized_splits) > 0,
+                splits=normalized_splits,
                 confidence=float(data.get("confidence", 0.0)),
                 reason=data.get("reason", ""),
                 model=result["model"],
             )
 
-            # Validate split categories
-            for split in suggestion.splits:
-                if split.get("category") not in self.categories:
-                    logger.warning(
-                        "LLM suggested invalid split category '%s'",
-                        split.get("category"),
-                    )
-                    return None
-
             # Cache the result
-            self.store.set_llm_cache(
-                cache_key=cache_key,
-                model=result["model"],
-                prompt_version=PROMPT_VERSION,
-                taxonomy_version=self._taxonomy_version,
-                response_json=json.dumps(data),
-            )
+            if suggestion.splits:
+                self.store.set_llm_cache(
+                    cache_key=cache_key,
+                    model=result["model"],
+                    prompt_version=PROMPT_VERSION,
+                    taxonomy_version=self._taxonomy_version,
+                    response_json=json.dumps({
+                        "should_split": suggestion.should_split,
+                        "splits": suggestion.splits,
+                        "confidence": suggestion.confidence,
+                        "reason": suggestion.reason,
+                    }),
+                )
 
             return suggestion
 
         except (json.JSONDecodeError, ValueError, KeyError) as e:
             logger.warning("Failed to parse LLM split response: %s", e)
             return None
+
+    def _match_category(self, raw_category: str) -> str | None:
+        """Fuzzy match a category name to available categories.
+
+        Args:
+            raw_category: Raw category name from LLM.
+
+        Returns:
+            Matched category name or None if no match.
+        """
+        if not raw_category:
+            return None
+
+        raw_lower = raw_category.lower().strip()
+
+        # Exact match first
+        for cat in self.categories:
+            if cat.lower() == raw_lower:
+                return cat
+
+        # Substring match
+        for cat in self.categories:
+            if raw_lower in cat.lower() or cat.lower() in raw_lower:
+                return cat
+
+        # Word overlap match
+        raw_words = set(raw_lower.split())
+        best_match = None
+        best_overlap = 0
+        for cat in self.categories:
+            cat_words = set(cat.lower().split())
+            overlap = len(raw_words & cat_words)
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best_match = cat
+
+        if best_overlap > 0:
+            return best_match
+
+        logger.debug("Could not match category '%s' to available categories", raw_category)
+        return None
 
     def should_auto_apply(self, confidence: float) -> bool:
         """Check if a suggestion should be auto-applied.
@@ -653,7 +734,14 @@ class SparkAIService:
             self._limiter.release()
 
     def _parse_json_response(self, content: str) -> dict:
-        """Parse JSON from LLM response, handling markdown code blocks.
+        """Parse JSON from LLM response with robust handling of malformed responses.
+
+        Handles:
+        - Markdown code blocks (```json ... ```)
+        - Leading/trailing whitespace
+        - Newlines within JSON
+        - Minor formatting issues
+        - Extracts JSON from mixed text responses
 
         Args:
             content: Raw LLM response content.
@@ -662,18 +750,139 @@ class SparkAIService:
             Parsed JSON dict.
 
         Raises:
-            json.JSONDecodeError: If content is not valid JSON.
+            json.JSONDecodeError: If content cannot be parsed as valid JSON.
         """
-        # Strip markdown code blocks if present
+        if not content:
+            raise json.JSONDecodeError("Empty response", "", 0)
+
+        # Strip leading/trailing whitespace
         content = content.strip()
+
+        # Remove markdown code blocks
         if content.startswith("```json"):
             content = content[7:]
-        if content.startswith("```"):
+        elif content.startswith("```"):
             content = content[3:]
         if content.endswith("```"):
             content = content[:-3]
+        content = content.strip()
 
-        return json.loads(content.strip())
+        # Try direct parsing first
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            pass
+
+        # Try to find JSON array pattern for splits FIRST (handles nested objects)
+        # Check for array pattern before object pattern to avoid extracting first object
+        if "[" in content:
+            array_match = re.search(r"\[[\s\S]*\]", content)
+            if array_match:
+                try:
+                    # Wrap in object with splits key
+                    splits_data = json.loads(array_match.group())
+                    if isinstance(splits_data, list) and len(splits_data) > 0:
+                        return {
+                            "should_split": True,
+                            "splits": splits_data,
+                            "confidence": 0.5,
+                            "reason": "Extracted from malformed response",
+                        }
+                except json.JSONDecodeError:
+                    pass
+
+        # Try to extract JSON object from response using regex
+        # Match the outermost { ... } block (only if not inside an array)
+        json_match = re.search(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", content, re.DOTALL)
+        if json_match:
+            try:
+                return json.loads(json_match.group())
+            except json.JSONDecodeError:
+                pass
+
+        # Clean common issues and retry
+        # Remove control characters except newlines and tabs
+        cleaned = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", content)
+        # Fix common JSON issues: trailing commas before } or ]
+        cleaned = re.sub(r",\s*([}\]])", r"\1", cleaned)
+        # Fix unquoted keys (simple cases)
+        cleaned = re.sub(r"(\{|,)\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:", r'\1"\2":', cleaned)
+
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            pass
+
+        # Last resort: try to extract key-value pairs manually
+        result = {}
+
+        # Look for should_split
+        split_match = re.search(r'"?should_split"?\s*:\s*(true|false)', content, re.IGNORECASE)
+        if split_match:
+            result["should_split"] = split_match.group(1).lower() == "true"
+
+        # Look for confidence
+        conf_match = re.search(r'"?confidence"?\s*:\s*([0-9.]+)', content)
+        if conf_match:
+            try:
+                result["confidence"] = float(conf_match.group(1))
+            except ValueError:
+                result["confidence"] = 0.5
+
+        # Look for category
+        cat_match = re.search(r'"?category"?\s*:\s*"([^"]+)"', content)
+        if cat_match:
+            result["category"] = cat_match.group(1)
+
+        # Look for reason
+        reason_match = re.search(r'"?reason"?\s*:\s*"([^"]+)"', content)
+        if reason_match:
+            result["reason"] = reason_match.group(1)
+        else:
+            result["reason"] = "Extracted from malformed response"
+
+        if result:
+            logger.debug("Extracted partial data from malformed LLM response: %s", result)
+            return result
+
+        # Give up
+        raise json.JSONDecodeError(
+            f"Could not parse JSON from response: {content[:200]}...", content, 0
+        )
+
+    def chat(
+        self,
+        question: str,
+        documentation: str | None = None,
+    ) -> str | None:
+        """Chat with the LLM using documentation context.
+
+        Args:
+            question: User's question.
+            documentation: Optional documentation content for context.
+
+        Returns:
+            LLM response string or None if failed.
+        """
+        if not self.is_enabled:
+            return None
+
+        chat_prompt = ChatPrompt()
+        user_message = chat_prompt.format_user_message(
+            question=question,
+            documentation=documentation or "",
+        )
+
+        # Use fast model for chat
+        result = self._call_ollama(
+            model=self.llm_config.model_fast,
+            system_prompt=chat_prompt.system_prompt,
+            user_message=user_message,
+        )
+
+        if result:
+            return result["content"]
+        return None
 
     def close(self) -> None:
         """Close HTTP client."""
