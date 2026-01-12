@@ -172,6 +172,7 @@
     .status-linked { background: #dcfce7; color: #166534; }
     .status-orphan { background: #fee2e2; color: #991b1b; }
     .status-ready { background: #d1fae5; color: #065f46; }
+    .status-confirmed { background: #ddd6fe; color: #5b21b6; }
     
     /* AI Status Badges */
     .ai-status-badge {
@@ -223,7 +224,7 @@
     
     .record-actions {
         display: flex;
-        gap: 0.5rem;
+        gap: 0.75rem;
         flex-shrink: 0;
     }
     
@@ -491,14 +492,18 @@
                         </div>
                     </div>
                     <div class="record-status">
-                        {% if record.needs_linking %}
-                        <span class="status-needs-link">⚠️ Needs Link</span>
-                        {% elif record.needs_review %}
-                        <span class="status-needs-review">👁️ Needs Review</span>
-                        {% elif record.is_orphan %}
+                        {% if record.review_decision == 'ACCEPTED' or record.review_decision == 'EDITED' %}
+                        <span class="status-confirmed">✓ Confirmed</span>
+                        {% endif %}
+                        {% if record.is_orphan %}
                         <span class="status-orphan">📍 Orphan</span>
                         {% elif record.is_linked %}
                         <span class="status-linked">🔗 Linked</span>
+                        {% elif record.needs_linking %}
+                        <span class="status-needs-link">⚠️ Needs Link</span>
+                        {% endif %}
+                        {% if record.needs_review and record.review_decision != 'ACCEPTED' and record.review_decision != 'EDITED' %}
+                        <span class="status-needs-review">👁️ Needs Review</span>
                         {% endif %}
                         {% if record.ready_for_import %}
                         <span class="status-ready">✅ Ready</span>

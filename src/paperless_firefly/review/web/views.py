@@ -169,11 +169,11 @@ def _get_external_urls(user=None):
 
 def _get_document_id_for_extraction(store: StateStore, extraction_id: int) -> int | None:
     """Get the document_id for an extraction record.
-    
+
     Args:
         store: StateStore instance.
         extraction_id: The extraction record ID.
-        
+
     Returns:
         The document_id if found, None otherwise.
     """
@@ -369,18 +369,10 @@ def user_settings(request: HttpRequest) -> HttpResponse:
             profile.ai_schedule_interval_minutes = int(
                 request.POST.get("ai_schedule_interval_minutes", 60)
             )
-            profile.ai_schedule_batch_size = int(
-                request.POST.get("ai_schedule_batch_size", 1)
-            )
-            profile.ai_schedule_max_retries = int(
-                request.POST.get("ai_schedule_max_retries", 3)
-            )
-            profile.ai_schedule_start_hour = int(
-                request.POST.get("ai_schedule_start_hour", 0)
-            )
-            profile.ai_schedule_end_hour = int(
-                request.POST.get("ai_schedule_end_hour", 24)
-            )
+            profile.ai_schedule_batch_size = int(request.POST.get("ai_schedule_batch_size", 1))
+            profile.ai_schedule_max_retries = int(request.POST.get("ai_schedule_max_retries", 3))
+            profile.ai_schedule_start_hour = int(request.POST.get("ai_schedule_start_hour", 0))
+            profile.ai_schedule_end_hour = int(request.POST.get("ai_schedule_end_hour", 24))
         except ValueError:
             pass
 
@@ -433,6 +425,7 @@ def user_settings(request: HttpRequest) -> HttpResponse:
         ollama_url = profile.ollama_url or getattr(settings, "OLLAMA_URL", "http://localhost:11434")
         try:
             import httpx
+
             resp = httpx.get(f"{ollama_url}/api/tags", timeout=5)
             if resp.status_code == 200:
                 llm_status = "connected"
@@ -635,7 +628,7 @@ def _is_llm_globally_enabled() -> bool:
 
     Per SPARK_EVALUATION_REPORT.md 6.7.1: Global opt-out via config.llm.enabled.
     Environment variable SPARK_LLM_ENABLED takes precedence.
-    
+
     Note: This only checks base config. For user-specific settings, use
     _is_llm_enabled_for_user(request) instead.
     """
@@ -672,24 +665,24 @@ def _is_llm_globally_enabled() -> bool:
 
 def _is_llm_enabled_for_user(request: HttpRequest) -> bool:
     """Check if LLM is enabled for the current user.
-    
+
     Checks in order:
     1. Environment variable SPARK_LLM_ENABLED (overrides all)
     2. User profile llm_enabled setting
     3. Base config llm.enabled
-    
+
     Returns True if any of these enables LLM.
     """
     import os
     from .models import UserProfile
-    
+
     # Check environment variable first (takes precedence)
     env_value = os.environ.get("SPARK_LLM_ENABLED", "").lower()
     if env_value == "true":
         return True
     elif env_value == "false":
         return False
-    
+
     # Check user profile setting
     if request.user.is_authenticated:
         try:
@@ -698,7 +691,7 @@ def _is_llm_enabled_for_user(request: HttpRequest) -> bool:
                 return True
         except UserProfile.DoesNotExist:
             pass
-    
+
     # Fall back to global config check
     return _is_llm_globally_enabled()
 
@@ -722,7 +715,9 @@ def accept_extraction(request: HttpRequest, extraction_id: int) -> HttpResponse:
 
     pending = store.get_extractions_for_review()
     if pending:
-        return redirect("unified_review_detail", record_type="paperless", record_id=pending[0].document_id)
+        return redirect(
+            "unified_review_detail", record_type="paperless", record_id=pending[0].document_id
+        )
     return redirect("list")
 
 
@@ -735,7 +730,9 @@ def reject_extraction(request: HttpRequest, extraction_id: int) -> HttpResponse:
 
     pending = store.get_extractions_for_review()
     if pending:
-        return redirect("unified_review_detail", record_type="paperless", record_id=pending[0].document_id)
+        return redirect(
+            "unified_review_detail", record_type="paperless", record_id=pending[0].document_id
+        )
     return redirect("list")
 
 
@@ -1024,19 +1021,22 @@ def save_extraction(request: HttpRequest, extraction_id: int) -> HttpResponse:
         decision = None  # Don't change review decision
 
     updated_json = json.dumps(extraction.to_dict())
-    
+
     if decision is not None:
         store.update_extraction_review(extraction_id, decision.value, updated_json)
         # Move to next pending item
         pending = store.get_extractions_for_review()
         if pending:
-            return redirect("unified_review_detail", record_type="paperless", record_id=pending[0].document_id)
+            return redirect(
+                "unified_review_detail", record_type="paperless", record_id=pending[0].document_id
+            )
         return redirect("list")
     else:
         # Just save the data without changing review status
         store.update_extraction_data(extraction_id, updated_json)
         # Stay on current page with success message
         from django.contrib import messages
+
         messages.success(request, "Changes saved. Review and confirm when ready.")
         doc_id = _get_document_id_for_extraction(store, extraction_id)
         if doc_id:
@@ -1183,7 +1183,7 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
                 error_message = "Configuration file not found"
             else:
                 config = load_config(config_path)
-                
+
                 # Override config with user profile settings
                 try:
                     profile = UserProfile.objects.get(user=request.user)
@@ -1232,14 +1232,14 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
                     current_category = proposal.get("category", "")
                     current_type = proposal.get("transaction_type", "withdrawal")
                     invoice_number = proposal.get("invoice_number", "")
-                    
+
                     # Get document content (OCR text or structured content)
                     # Check multiple possible locations for the raw text
                     document_content = (
-                        extraction_data.get("raw_text") or
-                        extraction_data.get("ocr_content") or
-                        extraction_data.get("content") or
-                        ""
+                        extraction_data.get("raw_text")
+                        or extraction_data.get("ocr_content")
+                        or extraction_data.get("content")
+                        or ""
                     )
                     if not document_content:
                         # Try to get from structured payload
@@ -1247,17 +1247,17 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
                         if structured:
                             document_content = f"Invoice: {structured.get('invoice_id', '')}\n"
                             document_content += f"Vendor: {structured.get('seller_name', '')}\n"
-                            line_items = structured.get('line_items', [])
+                            line_items = structured.get("line_items", [])
                             if line_items:
                                 document_content += "Line Items:\n"
                                 for item in line_items:
                                     if isinstance(item, dict):
-                                        name = item.get('name', item.get('description', ''))
-                                        price = item.get('price', item.get('amount', ''))
+                                        name = item.get("name", item.get("description", ""))
+                                        price = item.get("price", item.get("amount", ""))
                                         document_content += f"  - {name}: {price}\n"
                                     else:
                                         document_content += f"  - {item}\n"
-                    
+
                     # Get linked bank transaction if available
                     bank_transaction = None
                     linkage = store.get_linkage_by_extraction(extraction_id)
@@ -1276,16 +1276,16 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
                                 bank_transaction = dict(ff_row)
                         finally:
                             conn.close()
-                    
+
                     # Get previous interpretation decisions
                     previous_decisions = store.get_interpretation_runs(document_id)[:3]
-                    
+
                     # Create SparkAI service and call comprehensive review
                     ai_service = SparkAIService(store, config, categories)
-                    
+
                     # Get current source account for comparison
                     current_source_account = proposal.get("source_account")
-                    
+
                     # Use comprehensive review method for full field suggestions
                     review_suggestion = ai_service.suggest_for_review(
                         amount=amount,
@@ -1304,19 +1304,19 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
                         source_accounts=source_accounts,
                         current_source_account=current_source_account,
                     )
-                    
+
                     if review_suggestion:
                         llm_result = review_suggestion.to_dict()
                         all_suggestions = llm_result.get("suggestions", {})
-                        
+
                         # Include split transactions if present
                         if llm_result.get("split_transactions"):
                             all_suggestions["split_transactions"] = llm_result["split_transactions"]
-                        
+
                         # Extract category for backward compatibility
                         if "category" in all_suggestions:
                             suggested_category = all_suggestions["category"]["value"]
-                        
+
                         final_state = "COMPLETED"
                     else:
                         # Fall back to simple category suggestion
@@ -1328,7 +1328,7 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
                             document_id=document_id,
                             use_cache=False,
                         )
-                        
+
                         if suggestion:
                             llm_result = suggestion.to_dict()
                             suggested_category = suggestion.category
@@ -1344,12 +1344,16 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
                             final_state = "NO_SUGGESTION"
                             # Try to diagnose why LLM returned no suggestion
                             if not ai_service.is_enabled:
-                                error_message = "LLM service is not enabled. Check Settings → AI Assistant."
+                                error_message = (
+                                    "LLM service is not enabled. Check Settings → AI Assistant."
+                                )
                             else:
                                 # Check opt-out status
                                 opted_out, opt_reason = ai_service.check_opt_out(document_id)
                                 if opted_out:
-                                    error_message = f"LLM is opted out for this document: {opt_reason}"
+                                    error_message = (
+                                        f"LLM is opted out for this document: {opt_reason}"
+                                    )
                                 else:
                                     # LLM call likely failed (timeout, connection, parsing)
                                     error_message = (
@@ -2745,9 +2749,11 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
                     file_bytes=file_bytes,
                     source_hash=source_hash,
                     paperless_base_url=settings.PAPERLESS_BASE_URL,
-                    default_source_account=config.firefly.default_source_account
-                    if hasattr(config.firefly, "default_source_account")
-                    else None,
+                    default_source_account=(
+                        config.firefly.default_source_account
+                        if hasattr(config.firefly, "default_source_account")
+                        else None
+                    ),
                 )
 
                 # Save extraction with full data
@@ -2758,10 +2764,11 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
                     overall_confidence=extraction.confidence.overall,
                     review_state=extraction.confidence.review_state.value,
                 )
-                
+
                 # Schedule AI job if AI scheduling is enabled
                 try:
                     from .models import UserProfile
+
                     profile = UserProfile.objects.filter(user=request.user).first()
                     if profile and profile.ai_schedule_enabled and profile.llm_enabled:
                         # Get extraction ID for the just-saved extraction
@@ -2778,7 +2785,7 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
                             logger.debug(f"Scheduled AI job for doc {doc_id}")
                 except Exception as schedule_err:
                     logger.warning(f"Failed to schedule AI job for doc {doc_id}: {schedule_err}")
-                
+
                 synced += 1
                 logger.info(
                     f"Extracted doc {doc_id}: {extraction.proposal.amount} {extraction.proposal.currency} - {extraction.proposal.date}"
@@ -3230,7 +3237,9 @@ def link_document_to_transaction(request: HttpRequest) -> HttpResponse:
                 return redirect("list")
             else:
                 messages.error(request, "Failed to link document to transaction")
-                return redirect("unified_review_detail", record_type="paperless", record_id=document_id_int)
+                return redirect(
+                    "unified_review_detail", record_type="paperless", record_id=document_id_int
+                )
 
         except Exception as e:
             logger.error(f"Error linking doc {document_id} to tx {firefly_id}: {e}")
@@ -3928,7 +3937,7 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
                         record["match_count"] = len(suggestions)
                     except Exception:
                         pass
-                
+
                 # Get AI job status for this document
                 record["ai_status"] = None
                 record["ai_has_suggestions"] = False
@@ -4177,24 +4186,36 @@ def unified_review_detail(request: HttpRequest, record_type: str, record_id: int
         conf = extraction_data.get("confidence", {})
         confidence = {
             "overall": record_data.get("confidence", 0),
-            "amount": conf.get("amount", 0) * 100
-            if isinstance(conf.get("amount"), float)
-            else conf.get("amount", 0),
-            "date": conf.get("date", 0) * 100
-            if isinstance(conf.get("date"), float)
-            else conf.get("date", 0),
-            "currency": conf.get("currency", 0) * 100
-            if isinstance(conf.get("currency"), float)
-            else conf.get("currency", 0),
-            "description": conf.get("description", 0) * 100
-            if isinstance(conf.get("description"), float)
-            else conf.get("description", 0),
-            "vendor": conf.get("vendor", 0) * 100
-            if isinstance(conf.get("vendor"), float)
-            else conf.get("vendor", 0),
-            "invoice_number": conf.get("invoice_number", 0) * 100
-            if isinstance(conf.get("invoice_number"), float)
-            else conf.get("invoice_number", 0),
+            "amount": (
+                conf.get("amount", 0) * 100
+                if isinstance(conf.get("amount"), float)
+                else conf.get("amount", 0)
+            ),
+            "date": (
+                conf.get("date", 0) * 100
+                if isinstance(conf.get("date"), float)
+                else conf.get("date", 0)
+            ),
+            "currency": (
+                conf.get("currency", 0) * 100
+                if isinstance(conf.get("currency"), float)
+                else conf.get("currency", 0)
+            ),
+            "description": (
+                conf.get("description", 0) * 100
+                if isinstance(conf.get("description"), float)
+                else conf.get("description", 0)
+            ),
+            "vendor": (
+                conf.get("vendor", 0) * 100
+                if isinstance(conf.get("vendor"), float)
+                else conf.get("vendor", 0)
+            ),
+            "invoice_number": (
+                conf.get("invoice_number", 0) * 100
+                if isinstance(conf.get("invoice_number"), float)
+                else conf.get("invoice_number", 0)
+            ),
         }
 
     # Provenance for display
@@ -4266,25 +4287,36 @@ def unified_review_detail(request: HttpRequest, record_type: str, record_id: int
                         ai_suggestions = raw_suggestions.get("suggestions", {})
                         # Merge split_transactions into the flat structure
                         if raw_suggestions.get("split_transactions"):
-                            ai_suggestions["split_transactions"] = raw_suggestions["split_transactions"]
+                            ai_suggestions["split_transactions"] = raw_suggestions[
+                                "split_transactions"
+                            ]
                         # Also include overall_confidence and analysis_notes for UI
                         if raw_suggestions.get("overall_confidence"):
-                            ai_suggestions["_overall_confidence"] = raw_suggestions["overall_confidence"]
+                            ai_suggestions["_overall_confidence"] = raw_suggestions[
+                                "overall_confidence"
+                            ]
                         if raw_suggestions.get("analysis_notes"):
                             ai_suggestions["_analysis_notes"] = raw_suggestions["analysis_notes"]
-                        
+
                         # Filter out suggestions for user-edited fields
                         # This prevents AI suggestions from overriding user's saved changes
-                        user_edited = extraction_data.get("user_edited_fields", []) if extraction_data else []
+                        user_edited = (
+                            extraction_data.get("user_edited_fields", []) if extraction_data else []
+                        )
                         if user_edited:
                             for field_name in user_edited:
                                 if field_name in ai_suggestions:
-                                    logger.debug(f"Suppressing AI suggestion for user-edited field: {field_name}")
+                                    logger.debug(
+                                        f"Suppressing AI suggestion for user-edited field: {field_name}"
+                                    )
                                     del ai_suggestions[field_name]
                             # Also suppress line_items if user edited them
-                            if "line_items" in user_edited and "split_transactions" in ai_suggestions:
+                            if (
+                                "line_items" in user_edited
+                                and "split_transactions" in ai_suggestions
+                            ):
                                 del ai_suggestions["split_transactions"]
-                                
+
                     except json.JSONDecodeError:
                         logger.warning(f"Could not parse AI suggestions for job {ai_job['id']}")
         except Exception as e:
@@ -4295,12 +4327,14 @@ def unified_review_detail(request: HttpRequest, record_type: str, record_id: int
     saved_line_items = []
     if extraction_data and extraction_data.get("line_items"):
         for idx, item in enumerate(extraction_data["line_items"]):
-            saved_line_items.append({
-                "id": idx,
-                "amount": float(item.get("total") or item.get("unit_price") or 0),
-                "description": item.get("description", ""),
-                "category": item.get("category", ""),
-            })
+            saved_line_items.append(
+                {
+                    "id": idx,
+                    "amount": float(item.get("total") or item.get("unit_price") or 0),
+                    "description": item.get("description", ""),
+                    "category": item.get("category", ""),
+                }
+            )
     saved_line_items_json = json.dumps(saved_line_items) if saved_line_items else "[]"
 
     context = {
@@ -4328,7 +4362,9 @@ def unified_review_detail(request: HttpRequest, record_type: str, record_id: int
         "ai_job_status": ai_job_status,
         "ai_suggestions": ai_suggestions,
         # List of fields user has edited (suppress AI suggestions for these)
-        "user_edited_fields": extraction_data.get("user_edited_fields", []) if extraction_data else [],
+        "user_edited_fields": (
+            extraction_data.get("user_edited_fields", []) if extraction_data else []
+        ),
         # Saved line items for form restoration (split transactions)
         "saved_line_items_json": saved_line_items_json,
         **_get_external_urls(request.user if hasattr(request, "user") else None),
@@ -4384,7 +4420,7 @@ def api_quick_link(request: HttpRequest) -> JsonResponse:
                 conn.commit()
             finally:
                 conn.close()
-            
+
             return JsonResponse(
                 {
                     "success": True,
@@ -4398,7 +4434,9 @@ def api_quick_link(request: HttpRequest) -> JsonResponse:
 
     # For paperless documents, paperless_id is required
     if not paperless_id:
-        return JsonResponse({"success": False, "error": "paperless_id required for document operations"}, status=400)
+        return JsonResponse(
+            {"success": False, "error": "paperless_id required for document operations"}, status=400
+        )
 
     try:
         # Get extraction for document
@@ -4582,11 +4620,11 @@ def api_quick_accept(request: HttpRequest, document_id: int) -> JsonResponse:
 
     This applies any AI suggestions and marks the document as accepted,
     ready for import.
-    
+
     Args:
         request: HTTP request
         document_id: Paperless document ID
-        
+
     Returns:
         JSON response with success status
     """
@@ -4597,20 +4635,22 @@ def api_quick_accept(request: HttpRequest, document_id: int) -> JsonResponse:
         extraction = store.get_extraction_by_document(document_id)
         if not extraction:
             return JsonResponse({"success": False, "error": "Extraction not found"}, status=404)
-        
-        extraction_data = json.loads(extraction.extraction_json) if extraction.extraction_json else {}
+
+        extraction_data = (
+            json.loads(extraction.extraction_json) if extraction.extraction_json else {}
+        )
         proposal = extraction_data.get("proposal", {})
-        
+
         # Track which AI suggestions were applied
         ai_suggestions_applied = {}
         original_values = {}
-        
+
         # Check if AI suggestions are available and apply ALL of them
         ai_job = store.get_ai_job_by_document(document_id, active_only=False)
         if ai_job and ai_job["status"] == "COMPLETED" and ai_job.get("suggestions_json"):
             try:
                 suggestions = json.loads(ai_job["suggestions_json"])
-                
+
                 # Apply all available suggestions
                 field_mappings = {
                     "category": "category",
@@ -4620,7 +4660,7 @@ def api_quick_accept(request: HttpRequest, document_id: int) -> JsonResponse:
                     "amount": "amount",
                     "transaction_type": "transaction_type",
                 }
-                
+
                 for suggestion_key, proposal_key in field_mappings.items():
                     if suggestions.get(suggestion_key, {}).get("value"):
                         original_values[proposal_key] = proposal.get(proposal_key)
@@ -4630,9 +4670,9 @@ def api_quick_accept(request: HttpRequest, document_id: int) -> JsonResponse:
                             "confidence": suggestions[suggestion_key].get("confidence"),
                             "original": original_values[proposal_key],
                         }
-                
+
                 extraction_data["proposal"] = proposal
-                
+
                 # Store which AI suggestions were applied for audit
                 if "ai_applied" not in extraction_data:
                     extraction_data["ai_applied"] = {}
@@ -4641,10 +4681,10 @@ def api_quick_accept(request: HttpRequest, document_id: int) -> JsonResponse:
                     "job_id": ai_job["id"],
                     "suggestions": ai_suggestions_applied,
                 }
-                
+
             except json.JSONDecodeError:
                 logger.warning(f"Could not parse AI suggestions for document {document_id}")
-        
+
         # Update extraction with any AI suggestions applied
         conn = store._get_connection()
         try:
@@ -4655,14 +4695,14 @@ def api_quick_accept(request: HttpRequest, document_id: int) -> JsonResponse:
             conn.commit()
         finally:
             conn.close()
-        
+
         # Update extraction status to accepted
         store.update_extraction_status(
             extraction.id,
             review_decision="ACCEPTED",
             review_state="AUTO",
         )
-        
+
         # Create audit trail entry with detailed info about what was applied
         store.create_interpretation_run(
             document_id=document_id,
@@ -4682,11 +4722,13 @@ def api_quick_accept(request: HttpRequest, document_id: int) -> JsonResponse:
             llm_result=ai_suggestions_applied if ai_suggestions_applied else None,
         )
 
-        return JsonResponse({
-            "success": True,
-            "message": f"Document {document_id} accepted",
-            "ai_suggestions_applied": len(ai_suggestions_applied),
-        })
+        return JsonResponse(
+            {
+                "success": True,
+                "message": f"Document {document_id} accepted",
+                "ai_suggestions_applied": len(ai_suggestions_applied),
+            }
+        )
 
     except Exception as e:
         logger.error(f"Error in quick accept: {e}")
@@ -4700,19 +4742,19 @@ def api_quick_accept(request: HttpRequest, document_id: int) -> JsonResponse:
 
 def _load_documentation_context() -> str:
     """Load documentation files as context for the chatbot.
-    
+
     Returns:
         Combined documentation content.
     """
     from pathlib import Path
-    
+
     docs_dir = Path(__file__).parent.parent.parent.parent.parent / "docs"
     doc_files = [
         "DEVELOPER_GUIDE.md",
         "DOCKER_QUICK_START.md",
         "TESTING_GUIDE.md",
     ]
-    
+
     content_parts = []
     for filename in doc_files:
         filepath = docs_dir / filename
@@ -4725,7 +4767,7 @@ def _load_documentation_context() -> str:
                 content_parts.append(f"## {filename}\n\n{text}")
             except Exception as e:
                 logger.warning(f"Could not read {filename}: {e}")
-    
+
     return "\n\n---\n\n".join(content_parts) if content_parts else ""
 
 
@@ -4733,14 +4775,14 @@ def _load_documentation_context() -> str:
 @require_http_methods(["POST"])
 def api_suggest_splits(request: HttpRequest, document_id: int) -> JsonResponse:
     """API endpoint to get AI-suggested split transactions.
-    
+
     Uses the SparkAI service to analyze document content and suggest
     how to split a transaction across categories based on line items.
-    
+
     Args:
         request: HTTP request with optional bank_data in body.
         document_id: Paperless document ID.
-        
+
     Returns:
         JSON response with split suggestions.
     """
@@ -4748,24 +4790,23 @@ def api_suggest_splits(request: HttpRequest, document_id: int) -> JsonResponse:
     from ...config import load_config
     from ...spark_ai import SparkAIService
     from ...firefly_client import FireflyClient
-    
+
     store = _get_store()
-    
+
     try:
         # Get extraction data
         extraction = store.get_extraction_by_document(document_id)
         if not extraction:
-            return JsonResponse({
-                "success": False,
-                "error": "Extraction not found for this document"
-            }, status=404)
-        
+            return JsonResponse(
+                {"success": False, "error": "Extraction not found for this document"}, status=404
+            )
+
         # Parse extraction JSON
         try:
             extraction_data = json.loads(extraction.extraction_json)
         except (json.JSONDecodeError, TypeError):
             extraction_data = {}
-        
+
         # Get request body for optional bank data
         bank_data = None
         if request.body:
@@ -4774,7 +4815,7 @@ def api_suggest_splits(request: HttpRequest, document_id: int) -> JsonResponse:
                 bank_data = body.get("bank_data")
             except json.JSONDecodeError:
                 pass
-        
+
         # Get linked bank transaction if available
         if not bank_data:
             linkage = store.get_linkage_by_extraction(extraction.id)
@@ -4784,7 +4825,7 @@ def api_suggest_splits(request: HttpRequest, document_id: int) -> JsonResponse:
                 try:
                     row = conn.execute(
                         "SELECT transaction_json FROM firefly_cache WHERE firefly_id = ?",
-                        (linkage["firefly_id"],)
+                        (linkage["firefly_id"],),
                     ).fetchone()
                     if row:
                         try:
@@ -4799,26 +4840,27 @@ def api_suggest_splits(request: HttpRequest, document_id: int) -> JsonResponse:
                             pass
                 finally:
                     conn.close()
-        
+
         # Load config and create SparkAI service
-        config_path = Path(getattr(settings, "STATE_DB_PATH", "/app/data/state.db")).parent / "config.yaml"
+        config_path = (
+            Path(getattr(settings, "STATE_DB_PATH", "/app/data/state.db")).parent / "config.yaml"
+        )
         if not config_path.exists():
             config_path = Path("/app/config/config.yaml")
-        
+
         if not config_path.exists():
-            return JsonResponse({
-                "success": False,
-                "error": "Configuration file not found"
-            }, status=500)
-        
+            return JsonResponse(
+                {"success": False, "error": "Configuration file not found"}, status=500
+            )
+
         config = load_config(config_path)
-        
+
         if not config.llm.enabled:
-            return JsonResponse({
-                "success": False,
-                "error": "LLM service is not enabled in configuration"
-            }, status=400)
-        
+            return JsonResponse(
+                {"success": False, "error": "LLM service is not enabled in configuration"},
+                status=400,
+            )
+
         # Get categories from Firefly
         categories = []
         try:
@@ -4826,24 +4868,24 @@ def api_suggest_splits(request: HttpRequest, document_id: int) -> JsonResponse:
             categories = firefly.get_categories()
         except Exception as e:
             logger.warning(f"Could not fetch Firefly categories: {e}")
-        
+
         # Create AI service
         ai_service = SparkAIService(store, config, categories)
-        
+
         # Extract content for analysis
         amount = extraction_data.get("total_amount") or extraction_data.get("amount", "0")
         date = extraction_data.get("date", "")
         vendor = extraction_data.get("vendor") or extraction_data.get("payee", "")
         description = extraction_data.get("description", "")
         content = extraction_data.get("ocr_content") or extraction_data.get("content", "")
-        
+
         # If we have line items already extracted, format them
         line_items = extraction_data.get("line_items", [])
         if line_items and not content:
             content = "Extracted line items:\n"
             for item in line_items:
                 content += f"- {item.get('description', 'Item')}: {item.get('amount', '0')}\n"
-        
+
         # Get split suggestions
         suggestion = ai_service.suggest_splits(
             amount=str(amount),
@@ -4853,39 +4895,38 @@ def api_suggest_splits(request: HttpRequest, document_id: int) -> JsonResponse:
             content=content,
             bank_data=bank_data,
         )
-        
+
         ai_service.close()
-        
+
         if not suggestion:
-            return JsonResponse({
-                "success": False,
-                "error": "LLM service failed to generate suggestions"
-            }, status=500)
-        
-        return JsonResponse({
-            "success": True,
-            "suggestion": suggestion.to_dict(),
-        })
-        
+            return JsonResponse(
+                {"success": False, "error": "LLM service failed to generate suggestions"},
+                status=500,
+            )
+
+        return JsonResponse(
+            {
+                "success": True,
+                "suggestion": suggestion.to_dict(),
+            }
+        )
+
     except Exception as e:
         logger.exception(f"Error generating split suggestions: {e}")
-        return JsonResponse({
-            "success": False,
-            "error": str(e)
-        }, status=500)
+        return JsonResponse({"success": False, "error": str(e)}, status=500)
 
 
 @login_required
 @require_http_methods(["POST"])
 def api_chat(request: HttpRequest) -> JsonResponse:
     """API endpoint for the documentation chatbot.
-    
+
     Uses SparkAI service to answer questions about the software
     with documentation context. Respects user's LLM settings from profile.
-    
+
     Args:
         request: HTTP request with 'question' in JSON body.
-        
+
     Returns:
         JSON response with chatbot answer.
     """
@@ -4893,53 +4934,45 @@ def api_chat(request: HttpRequest) -> JsonResponse:
     from ...config import load_config, LLMConfig
     from ...spark_ai import SparkAIService
     from .models import UserProfile
-    
+
     store = _get_store()
-    
+
     try:
         # Parse request body
         if not request.body:
-            return JsonResponse({
-                "success": False,
-                "error": "Request body required"
-            }, status=400)
-        
+            return JsonResponse({"success": False, "error": "Request body required"}, status=400)
+
         try:
             body = json.loads(request.body)
         except json.JSONDecodeError:
-            return JsonResponse({
-                "success": False,
-                "error": "Invalid JSON body"
-            }, status=400)
-        
+            return JsonResponse({"success": False, "error": "Invalid JSON body"}, status=400)
+
         question = body.get("question", "").strip()
         if not question:
-            return JsonResponse({
-                "success": False,
-                "error": "Question is required"
-            }, status=400)
-        
+            return JsonResponse({"success": False, "error": "Question is required"}, status=400)
+
         # Extract optional context from request
         page_context = body.get("page_context", "")
         conversation_history = body.get("conversation_history", [])
-        
+
         # Validate conversation history format
         if not isinstance(conversation_history, list):
             conversation_history = []
-        
+
         # Load base config
-        config_path = Path(getattr(settings, "STATE_DB_PATH", "/app/data/state.db")).parent / "config.yaml"
+        config_path = (
+            Path(getattr(settings, "STATE_DB_PATH", "/app/data/state.db")).parent / "config.yaml"
+        )
         if not config_path.exists():
             config_path = Path("/app/config/config.yaml")
-        
+
         if not config_path.exists():
-            return JsonResponse({
-                "success": False,
-                "error": "Configuration file not found"
-            }, status=500)
-        
+            return JsonResponse(
+                {"success": False, "error": "Configuration file not found"}, status=500
+            )
+
         config = load_config(config_path)
-        
+
         # Override with user profile settings if available
         try:
             profile = UserProfile.objects.get(user=request.user)
@@ -4956,19 +4989,22 @@ def api_chat(request: HttpRequest) -> JsonResponse:
                     config.llm.timeout_seconds = profile.ollama_timeout
         except UserProfile.DoesNotExist:
             pass
-        
+
         if not config.llm.enabled:
-            return JsonResponse({
-                "success": False,
-                "error": "LLM service is not enabled. Enable it in Settings → AI Assistant or set SPARK_LLM_ENABLED=true"
-            }, status=400)
-        
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": "LLM service is not enabled. Enable it in Settings → AI Assistant or set SPARK_LLM_ENABLED=true",
+                },
+                status=400,
+            )
+
         # Create AI service (no categories needed for chat)
         ai_service = SparkAIService(store, config, categories=[])
-        
+
         # Load documentation context
         documentation = _load_documentation_context()
-        
+
         # Get response
         response = ai_service.chat(
             question=question,
@@ -4976,26 +5012,28 @@ def api_chat(request: HttpRequest) -> JsonResponse:
             page_context=page_context,
             conversation_history=conversation_history,
         )
-        
+
         ai_service.close()
-        
+
         if not response:
-            return JsonResponse({
-                "success": False,
-                "error": "LLM service failed to generate response. Check Ollama URL and model in Settings."
-            }, status=500)
-        
-        return JsonResponse({
-            "success": True,
-            "response": response,
-        })
-        
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": "LLM service failed to generate response. Check Ollama URL and model in Settings.",
+                },
+                status=500,
+            )
+
+        return JsonResponse(
+            {
+                "success": True,
+                "response": response,
+            }
+        )
+
     except Exception as e:
         logger.exception(f"Error in chatbot: {e}")
-        return JsonResponse({
-            "success": False,
-            "error": str(e)
-        }, status=500)
+        return JsonResponse({"success": False, "error": str(e)}, status=500)
 
 
 # ============================================================================
@@ -5005,7 +5043,7 @@ def api_chat(request: HttpRequest) -> JsonResponse:
 
 def _run_ai_job_now(request: HttpRequest, store: StateStore, job: dict) -> bool:
     """Run an AI job immediately (synchronously).
-    
+
     Uses comprehensive suggest_for_review for complete field suggestions
     including split transactions extraction.
     """
@@ -5017,7 +5055,7 @@ def _run_ai_job_now(request: HttpRequest, store: StateStore, job: dict) -> bool:
     job_id = job["id"]
     document_id = job["document_id"]
     extraction_id = job.get("extraction_id")
-    
+
     # Check if AI is opted out for this document
     try:
         extraction = store.get_extraction_by_document(document_id)
@@ -5031,32 +5069,31 @@ def _run_ai_job_now(request: HttpRequest, store: StateStore, job: dict) -> bool:
             return True
     except Exception:
         pass
-    
+
     # Mark as started
     if not store.start_ai_job(job_id):
         logger.warning(f"Could not start job #{job_id}")
         return False
-    
+
     start_time = time.time()
-    
+
     try:
         # Load config
         from ...config import load_config
         from ...spark_ai import SparkAIService
 
         config_path = (
-            Path(getattr(settings, "STATE_DB_PATH", "/app/data/state.db")).parent
-            / "config.yaml"
+            Path(getattr(settings, "STATE_DB_PATH", "/app/data/state.db")).parent / "config.yaml"
         )
         if not config_path.exists():
             config_path = Path("/app/config/config.yaml")
-        
+
         if not config_path.exists():
             store.fail_ai_job(job_id, "Configuration file not found", can_retry=False)
             return False
-        
+
         config = load_config(config_path)
-        
+
         # Override with user profile settings
         try:
             profile = UserProfile.objects.get(user=request.user)
@@ -5070,7 +5107,7 @@ def _run_ai_job_now(request: HttpRequest, store: StateStore, job: dict) -> bool:
                     config.llm.timeout_seconds = profile.ollama_timeout
         except UserProfile.DoesNotExist:
             pass
-        
+
         # Get categories and source accounts
         firefly_client = _get_firefly_client(request)
         categories = []
@@ -5086,11 +5123,11 @@ def _run_ai_job_now(request: HttpRequest, store: StateStore, job: dict) -> bool:
                 source_accounts = [acc.name for acc in accounts]
             except Exception as e:
                 logger.warning(f"Could not fetch source accounts: {e}")
-        
+
         if not categories:
             store.fail_ai_job(job_id, "No categories available from Firefly", can_retry=True)
             return False
-        
+
         # Get extraction data
         extraction_data = {}
         external_id = None
@@ -5098,11 +5135,11 @@ def _run_ai_job_now(request: HttpRequest, store: StateStore, job: dict) -> bool:
         if ext:
             extraction_data = json.loads(ext.extraction_json) if ext.extraction_json else {}
             external_id = ext.external_id
-        
+
         proposal = extraction_data.get("proposal", {})
         raw_text = extraction_data.get("raw_text", "")
         confidence = extraction_data.get("confidence", {})
-        
+
         # Get linked bank transaction if available
         bank_transaction = None
         linkage = store.get_linkage_by_extraction(ext.id) if ext else None
@@ -5117,7 +5154,7 @@ def _run_ai_job_now(request: HttpRequest, store: StateStore, job: dict) -> bool:
                     "source_account": firefly_tx.get("source_account"),
                     "destination_account": firefly_tx.get("destination_account"),
                 }
-        
+
         # Get previous AI decisions for context
         previous_decisions = []
         try:
@@ -5132,20 +5169,20 @@ def _run_ai_job_now(request: HttpRequest, store: StateStore, job: dict) -> bool:
             ]
         except Exception:
             pass
-        
+
         # Run comprehensive AI interpretation with suggest_for_review
         # CRITICAL: Use no_timeout=True for scheduled jobs - LLM inference can take
         # minutes or even hours for complex documents and must NEVER be interrupted
         # The cancel_check allows users to cancel via the UI (only way to stop)
         ai_service = SparkAIService(store, config, categories)
-        
+
         # Create cancel check function that queries the database
         def check_cancelled():
             return store.is_ai_job_cancelled(job_id)
-        
+
         # Get current source account from proposal for comparison
         current_source_account = proposal.get("source_account")
-        
+
         suggestion = ai_service.suggest_for_review(
             amount=str(proposal.get("amount", "0")),
             date=proposal.get("date", ""),
@@ -5165,20 +5202,20 @@ def _run_ai_job_now(request: HttpRequest, store: StateStore, job: dict) -> bool:
             source_accounts=source_accounts,
             current_source_account=current_source_account,
         )
-        
+
         # Check if cancelled after completion
         if store.is_ai_job_cancelled(job_id):
             logger.info(f"AI job #{job_id} was cancelled")
             return False
-        
+
         duration_ms = int((time.time() - start_time) * 1000)
-        
+
         if suggestion:
             # Build comprehensive suggestions JSON
             suggestions_data = suggestion.to_dict()
             suggestions_json = json.dumps(suggestions_data)
             store.complete_ai_job(job_id, suggestions_json)
-            
+
             # Record audit trail
             store.create_interpretation_run(
                 document_id=document_id,
@@ -5195,10 +5232,14 @@ def _run_ai_job_now(request: HttpRequest, store: StateStore, job: dict) -> bool:
                 final_state="COMPLETED",
                 duration_ms=duration_ms,
                 llm_result=suggestions_data,
-                suggested_category=suggestion.suggestions["category"].value if "category" in suggestion.suggestions else None,
+                suggested_category=(
+                    suggestion.suggestions["category"].value
+                    if "category" in suggestion.suggestions
+                    else None
+                ),
                 decision_source="USER_RUN_NOW",
             )
-            
+
             logger.info(
                 f"AI job #{job_id} completed in {duration_ms}ms with "
                 f"{len(suggestion.suggestions)} field suggestions"
@@ -5208,7 +5249,7 @@ def _run_ai_job_now(request: HttpRequest, store: StateStore, job: dict) -> bool:
         else:
             store.fail_ai_job(job_id, "No suggestion returned from AI", can_retry=True)
             return False
-            
+
     except Exception as e:
         logger.error(f"Error running job #{job_id}: {e}")
         store.fail_ai_job(job_id, str(e), can_retry=True)
@@ -5219,26 +5260,50 @@ def _run_ai_job_now(request: HttpRequest, store: StateStore, job: dict) -> bool:
 def ai_queue_list(request: HttpRequest) -> HttpResponse:
     """View the AI job queue."""
     store = _get_store()
-    
+
     # Get filter from query params
     status_filter = request.GET.get("status", None)
     page = int(request.GET.get("page", 1))
     per_page = 50
     offset = (page - 1) * per_page
-    
+
     # Get jobs
     jobs = store.get_ai_jobs_list(
         status=status_filter,
         limit=per_page,
         offset=offset,
     )
-    
+
+    # Parse datetime strings for Django template date filter
+    for job in jobs:
+        for date_field in ["scheduled_at", "started_at", "completed_at"]:
+            if job.get(date_field):
+                try:
+                    # Parse ISO format datetime string
+                    from datetime import datetime
+
+                    dt_str = job[date_field]
+                    # Handle both with and without microseconds
+                    for fmt in [
+                        "%Y-%m-%dT%H:%M:%S.%f",
+                        "%Y-%m-%dT%H:%M:%S",
+                        "%Y-%m-%d %H:%M:%S.%f",
+                        "%Y-%m-%d %H:%M:%S",
+                    ]:
+                        try:
+                            job[date_field] = datetime.strptime(dt_str[:26], fmt)
+                            break
+                        except ValueError:
+                            continue
+                except Exception:
+                    pass  # Keep original string if parsing fails
+
     # Get stats
     stats = store.get_ai_queue_stats()
-    
+
     # Check if any job is processing (for Run Now button)
     is_processing = stats.get("processing", 0) > 0
-    
+
     context = {
         "jobs": jobs,
         "stats": stats,
@@ -5257,23 +5322,20 @@ def ai_queue_list(request: HttpRequest) -> HttpResponse:
 def ai_queue_action(request: HttpRequest) -> JsonResponse:
     """Perform actions on AI queue jobs."""
     store = _get_store()
-    
+
     action = request.POST.get("action")
     job_ids = request.POST.getlist("job_ids[]")
-    
+
     if not job_ids:
         job_id = request.POST.get("job_id")
         if job_id:
             job_ids = [job_id]
-    
+
     if not action or not job_ids:
-        return JsonResponse({
-            "success": False,
-            "error": "Missing action or job IDs"
-        }, status=400)
-    
+        return JsonResponse({"success": False, "error": "Missing action or job IDs"}, status=400)
+
     results = {"success": 0, "failed": 0}
-    
+
     for job_id in job_ids:
         try:
             job_id = int(job_id)
@@ -5319,11 +5381,14 @@ def ai_queue_action(request: HttpRequest) -> JsonResponse:
                     # Check if any job is currently processing
                     stats = store.get_ai_queue_stats()
                     if stats.get("processing", 0) > 0:
-                        return JsonResponse({
-                            "success": False,
-                            "error": "Another job is currently processing. Please wait."
-                        }, status=409)
-                    
+                        return JsonResponse(
+                            {
+                                "success": False,
+                                "error": "Another job is currently processing. Please wait.",
+                            },
+                            status=409,
+                        )
+
                     # Run the job immediately
                     success = _run_ai_job_now(request, store, job)
                     if success:
@@ -5337,40 +5402,39 @@ def ai_queue_action(request: HttpRequest) -> JsonResponse:
         except Exception as e:
             logger.error(f"Error performing {action} on job {job_id}: {e}")
             results["failed"] += 1
-    
-    return JsonResponse({
-        "success": True,
-        "results": results,
-        "message": f"{results['success']} job(s) updated, {results['failed']} failed"
-    })
+
+    return JsonResponse(
+        {
+            "success": True,
+            "results": results,
+            "message": f"{results['success']} job(s) updated, {results['failed']} failed",
+        }
+    )
 
 
 @login_required
 @require_POST
 def ai_queue_schedule(request: HttpRequest) -> JsonResponse:
     """Manually schedule an AI job for a document.
-    
+
     Supports run_immediately=true to execute the job synchronously.
     """
     from .models import UserProfile
-    
+
     store = _get_store()
-    
+
     document_id = request.POST.get("document_id")
     extraction_id = request.POST.get("extraction_id")
     priority = int(request.POST.get("priority", 0))
     run_immediately = request.POST.get("run_immediately", "").lower() in ("true", "1", "yes")
-    
+
     if not document_id:
-        return JsonResponse({
-            "success": False,
-            "error": "Missing document_id"
-        }, status=400)
-    
+        return JsonResponse({"success": False, "error": "Missing document_id"}, status=400)
+
     try:
         document_id = int(document_id)
         extraction_id = int(extraction_id) if extraction_id else None
-        
+
         # Get max_retries from user profile settings
         max_retries = 3  # default
         try:
@@ -5378,7 +5442,7 @@ def ai_queue_schedule(request: HttpRequest) -> JsonResponse:
             max_retries = profile.ai_schedule_max_retries
         except UserProfile.DoesNotExist:
             pass
-        
+
         # Check if there's an existing pending/processing job
         existing_job = store.get_ai_job_by_document(document_id, active_only=True)
         if existing_job:
@@ -5386,12 +5450,15 @@ def ai_queue_schedule(request: HttpRequest) -> JsonResponse:
             if existing_job["status"] == "PENDING":
                 store.cancel_ai_job(existing_job["id"])
             elif existing_job["status"] == "PROCESSING":
-                return JsonResponse({
-                    "success": False,
-                    "error": "A job is already processing for this document",
-                    "status": "PROCESSING"
-                }, status=409)
-        
+                return JsonResponse(
+                    {
+                        "success": False,
+                        "error": "A job is already processing for this document",
+                        "status": "PROCESSING",
+                    },
+                    status=409,
+                )
+
         job_id = store.schedule_ai_job(
             document_id=document_id,
             extraction_id=extraction_id,
@@ -5399,11 +5466,11 @@ def ai_queue_schedule(request: HttpRequest) -> JsonResponse:
             created_by="USER",
             max_retries=max_retries,
         )
-        
+
         if job_id:
             result_status = "PENDING"
             result_message = f"AI job #{job_id} scheduled for document {document_id}"
-            
+
             # If run_immediately, execute the job now
             if run_immediately:
                 job = store.get_ai_job(job_id)
@@ -5415,41 +5482,40 @@ def ai_queue_schedule(request: HttpRequest) -> JsonResponse:
                     else:
                         # Get the updated job status
                         updated_job = store.get_ai_job(job_id)
-                        result_status = updated_job.get("status", "FAILED") if updated_job else "FAILED"
-                        result_message = updated_job.get("error_message", "Job failed") if updated_job else "Job failed"
-            
-            return JsonResponse({
-                "success": True,
-                "job_id": job_id,
-                "status": result_status,
-                "message": result_message
-            })
+                        result_status = (
+                            updated_job.get("status", "FAILED") if updated_job else "FAILED"
+                        )
+                        result_message = (
+                            updated_job.get("error_message", "Job failed")
+                            if updated_job
+                            else "Job failed"
+                        )
+
+            return JsonResponse(
+                {
+                    "success": True,
+                    "job_id": job_id,
+                    "status": result_status,
+                    "message": result_message,
+                }
+            )
         else:
-            return JsonResponse({
-                "success": False,
-                "error": "Could not schedule job"
-            }, status=500)
-            
+            return JsonResponse({"success": False, "error": "Could not schedule job"}, status=500)
+
     except Exception as e:
         logger.exception(f"Error scheduling AI job: {e}")
-        return JsonResponse({
-            "success": False,
-            "error": str(e)
-        }, status=500)
+        return JsonResponse({"success": False, "error": str(e)}, status=500)
 
 
 @login_required
 def ai_queue_job_detail(request: HttpRequest, job_id: int) -> JsonResponse:
     """Get details of a specific AI job."""
     store = _get_store()
-    
+
     job = store.get_ai_job(job_id)
     if not job:
-        return JsonResponse({
-            "success": False,
-            "error": "Job not found"
-        }, status=404)
-    
+        return JsonResponse({"success": False, "error": "Job not found"}, status=404)
+
     # Parse suggestions if available
     suggestions = None
     if job.get("suggestions_json"):
@@ -5457,11 +5523,13 @@ def ai_queue_job_detail(request: HttpRequest, job_id: int) -> JsonResponse:
             suggestions = json.loads(job["suggestions_json"])
         except json.JSONDecodeError:
             pass
-    
-    return JsonResponse({
-        "success": True,
-        "job": {
-            **job,
-            "suggestions": suggestions,
+
+    return JsonResponse(
+        {
+            "success": True,
+            "job": {
+                **job,
+                "suggestions": suggestions,
+            },
         }
-    })
+    )

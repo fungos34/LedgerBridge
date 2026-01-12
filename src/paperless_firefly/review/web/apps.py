@@ -183,8 +183,10 @@ def _process_ai_queue_batch():
             config=config,
         )
 
-        # Get next jobs
-        jobs = state_store.get_next_ai_jobs(limit=batch_size, check_schedule=True)
+        # Get next jobs - process ALL pending jobs, regardless of scheduled time
+        # The scheduled_for field is for user-facing scheduling hints, but the background
+        # worker should process the entire queue sorted by priority
+        jobs = state_store.get_next_ai_jobs(limit=batch_size, check_schedule=False)
 
         if not jobs:
             logger.debug("No pending AI jobs in queue")
