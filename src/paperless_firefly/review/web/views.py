@@ -1192,14 +1192,29 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
                     invoice_number = proposal.get("invoice_number", "")
                     
                     # Get document content (OCR text or structured content)
-                    document_content = extraction_data.get("ocr_content", "")
+                    # Check multiple possible locations for the raw text
+                    document_content = (
+                        extraction_data.get("raw_text") or
+                        extraction_data.get("ocr_content") or
+                        extraction_data.get("content") or
+                        ""
+                    )
                     if not document_content:
                         # Try to get from structured payload
                         structured = extraction_data.get("structured", {})
                         if structured:
                             document_content = f"Invoice: {structured.get('invoice_id', '')}\n"
                             document_content += f"Vendor: {structured.get('seller_name', '')}\n"
-                            document_content += f"Items: {structured.get('line_items', [])}"
+                            line_items = structured.get('line_items', [])
+                            if line_items:
+                                document_content += "Line Items:\n"
+                                for item in line_items:
+                                    if isinstance(item, dict):
+                                        name = item.get('name', item.get('description', ''))
+                                        price = item.get('price', item.get('amount', ''))
+                                        document_content += f"  - {name}: {price}\n"
+                                    else:
+                                        document_content += f"  - {item}\n"
                     
                     # Get linked bank transaction if available
                     bank_transaction = None

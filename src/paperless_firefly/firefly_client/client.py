@@ -66,7 +66,18 @@ class FireflyDuplicateError(FireflyError):
 
 @dataclass
 class FireflyTransaction:
-    """Firefly transaction representation."""
+    """Firefly transaction representation.
+    
+    When a Firefly transaction has multiple splits, we represent it as a single
+    FireflyTransaction with:
+    - amount: The total amount (sum of all splits)
+    - has_splits: True if transaction has multiple splits
+    - split_count: Number of splits (1 for single transactions)
+    - The category/description are from the first split (primary line)
+    
+    This ensures only one link per Firefly transaction is possible, regardless
+    of how many splits it contains.
+    """
 
     id: int
     type: str
@@ -80,6 +91,8 @@ class FireflyTransaction:
     notes: str | None = None
     category_name: str | None = None
     tags: list[str] | None = None
+    has_splits: bool = False
+    split_count: int = 1
 
 
 @dataclass
@@ -538,6 +551,11 @@ class FireflyClient:
     ) -> list[FireflyTransaction]:
         """
         List transactions in a date range.
+        
+        IMPORTANT: Split transactions in Firefly are returned as a single
+        FireflyTransaction with the total amount. This ensures only one link
+        per Firefly transaction is possible. The first split's metadata
+        (description, category, etc.) is used for display purposes.
 
         Args:
             start_date: Start date (YYYY-MM-DD)
@@ -546,7 +564,7 @@ class FireflyClient:
             limit: Optional max results (None = all)
 
         Returns:
-            List of FireflyTransaction objects
+            List of FireflyTransaction objects (one per Firefly transaction, not per split)
         """
         transactions = []
         page = 1
@@ -566,24 +584,67 @@ class FireflyClient:
             for item in data.get("data", []):
                 attrs = item.get("attributes", {})
                 tx_list = attrs.get("transactions", [])
-
+                
+                if not tx_list:
+                    continue
+                
+                # Aggregate all splits into a single transaction
+                # Use first split for primary metadata, sum amounts
+                first_split = tx_list[0]
+                split_count = len(tx_list)
+                has_splits = split_count > 1
+                
+                # Sum amounts from all splits
+                total_amount = sum(
+                    float(tx.get("amount", 0)) for tx in tx_list
+                )
+                
+                # Collect all unique tags across splits
+                all_tags: list[str] = []
                 for tx in tx_list:
-                    transactions.append(
-                        FireflyTransaction(
-                            id=int(item.get("id", 0)),
-                            type=tx.get("type", ""),
-                            date=tx.get("date", ""),
-                            amount=tx.get("amount", ""),
-                            description=tx.get("description", ""),
-                            external_id=tx.get("external_id"),
-                            source_name=tx.get("source_name"),
-                            destination_name=tx.get("destination_name"),
-                            internal_reference=tx.get("internal_reference"),
-                            notes=tx.get("notes"),
-                            category_name=tx.get("category_name"),
-                            tags=_normalize_tags(tx.get("tags")),
-                        )
+                    tx_tags = _normalize_tags(tx.get("tags"))
+                    if tx_tags:
+                        for tag in tx_tags:
+                            if tag not in all_tags:
+                                all_tags.append(tag)
+                
+                # Build description that includes split info if relevant
+                description = first_split.get("description", "")
+                if has_splits:
+                    # Append indicator that this has splits
+                    split_summaries = [
+                        f"{tx.get('description', 'Split')} ({tx.get('amount', '?')})"
+                        for tx in tx_list[1:4]  # Show up to 3 additional splits
+                    ]
+                    if split_count > 4:
+                        split_summaries.append(f"... +{split_count - 4} more")
+                    # Keep original description primary, add split count note
+                    notes_suffix = f" [Split: {split_count} parts]"
+                else:
+                    notes_suffix = ""
+                
+                # Get notes - combine with split indicator
+                existing_notes = first_split.get("notes") or ""
+                combined_notes = (existing_notes + notes_suffix).strip() if notes_suffix else existing_notes or None
+                
+                transactions.append(
+                    FireflyTransaction(
+                        id=int(item.get("id", 0)),
+                        type=first_split.get("type", ""),
+                        date=first_split.get("date", ""),
+                        amount=str(total_amount),
+                        description=description,
+                        external_id=first_split.get("external_id"),
+                        source_name=first_split.get("source_name"),
+                        destination_name=first_split.get("destination_name"),
+                        internal_reference=first_split.get("internal_reference"),
+                        notes=combined_notes,
+                        category_name=first_split.get("category_name"),
+                        tags=all_tags if all_tags else None,
+                        has_splits=has_splits,
+                        split_count=split_count,
                     )
+                )
 
             # Check limit
             if limit and len(transactions) >= limit:

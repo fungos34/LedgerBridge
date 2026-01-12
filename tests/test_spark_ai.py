@@ -77,7 +77,9 @@ class TestSplitPrompt:
         assert "150.00" in message
         assert "Target" in message
         assert "Item 1: $100" in message
-        assert "- Groceries" in message
+        # Categories are now formatted with bullet points (•)
+        assert "Groceries" in message
+        assert "Household" in message
 
     def test_format_user_message_with_bank_data(self) -> None:
         """Test formatting split prompt with bank data context."""

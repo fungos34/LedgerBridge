@@ -8,7 +8,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-PROMPT_VERSION = "v1.1"
+# Prompt version for cache invalidation
+# v1.2: Enhanced split transaction extraction with imperative instructions
+PROMPT_VERSION = "v1.2"
 
 
 @dataclass
@@ -93,62 +95,87 @@ class SplitPrompt:
 
     version: str = PROMPT_VERSION
 
-    system_prompt: str = """You are a financial document analysis assistant specialized in extracting itemized purchases from receipts and invoices.
+    system_prompt: str = """You are a receipt/invoice line item extraction specialist. Your PRIMARY JOB is to find and extract EVERY individual item with its price from documents.
 
-Your task is to analyze document content (OCR text) and determine:
-1. Whether the transaction should be split into multiple line items
-2. Extract individual items with their prices and assign appropriate categories
+## MANDATORY EXTRACTION PROCESS:
 
-EXTRACTION RULES:
-- Look for itemized lists with prices (e.g., "Milk 2.99", "Bread €1.50")
-- Parse prices in various formats: 2.99, 2,99, €2.99, EUR 2.99, $2.99
-- Handle German/European formats (comma as decimal separator)
-- Identify product names and match them to the most appropriate category
-- Split amounts MUST sum to the total transaction amount (within ±0.05 tolerance)
-- If you cannot extract clear line items, set should_split to false
+### STEP 1: SCAN FOR LINE ITEMS
+Search the ENTIRE document for patterns like:
+- "Product Name    2.99"
+- "Item    €4,50"
+- "1x Milk    1.99"
+- "Bread 250g    0,89€"
 
-CATEGORY MATCHING:
-- Match items to the most specific category available
-- For groceries: Food & Dining, Groceries, Household, etc.
-- For mixed purchases (e.g., supermarket with cleaning supplies + food), split appropriately
+### STEP 2: PARSE ALL PRICE FORMATS
+You MUST handle:
+- US format: 2.99, $2.99
+- European format: 2,99, €2,99, 2,99€
+- With currency: EUR 2.99, 2.99 EUR
+- German format: 2,99 €
 
-OUTPUT FORMAT (strict JSON):
+### STEP 3: CATEGORIZE EACH ITEM
+Match EVERY extracted item to the most appropriate category:
+- Food items → Groceries / Food & Dining
+- Cleaning products → Household
+- Personal care → Health & Beauty
+- Electronics → Electronics
+- Clothing → Apparel
+- etc.
+
+### STEP 4: GROUP BY CATEGORY
+Combine items that share the same category into one split entry:
+- "Groceries: Milk, Bread, Cheese" = sum of those prices
+
+### STEP 5: VERIFY TOTALS
+The sum of all split amounts MUST equal the transaction total (±0.05 tolerance).
+
+## OUTPUT FORMAT (strict JSON):
 {
     "should_split": true,
     "splits": [
-        {"category": "Groceries", "amount": 12.50, "description": "Food items (milk, bread, cheese)"},
-        {"category": "Household", "amount": 8.99, "description": "Cleaning supplies"}
+        {"category": "Groceries", "amount": 12.50, "description": "Food: milk (1.99), bread (0.89), cheese (9.62)"},
+        {"category": "Household", "amount": 8.99, "description": "Cleaning: dish soap, paper towels"}
     ],
     "confidence": 0.85,
-    "reason": "Extracted 2 distinct item categories from receipt"
+    "reason": "Extracted 6 items across 2 categories from receipt"
 }
 
-If no split is needed:
-{
-    "should_split": false,
-    "splits": [],
-    "confidence": 0.90,
-    "reason": "Single category transaction or cannot extract line items"
-}"""
+## RULES:
+- If you find ANY line items with prices → should_split = true
+- Categories MUST be from the provided list
+- Split amounts MUST sum to total
+- Each split needs: amount (number), description (string with items), category (from list)
+- If document has no visible line items → should_split = false"""
 
-    user_template: str = """Analyze this document for split transactions:
+    user_template: str = """EXTRACT ALL LINE ITEMS FROM THIS DOCUMENT:
 
-TRANSACTION DETAILS:
-- Total Amount: {amount}
-- Date: {date}
-- Vendor/Payee: {vendor}
-- Description: {description}
+═══════════════════════════════════════════════════════════════
+TRANSACTION TOTAL: {amount}
+DATE: {date}
+VENDOR: {vendor}
+DESCRIPTION: {description}
+═══════════════════════════════════════════════════════════════
 
-OCR/DOCUMENT CONTENT:
+DOCUMENT CONTENT (scan for prices and items):
 {content}
 
-LINKED BANK TRANSACTION DATA:
+═══════════════════════════════════════════════════════════════
+BANK DATA (for reference):
 {bank_data}
 
-AVAILABLE CATEGORIES:
+═══════════════════════════════════════════════════════════════
+AVAILABLE CATEGORIES (use ONLY these):
 {categories}
 
-Extract line items with prices from the content above and assign categories. Provide your analysis in JSON format."""
+═══════════════════════════════════════════════════════════════
+INSTRUCTIONS:
+1. Find EVERY line with a product and price
+2. Parse the price (handle 2.99 or 2,99 formats)
+3. Assign each item to a category from the list
+4. Group by category and sum amounts
+5. Verify total matches {amount}
+
+Return JSON with splits for each category."""
 
     def format_user_message(
         self,
@@ -174,23 +201,23 @@ Extract line items with prices from the content above and assign categories. Pro
         Returns:
             Formatted user message.
         """
-        categories_str = "\n".join(f"- {cat}" for cat in categories)
+        categories_str = "\n".join(f"• {cat}" for cat in categories)
         
         # Format bank data if available
         if bank_data:
-            bank_str = f"""- Bank Amount: {bank_data.get('amount', 'N/A')}
-- Bank Date: {bank_data.get('date', 'N/A')}
-- Bank Description: {bank_data.get('description', 'N/A')}
-- Bank Category: {bank_data.get('category_name', 'N/A')}"""
+            bank_str = f"""Bank Amount: {bank_data.get('amount', 'N/A')}
+Bank Date: {bank_data.get('date', 'N/A')}
+Bank Description: {bank_data.get('description', 'N/A')}
+Bank Category: {bank_data.get('category_name', 'N/A')}"""
         else:
-            bank_str = "Not available"
+            bank_str = "No bank data available"
         
         return self.user_template.format(
             amount=amount,
             date=date,
-            vendor=vendor or "Unknown",
-            description=description or "No description",
-            content=content or "No OCR content available",
+            vendor=vendor or "(unknown vendor)",
+            description=description or "(no description)",
+            content=content or "No OCR content available - cannot extract line items",
             bank_data=bank_str,
             categories=categories_str,
         )
@@ -285,83 +312,120 @@ class TransactionReviewPrompt:
 
     Used when reviewing a document to suggest values for all editable fields
     based on document content, OCR data, and linked bank transaction context.
+    
+    IMPORTANT: This prompt must be imperative and clear to the AI model.
+    Split transaction extraction is a core feature.
     """
 
     version: str = PROMPT_VERSION
 
-    system_prompt: str = """You are a financial document review assistant helping categorize and verify transactions.
+    system_prompt: str = """You are a financial document analysis expert. Your mission is critical: extract and categorize ALL financial data from receipts and invoices accurately.
 
-Your task is to analyze the provided document and suggest values for transaction fields.
-You have access to:
-1. Document data (extracted from OCR or structured invoice)
-2. Linked bank transaction data (if available) for verification
-3. Previously applied rules or decisions
+## YOUR MANDATORY TASKS:
 
-IMPORTANT RULES:
-1. For 'category': ONLY suggest from the available categories list
-2. For 'transaction_type': ONLY use 'withdrawal', 'deposit', or 'transfer'
-3. Preserve existing good values - only suggest changes that improve accuracy
-4. Use linked bank data to verify/correct amounts and dates
-5. Provide confidence scores (0.0-1.0) for each suggestion
-6. Be conservative - if uncertain, keep the original value
-7. If the document shows LINE ITEMS with different categories, suggest split_transactions
+### 1. EXTRACT THE TOTAL AMOUNT
+- Find the total/grand total/sum on the document
+- Verify it matches the stated amount or correct it
+- Use the document's total as truth, NOT any pre-filled value
 
-Respond in JSON format:
+### 2. IDENTIFY THE VENDOR/MERCHANT
+- Extract the store name, company, or merchant from the document header
+- Look for business names, logos, addresses at the top
+- This MUST be filled in - every receipt has a vendor
+
+### 3. CREATE SPLIT TRANSACTIONS FOR LINE ITEMS
+This is MANDATORY when the document shows itemized purchases:
+- SCAN the entire document for individual products/services with prices
+- EXTRACT each line item: product name + price
+- CATEGORIZE each item into the appropriate category from the available list
+- The sum of split amounts MUST equal the total transaction amount
+
+SPLIT TRANSACTION REQUIREMENTS:
+- If you see ANY itemized list (products, services, line items), you MUST create splits
+- Each split needs: amount (number), description (string), category (from list)
+- Group similar items if they share a category (e.g., all groceries together)
+- Parse prices in ANY format: 2.99, 2,99, €2.99, EUR 2.99, $2.99, 2,99€
+
+### 4. SUGGEST DESCRIPTION
+- Create a concise description summarizing the purchase
+- Include key items or the nature of the transaction
+- Example: "Grocery shopping - milk, bread, cleaning supplies"
+
+### 5. DETERMINE TRANSACTION TYPE
+- "withdrawal" = expense/purchase (most receipts)
+- "deposit" = refund/income
+- "transfer" = between own accounts (rare for receipts)
+
+## RESPONSE FORMAT (strict JSON):
 {
     "suggestions": {
-        "category": {"value": "CategoryName", "confidence": 0.85, "reason": "..."},
-        "transaction_type": {"value": "withdrawal", "confidence": 0.95, "reason": "..."},
-        "destination_account": {"value": "Vendor Name", "confidence": 0.80, "reason": "..."},
-        "description": {"value": "Description text", "confidence": 0.75, "reason": "..."}
+        "category": {"value": "PrimaryCategory", "confidence": 0.85, "reason": "Most items belong here"},
+        "transaction_type": {"value": "withdrawal", "confidence": 0.95, "reason": "This is a purchase"},
+        "destination_account": {"value": "Vendor Name", "confidence": 0.90, "reason": "Extracted from receipt header"},
+        "description": {"value": "Descriptive summary", "confidence": 0.80, "reason": "Based on items purchased"}
     },
     "split_transactions": [
-        {"amount": 29.99, "description": "Item 1", "category": "Category1"},
-        {"amount": 15.50, "description": "Item 2", "category": "Category2"}
+        {"amount": 15.99, "description": "Food items (milk, bread, eggs)", "category": "Groceries"},
+        {"amount": 8.49, "description": "Cleaning supplies", "category": "Household"},
+        {"amount": 5.99, "description": "Batteries", "category": "Electronics"}
     ],
-    "overall_confidence": 0.82,
-    "analysis_notes": "Brief analysis summary"
+    "overall_confidence": 0.85,
+    "analysis_notes": "Receipt from SuperMart with 3 categories of items"
 }
 
-Only include fields where you have a meaningful suggestion (confidence > 0.5).
-Only include split_transactions if the document clearly shows multiple line items with different categories.
-Split amounts should sum to the total transaction amount."""
+## CRITICAL RULES:
+- Categories in suggestions and splits MUST be from the provided list ONLY
+- Split amounts MUST sum to total (tolerance: ±0.05)
+- ALWAYS include destination_account (vendor name)
+- ALWAYS include description
+- If document has line items → MUST suggest split_transactions
+- Confidence scores: 0.0-1.0"""
 
-    user_template: str = """Review this transaction and suggest values for the form fields:
+    user_template: str = """ANALYZE THIS DOCUMENT AND EXTRACT ALL FINANCIAL DATA:
 
-CURRENT DOCUMENT DATA:
-- Amount: {amount}
-- Date: {date}
-- Vendor/Payee: {vendor}
-- Description: {description}
-- Current Category: {current_category}
-- Current Transaction Type: {current_type}
-- Invoice Number: {invoice_number}
-- OCR Confidence: {ocr_confidence}%
+═══════════════════════════════════════════════════════════════
+DOCUMENT INFORMATION:
+═══════════════════════════════════════════════════════════════
+Total Amount: {amount}
+Date: {date}
+Current Vendor: {vendor}
+Current Description: {description}
+Current Category: {current_category}
+Current Type: {current_type}
+Invoice/Receipt Number: {invoice_number}
+OCR Quality: {ocr_confidence}%
 
-DOCUMENT CONTENT (OCR/Structured):
+═══════════════════════════════════════════════════════════════
+DOCUMENT CONTENT (OCR TEXT):
+═══════════════════════════════════════════════════════════════
 {document_content}
 
-LINKED BANK TRANSACTION:
+═══════════════════════════════════════════════════════════════
+LINKED BANK DATA (for verification):
+═══════════════════════════════════════════════════════════════
 {bank_transaction}
 
-PREVIOUS DECISIONS:
+═══════════════════════════════════════════════════════════════
+PREVIOUS AI DECISIONS:
+═══════════════════════════════════════════════════════════════
 {previous_decisions}
 
-AVAILABLE CATEGORIES:
+═══════════════════════════════════════════════════════════════
+AVAILABLE CATEGORIES (use ONLY these):
+═══════════════════════════════════════════════════════════════
 {categories}
 
-AVAILABLE TRANSACTION TYPES:
-- withdrawal (expense/purchase)
-- deposit (income/refund)
-- transfer (between own accounts)
+═══════════════════════════════════════════════════════════════
+YOUR TASKS:
+═══════════════════════════════════════════════════════════════
+1. EXTRACT the vendor/merchant name from the document
+2. IDENTIFY all line items with prices from the OCR text
+3. CATEGORIZE each line item into the appropriate category
+4. CREATE split_transactions if multiple items/categories exist
+5. WRITE a descriptive summary
+6. VERIFY the total amount matches line items
 
-Analyze this data and provide suggestions for any fields that could be improved or filled in.
-Prioritize accuracy over completeness - only suggest values you're confident about.
-
-SPLIT TRANSACTIONS:
-If the document shows multiple line items with different categories (e.g., a receipt with groceries and household items),
-suggest split_transactions with amounts, descriptions, and categories. The amounts should sum to the total.
-Only suggest splits if clearly indicated by the document content."""
+Respond with complete JSON including split_transactions if items are visible."""
 
     def format_user_message(
         self,
@@ -397,7 +461,7 @@ Only suggest splits if clearly indicated by the document content."""
         Returns:
             Formatted user message.
         """
-        categories_str = "\n".join(f"- {cat}" for cat in categories)
+        categories_str = "\n".join(f"• {cat}" for cat in categories)
 
         # Format bank transaction data
         if bank_transaction:
@@ -408,31 +472,31 @@ Category: {bank_transaction.get('category_name', 'Not categorized')}
 Source: {bank_transaction.get('source_account', 'N/A')}
 Destination: {bank_transaction.get('destination_account', 'N/A')}"""
         else:
-            bank_str = "No linked bank transaction"
+            bank_str = "No linked bank transaction available"
 
         # Format previous decisions
         if previous_decisions:
             decisions_str = "\n".join(
-                f"- {d.get('decision_source', 'Unknown')}: {d.get('final_state', '')} "
+                f"• {d.get('decision_source', 'Unknown')}: {d.get('final_state', '')} "
                 f"(Category: {d.get('suggested_category', 'None')})"
                 for d in previous_decisions[:3]  # Last 3 decisions
             )
         else:
-            decisions_str = "No previous decisions"
+            decisions_str = "No previous AI decisions"
 
-        # Truncate document content to avoid token limits
-        content = document_content or "No content available"
-        if len(content) > 2000:
-            content = content[:2000] + "\n... (truncated)"
+        # Truncate document content to avoid token limits but keep more for better extraction
+        content = document_content or "No OCR content available"
+        if len(content) > 3000:
+            content = content[:3000] + "\n[... document truncated, analyze visible content ...]"
 
         return self.user_template.format(
             amount=amount,
             date=date,
-            vendor=vendor or "Unknown",
-            description=description or "No description",
-            current_category=current_category or "Not set",
+            vendor=vendor or "(not extracted yet)",
+            description=description or "(not extracted yet)",
+            current_category=current_category or "(not set)",
             current_type=current_type or "withdrawal",
-            invoice_number=invoice_number or "Not found",
+            invoice_number=invoice_number or "(not found)",
             ocr_confidence=int(ocr_confidence * 100) if ocr_confidence else 0,
             document_content=content,
             bank_transaction=bank_str,
