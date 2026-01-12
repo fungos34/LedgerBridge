@@ -721,10 +721,15 @@ class SparkAIService:
             logger.warning("Ollama request timed out after %ds", self.llm_config.timeout_seconds)
             return None
         except httpx.HTTPStatusError as e:
-            logger.error("Ollama API error: %s", e.response.status_code)
+            logger.error(
+                "Ollama API error %s for model '%s' at %s",
+                e.response.status_code,
+                model,
+                self.llm_config.ollama_url,
+            )
             return None
         except httpx.RequestError as e:
-            logger.error("Ollama request failed: %s", e)
+            logger.error("Ollama request failed: %s (URL: %s)", e, self.llm_config.ollama_url)
             return None
         except Exception as e:
             logger.exception("Unexpected error calling Ollama: %s", e)
@@ -873,8 +878,8 @@ class SparkAIService:
             documentation=documentation or "",
         )
 
-        # Use fast model for chat
-        result = self._call_ollama(
+        # Use fast model for chat (without JSON format requirement)
+        result = self._call_ollama_text(
             model=self.llm_config.model_fast,
             system_prompt=chat_prompt.system_prompt,
             user_message=user_message,
@@ -883,6 +888,80 @@ class SparkAIService:
         if result:
             return result["content"]
         return None
+
+    def _call_ollama_text(
+        self,
+        model: str,
+        system_prompt: str,
+        user_message: str,
+    ) -> dict | None:
+        """Call Ollama API for text completion (no JSON format).
+
+        Similar to _call_ollama but returns natural text instead of forcing JSON.
+        Used for chatbot responses.
+
+        Args:
+            model: Model name (e.g., "qwen2.5:7b").
+            system_prompt: System message.
+            user_message: User message.
+
+        Returns:
+            Dict with "content" and "model" keys, or None on failure.
+        """
+        # Acquire concurrency slot with timeout
+        wait_timeout = self.llm_config.timeout_seconds
+        if not self._limiter.acquire(timeout=wait_timeout):
+            logger.warning(
+                "LLM request timed out waiting for concurrency slot (max=%d, active=%d)",
+                self.llm_config.max_concurrent,
+                self._limiter.active_requests,
+            )
+            return None
+
+        try:
+            url = f"{self.llm_config.ollama_url}/api/chat"
+            payload = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message},
+                ],
+                "stream": False,
+                # No "format": "json" - we want natural text
+            }
+
+            logger.debug("Calling Ollama chat model %s at %s", model, url)
+
+            response = self._client.post(
+                url, json=payload, timeout=float(self.llm_config.timeout_seconds)
+            )
+            response.raise_for_status()
+
+            data = response.json()
+            content = data.get("message", {}).get("content", "")
+
+            logger.debug("Ollama %s returned %d chars", model, len(content))
+            return {"content": content, "model": model}
+
+        except httpx.TimeoutException:
+            logger.warning("Ollama request timed out after %ds", self.llm_config.timeout_seconds)
+            return None
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                "Ollama API error %s for model '%s' at %s",
+                e.response.status_code,
+                model,
+                self.llm_config.ollama_url,
+            )
+            return None
+        except httpx.RequestError as e:
+            logger.error("Ollama request failed: %s (URL: %s)", e, self.llm_config.ollama_url)
+            return None
+        except Exception as e:
+            logger.exception("Unexpected error calling Ollama: %s", e)
+            return None
+        finally:
+            self._limiter.release()
 
     def close(self) -> None:
         """Close HTTP client."""
