@@ -19,7 +19,9 @@ import httpx
 # Configuration - MODIFY THESE VALUES FOR YOUR DEPLOYMENT
 OLLAMA_URL = "http://ollama:11434"  # or http://localhost:11434 if testing locally
 MODEL = "qwen2.5:3b-instruct-q4_K_M"  # or whatever model you have pulled
-TIMEOUT_SECONDS = 200000000
+# NO TIMEOUT - LLM inference can take minutes or even hours
+# The process will wait indefinitely until a response is received
+NO_TIMEOUT = True
 
 # Sample document OCR content (typical receipt)
 DOCUMENT_CONTENT = """REWE Markt GmbH
@@ -248,24 +250,18 @@ print("TESTING OLLAMA INTEGRATION FROM DOCKER CONTAINER")
 print("=" * 80)
 print(f"\nOllama URL: {OLLAMA_URL}")
 print(f"Model: {MODEL}")
-print(f"Timeout: {TIMEOUT_SECONDS}s")
+print("Timeout: NONE (will wait indefinitely)")
 print(f"\nPayload size: {len(json.dumps(ollama_payload))} bytes")
 print(f"System prompt: {len(system_prompt)} chars")
 print(f"User message: {len(user_message)} chars")
 print("\n" + "=" * 80)
-print("SENDING REQUEST TO OLLAMA...")
+print("SENDING REQUEST TO OLLAMA (no timeout - will wait as long as needed)...")
 print("=" * 80)
 
 try:
-    # Make the request
-    timeout_config = httpx.Timeout(
-        connect=10.0,
-        read=float(TIMEOUT_SECONDS),
-        write=30.0,
-        pool=10.0
-    )
-    
-    with httpx.Client(timeout=timeout_config) as client:
+    # Make the request - NO TIMEOUT
+    # LLM inference can take minutes or even hours, process must wait indefinitely
+    with httpx.Client(timeout=None) as client:
         response = client.post(
             f"{OLLAMA_URL}/api/chat",
             json=ollama_payload
@@ -327,14 +323,12 @@ try:
             print(response.text)
             
 except httpx.TimeoutException:
+    # Should not happen with timeout=None, but just in case
     print("\n" + "=" * 80)
-    print(f"❌ TIMEOUT - No response after {TIMEOUT_SECONDS}s")
+    print("❌ UNEXPECTED TIMEOUT (this should not happen with no timeout)")
     print("=" * 80)
-    print("Possible issues:")
-    print("  - Ollama not running")
-    print("  - Model not pulled (try: docker exec <container> ollama pull qwen2.5:3b-instruct-q4_K_M)")
-    print("  - Network connectivity issues")
-    print("  - Model too slow for timeout setting")
+    print("The request was configured with no timeout, but still timed out.")
+    print("This may indicate a network or connection issue.")
     
 except httpx.ConnectError as e:
     print("\n" + "=" * 80)

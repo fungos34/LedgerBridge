@@ -723,6 +723,7 @@ class SparkAIService:
         model: str,
         system_prompt: str,
         user_message: str,
+        no_timeout: bool = False,
     ) -> dict | None:
         """Call Ollama API for completion with concurrency limiting.
 
@@ -733,12 +734,14 @@ class SparkAIService:
             model: Model name (e.g., "qwen2.5:7b").
             system_prompt: System message.
             user_message: User message.
+            no_timeout: If True, wait indefinitely for response (for scheduled jobs).
+                       LLM inference can take minutes or even hours for complex documents.
 
         Returns:
             Dict with "content" and "model" keys, or None on failure.
         """
-        # Acquire concurrency slot with timeout
-        wait_timeout = self.llm_config.timeout_seconds
+        # Acquire concurrency slot - wait indefinitely if no_timeout, otherwise use configured timeout
+        wait_timeout = None if no_timeout else self.llm_config.timeout_seconds
         if not self._limiter.acquire(timeout=wait_timeout):
             logger.warning(
                 "LLM request timed out waiting for concurrency slot (max=%d, active=%d)",
@@ -760,15 +763,23 @@ class SparkAIService:
             }
 
             # Debug logging only (never at INFO)
-            logger.debug("Calling Ollama model %s at %s", model, self.llm_config.ollama_url)
+            if no_timeout:
+                logger.info("Calling Ollama model %s (no timeout - will wait indefinitely)", model)
+            else:
+                logger.debug("Calling Ollama model %s at %s", model, self.llm_config.ollama_url)
 
-            # Use explicit Timeout with long read timeout for LLM inference
-            request_timeout = httpx.Timeout(
-                connect=10.0,
-                read=float(self.llm_config.timeout_seconds),
-                write=30.0,
-                pool=10.0,
-            )
+            # Use explicit Timeout - None for scheduled jobs that must wait indefinitely
+            # LLM inference can take minutes or even hours for complex documents
+            if no_timeout:
+                # No timeout at all - wait as long as needed
+                request_timeout = None
+            else:
+                request_timeout = httpx.Timeout(
+                    connect=10.0,
+                    read=float(self.llm_config.timeout_seconds),
+                    write=30.0,
+                    pool=10.0,
+                )
             response = self._client.post(url, json=payload, timeout=request_timeout)
             response.raise_for_status()
 
@@ -931,6 +942,7 @@ class SparkAIService:
         previous_decisions: list[dict] | None = None,
         document_id: int | None = None,
         use_cache: bool = True,
+        no_timeout: bool = False,
     ) -> TransactionReviewSuggestion | None:
         """Suggest values for all editable transaction fields during review.
         
@@ -952,6 +964,8 @@ class SparkAIService:
             previous_decisions: List of previous interpretation decisions.
             document_id: Optional document ID for per-doc opt-out check.
             use_cache: Whether to use cached responses.
+            no_timeout: If True, wait indefinitely for LLM response (for scheduled jobs).
+                       LLM inference can take minutes or even hours.
             
         Returns:
             TransactionReviewSuggestion with per-field suggestions, or None if LLM disabled.
@@ -1030,6 +1044,7 @@ class SparkAIService:
             model=self.llm_config.model_fast,
             system_prompt=self._review_prompt.system_prompt,
             user_message=user_message,
+            no_timeout=no_timeout,
         )
         
         # Fallback to slow model if needed
@@ -1039,6 +1054,7 @@ class SparkAIService:
                 model=self.llm_config.model_fallback,
                 system_prompt=self._review_prompt.system_prompt,
                 user_message=user_message,
+                no_timeout=no_timeout,
             )
             
         if result is None:

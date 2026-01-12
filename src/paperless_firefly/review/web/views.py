@@ -5067,6 +5067,8 @@ def _run_ai_job_now(request: HttpRequest, store: StateStore, job: dict) -> bool:
             pass
         
         # Run comprehensive AI interpretation with suggest_for_review
+        # CRITICAL: Use no_timeout=True for scheduled jobs - LLM inference can take
+        # minutes or even hours for complex documents and must NEVER be interrupted
         ai_service = SparkAIService(store, config, categories)
         
         suggestion = ai_service.suggest_for_review(
@@ -5083,6 +5085,7 @@ def _run_ai_job_now(request: HttpRequest, store: StateStore, job: dict) -> bool:
             previous_decisions=previous_decisions,
             document_id=document_id,
             use_cache=False,  # Always fresh for user-triggered runs
+            no_timeout=True,  # NEVER timeout - wait indefinitely for LLM response
         )
         
         duration_ms = int((time.time() - start_time) * 1000)
