@@ -110,15 +110,23 @@ def _get_processing_interval() -> int:
         from paperless_firefly.review.web.models import UserProfile
 
         profile = UserProfile.objects.first()
-        if profile and profile.ai_schedule_enabled:
+        if profile:
+            # Always use the profile's configured interval
             interval = profile.ai_schedule_interval_minutes * 60
-            logger.debug(f"AI worker interval from profile: {interval} seconds")
+            logger.info(
+                f"AI worker interval from profile: {profile.ai_schedule_interval_minutes} minutes "
+                f"({interval} seconds), enabled={profile.ai_schedule_enabled}"
+            )
             return interval
+        else:
+            logger.info("No UserProfile found, using default interval")
     except Exception as e:
-        logger.debug(f"Could not get interval from profile: {e}")
+        logger.warning(f"Could not get interval from profile: {e}")
 
     # Default: 5 minutes (reduced from 60 for more responsive processing)
-    return 5 * 60
+    default_interval = 5 * 60
+    logger.info(f"Using default AI worker interval: {default_interval} seconds")
+    return default_interval
 
 
 def _is_within_active_hours() -> bool:
@@ -204,7 +212,7 @@ def _process_ai_queue_batch():
 
         # Initialize services
         state_store = StateStore(config.state_db_path)
-        ai_service = SparkAIService(config.llm)
+        ai_service = SparkAIService(state_store=state_store, config=config)
         paperless_client = PaperlessClient(
             base_url=config.paperless.base_url,
             token=config.paperless.token,
