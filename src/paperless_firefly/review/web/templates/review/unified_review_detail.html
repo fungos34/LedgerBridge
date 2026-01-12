@@ -580,8 +580,17 @@
     }
     
     .ai-progress-status {
+        font-size: 0.875rem;
+        color: var(--gray-600);
+        min-height: 1.5rem;
+        margin-top: 0.5rem;
+        font-weight: 500;
+    }
+    
+    .ai-progress-hint {
+        margin-top: 0.5rem;
         font-size: 0.75rem;
-        color: var(--gray-500);
+        color: var(--gray-400);
     }
     
     .ai-progress-cancel {
@@ -1636,30 +1645,53 @@ function showAIProgressModal(timeoutSeconds) {
     overlay.className = 'ai-progress-overlay';
     overlay.innerHTML = `
         <div class="ai-progress-modal">
-            <div class="ai-progress-title ai-progress-spinner">🤖 AI Processing...</div>
-            <div class="ai-progress-subtitle">Analyzing document and generating suggestions</div>
+            <div class="ai-progress-title ai-progress-spinner">🤖 AI is thinking...</div>
+            <div class="ai-progress-subtitle">Please wait while the AI analyzes your document</div>
             <div class="ai-progress-bar-container">
                 <div id="ai-progress-bar" class="ai-progress-bar" style="width: 0%"></div>
             </div>
-            <div id="ai-progress-time" class="ai-progress-time">${timeoutSeconds}s</div>
-            <div class="ai-progress-status">Maximum wait time remaining</div>
+            <div id="ai-progress-time" class="ai-progress-time">0s</div>
+            <div class="ai-progress-status">Connecting to AI model...</div>
+            <div class="ai-progress-hint" style="margin-top: 0.5rem; font-size: 0.75rem; color: var(--gray-400);">
+                Maximum wait time: ${timeoutSeconds}s
+            </div>
             <button onclick="cancelAIRequest()" class="ai-progress-cancel">Cancel</button>
         </div>
     `;
     document.body.appendChild(overlay);
     
-    // Start countdown
+    // Start elapsed time counter
     let elapsed = 0;
     aiProgressInterval = setInterval(() => {
         elapsed++;
-        const remaining = Math.max(0, timeoutSeconds - elapsed);
         const progress = Math.min(100, (elapsed / timeoutSeconds) * 100);
+        
+        // Format elapsed time as "Xm Ys" or "Ys"
+        const minutes = Math.floor(elapsed / 60);
+        const seconds = elapsed % 60;
+        const timeString = minutes > 0 
+            ? `${minutes}m ${seconds}s` 
+            : `${seconds}s`;
         
         const timeEl = document.getElementById('ai-progress-time');
         const barEl = document.getElementById('ai-progress-bar');
+        const statusEl = document.querySelector('.ai-progress-status');
         
-        if (timeEl) timeEl.textContent = `${remaining}s`;
+        if (timeEl) timeEl.textContent = timeString;
         if (barEl) barEl.style.width = `${progress}%`;
+        
+        // Update status message based on elapsed time
+        if (statusEl) {
+            if (elapsed < 5) {
+                statusEl.textContent = 'Connecting to AI model...';
+            } else if (elapsed < 15) {
+                statusEl.textContent = 'AI analyzing document content...';
+            } else if (elapsed < 30) {
+                statusEl.textContent = 'Generating suggestions...';
+            } else {
+                statusEl.textContent = 'Still processing (this might take a while)...';
+            }
+        }
         
         if (elapsed >= timeoutSeconds) {
             clearInterval(aiProgressInterval);
