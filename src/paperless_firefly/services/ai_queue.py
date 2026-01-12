@@ -202,19 +202,45 @@ class AIJobQueueService:
             if extraction:
                 extraction_data = json.loads(extraction.extraction_json)
 
-            # Build context for AI
-            context = self._build_ai_context(document, extraction_data)
+            # Build document content for AI
+            content_parts = []
+            if getattr(document, "title", None):
+                content_parts.append(f"Title: {document.title}")
+            if getattr(document, "correspondent", None):
+                content_parts.append(f"Correspondent: {document.correspondent}")
+            if getattr(document, "content", None):
+                content_parts.append(document.content)
+            document_content = "\n\n".join(content_parts)
 
-            # Run AI interpretation
-            suggestions = ai_service.suggest_for_review(
-                document_content=context.get("content", ""),
-                current_values=context.get("current_values", {}),
-                available_categories=context.get("categories", []),
-                available_accounts=context.get("accounts", []),
+            # Extract current values from extraction data
+            amount = str(extraction_data.get("total_amount", "0")) if extraction_data else "0"
+            date = extraction_data.get("invoice_date", "") if extraction_data else ""
+            vendor = extraction_data.get("vendor_name") if extraction_data else None
+            description = extraction_data.get("description") if extraction_data else None
+            current_category = (
+                extraction_data.get("suggested_category") if extraction_data else None
             )
 
-            # Store results
-            suggestions_json = json.dumps(suggestions) if suggestions else None
+            # Run AI interpretation with correct parameters
+            suggestions = ai_service.suggest_for_review(
+                amount=amount,
+                date=date,
+                vendor=vendor,
+                description=description,
+                current_category=current_category,
+                document_content=document_content,
+                document_id=document_id,
+                no_timeout=True,  # Background job, wait for LLM
+            )
+
+            # Store results - convert to dict if needed
+            if suggestions:
+                suggestions_dict = (
+                    suggestions.to_dict() if hasattr(suggestions, "to_dict") else suggestions
+                )
+                suggestions_json = json.dumps(suggestions_dict)
+            else:
+                suggestions_json = None
             self.store.complete_ai_job(job_id, suggestions_json)
 
             logger.info(
@@ -228,51 +254,6 @@ class AIJobQueueService:
             logger.error(f"AI job #{job_id} failed: {error_msg}")
             self.store.fail_ai_job(job_id, error_msg, can_retry=True)
             return False
-
-    def _build_ai_context(
-        self,
-        document: Any,  # PaperlessDocument object
-        extraction_data: dict[str, Any] | None,
-    ) -> dict[str, Any]:
-        """
-        Build context dict for AI interpretation.
-
-        Args:
-            document: PaperlessDocument object from paperless_client
-            extraction_data: Existing extraction data if available
-
-        Returns:
-            Context dict with content, current values, etc.
-        """
-        context = {
-            "content": "",
-            "current_values": {},
-            "categories": [],
-            "accounts": [],
-        }
-
-        # Extract document content from PaperlessDocument object
-        content_parts = []
-        if getattr(document, "title", None):
-            content_parts.append(f"Title: {document.title}")
-        if getattr(document, "correspondent", None):
-            content_parts.append(f"Correspondent: {document.correspondent}")
-        if getattr(document, "content", None):
-            content_parts.append(document.content)
-
-        context["content"] = "\n\n".join(content_parts)
-
-        # Current extraction values
-        if extraction_data:
-            context["current_values"] = {
-                "amount": extraction_data.get("total_amount"),
-                "date": extraction_data.get("invoice_date"),
-                "vendor": extraction_data.get("vendor_name"),
-                "description": extraction_data.get("description"),
-                "category": extraction_data.get("suggested_category"),
-            }
-
-        return context
 
     def get_job_suggestions(self, document_id: int) -> dict[str, Any] | None:
         """
