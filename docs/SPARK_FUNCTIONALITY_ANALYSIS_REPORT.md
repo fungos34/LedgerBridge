@@ -236,8 +236,8 @@ Paperless doc_id=1234; source_hash=abcdef12345678; confidence=0.92; review_state
 llm:
   enabled: false  # DEFAULT: OFF
   ollama_url: "http://localhost:11434"
-  model_fast: "qwen2.5:3b-instruct"
-  model_fallback: "qwen2.5:7b-instruct"
+  model_fast: "qwen2.5:3b-instruct-q4_K_M"
+  model_fallback: "qwen2.5:7b-instruct-q4_K_M"
 ```
 
 **Environment Override:**

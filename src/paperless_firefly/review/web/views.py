@@ -418,8 +418,8 @@ def user_settings(request: HttpRequest) -> HttpResponse:
         "llm_status": llm_status,
         "available_models": available_models,
         "default_ollama_url": getattr(settings, "OLLAMA_URL", "http://localhost:11434"),
-        "default_ollama_model": getattr(settings, "OLLAMA_MODEL", "qwen2.5:3b-instruct"),
-        "default_ollama_model_fallback": getattr(settings, "OLLAMA_MODEL_FALLBACK", "qwen2.5:7b-instruct"),
+        "default_ollama_model": getattr(settings, "OLLAMA_MODEL", "qwen2.5:3b-instruct-q4_K_M"),
+        "default_ollama_model_fallback": getattr(settings, "OLLAMA_MODEL_FALLBACK", "qwen2.5:7b-instruct-q4_K_M"),
         **_get_external_urls(request.user if hasattr(request, "user") else None),
     }
     return render(request, "review/settings.html", context)

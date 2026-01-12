@@ -102,9 +102,9 @@ class LLMConfig:
     # Format: "Bearer <token>" or custom header value
     auth_header: str | None = None
     # Fast model (default)
-    model_fast: str = "qwen2.5:3b-instruct"
+    model_fast: str = "qwen2.5:3b-instruct-q4_K_M"
     # Fallback model (for hard cases)
-    model_fallback: str = "qwen2.5:7b-instruct"
+    model_fallback: str = "qwen2.5:7b-instruct-q4_K_M"
     # Request timeout (seconds)
     timeout_seconds: int = 30
     # Max retries per request
@@ -268,10 +268,10 @@ def load_config(config_path: Path) -> Config:
         ),
         auth_header=os.environ.get("OLLAMA_AUTH_HEADER", llm_data.get("auth_header")),
         model_fast=os.environ.get(
-            "OLLAMA_MODEL", llm_data.get("model_fast", "qwen2.5:3b-instruct")
+            "OLLAMA_MODEL", llm_data.get("model_fast", "qwen2.5:3b-instruct-q4_K_M")
         ),
         model_fallback=os.environ.get(
-            "OLLAMA_MODEL_FALLBACK", llm_data.get("model_fallback", "qwen2.5:7b-instruct")
+            "OLLAMA_MODEL_FALLBACK", llm_data.get("model_fallback", "qwen2.5:7b-instruct-q4_K_M")
         ),
         timeout_seconds=int(os.environ.get(
             "OLLAMA_TIMEOUT", llm_data.get("timeout_seconds", 30)
@@ -344,8 +344,8 @@ llm:
   enabled: false                           # Set to true to enable LLM assist
   ollama_url: "http://localhost:11434"     # Ollama server URL (localhost, LAN, or remote)
   auth_header: null                        # Optional auth header for proxied deployments
-  model_fast: "qwen2.5:3b-instruct"        # Fast model for most cases
-  model_fallback: "qwen2.5:7b-instruct"    # Fallback for hard cases
+  model_fast: "qwen2.5:3b-instruct-q4_K_M"        # Fast model for most cases
+  model_fallback: "qwen2.5:7b-instruct-q4_K_M"    # Fallback for hard cases
   timeout_seconds: 30
   max_retries: 2
   cache_ttl_days: 30                       # Cache LLM results for this long

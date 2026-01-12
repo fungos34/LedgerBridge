@@ -454,8 +454,8 @@ Use a **two-tier CPU-friendly strategy** for target hardware (Acer Aspire V / i5
 
 | Tier | Model | Use Case |
 |------|-------|----------|
-| **Fast default** | `qwen2.5:3b-instruct` | Most categorizations |
-| **Fallback** | `qwen2.5:7b-instruct` (quantized) | Hard cases, ambiguous inputs |
+| **Fast default** | `qwen2.5:3b-instruct-q4_K_M` | Most categorizations |
+| **Fallback** | `qwen2.5:7b-instruct-q4_K_M` (quantized) | Hard cases, ambiguous inputs |
 
 Model names are **configurable via environment/config** without code changes:
 
@@ -463,8 +463,8 @@ Model names are **configurable via environment/config** without code changes:
 # config.yaml
 llm:
   enabled: true
-  model_fast: "qwen2.5:3b-instruct"
-  model_fallback: "qwen2.5:7b-instruct"
+  model_fast: "qwen2.5:3b-instruct-q4_K_M"
+  model_fallback: "qwen2.5:7b-instruct-q4_K_M"
   ollama_url: "http://localhost:11434"
   timeout_seconds: 30
   max_retries: 2
@@ -690,7 +690,7 @@ CREATE TABLE interpretation_runs (
     -- LLM involvement (JSON, nullable)
     llm_result TEXT,
     -- {
-    --   "model": "qwen2.5:3b-instruct",
+    --   "model": "qwen2.5:3b-instruct-q4_K_M",
     --   "prompt_version": "cat-v2",
     --   "response": {"category_id": "groceries", "confidence": 0.85, ...},
     --   "fallback_used": false
@@ -800,8 +800,8 @@ class LLMCategorizer:
         self,
         client: OllamaClient,
         allowed_categories: list[dict],
-        model_fast: str = "qwen2.5:3b-instruct",
-        model_fallback: str = "qwen2.5:7b-instruct",
+        model_fast: str = "qwen2.5:3b-instruct-q4_K_M",
+        model_fallback: str = "qwen2.5:7b-instruct-q4_K_M",
     ):
         self.client = client
         self.allowed_categories = allowed_categories
