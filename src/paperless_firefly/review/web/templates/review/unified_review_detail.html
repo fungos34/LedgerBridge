@@ -689,9 +689,8 @@
                     <h2>{{ record.title|truncatechars:50 }}</h2>
                 </div>
                 <div class="card-body">
-                    <!-- Amount & Currency -->
+                    <!-- Amount & Currency (keeping section as it has 2 fields) -->
                     <div class="form-section">
-                        <div class="form-section-title">Amount</div>
                         <div class="form-row">
                             <div class="form-group">
                                 <label class="form-label" for="amount">Amount <span class="required-star">*</span></label>
@@ -725,45 +724,40 @@
                         </div>
                     </div>
                     
-                    <!-- Date -->
+                    <!-- Date & Description (combined as related fields) -->
                     <div class="form-section">
-                        <div class="form-section-title">Date</div>
-                        <div class="form-group">
-                            <label class="form-label" for="date">Transaction Date <span class="required-star">*</span></label>
-                            <input type="date" 
-                                   id="date" 
-                                   name="date" 
-                                   class="form-input" 
-                                   value="{{ record.date }}"
-                                   {% if record_type == 'firefly' %}readonly{% endif %}
-                                   required>
-                            {% if confidence.date %}
-                            <div class="form-help">Confidence: {{ confidence.date|floatformat:0 }}%</div>
-                            {% endif %}
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label" for="date">Transaction Date <span class="required-star">*</span></label>
+                                <input type="date" 
+                                       id="date" 
+                                       name="date" 
+                                       class="form-input" 
+                                       value="{{ record.date }}"
+                                       {% if record_type == 'firefly' %}readonly{% endif %}
+                                       required>
+                                {% if confidence.date %}
+                                <div class="form-help">Confidence: {{ confidence.date|floatformat:0 }}%</div>
+                                {% endif %}
+                            </div>
+                            <div class="form-group" style="flex: 2;">
+                                <label class="form-label" for="description">Description <span class="required-star">*</span></label>
+                                <input type="text" 
+                                       id="description" 
+                                       name="description" 
+                                       class="form-input" 
+                                       value="{{ record.description }}"
+                                       {% if record_type == 'firefly' %}readonly{% endif %}
+                                       required>
+                                {% if confidence.description %}
+                                <div class="form-help">Confidence: {{ confidence.description|floatformat:0 }}%</div>
+                                {% endif %}
+                            </div>
                         </div>
                     </div>
                     
-                    <!-- Description -->
+                    <!-- Accounts (keeping as has 2 fields) -->
                     <div class="form-section">
-                        <div class="form-section-title">Description</div>
-                        <div class="form-group">
-                            <label class="form-label" for="description">Description <span class="required-star">*</span></label>
-                            <input type="text" 
-                                   id="description" 
-                                   name="description" 
-                                   class="form-input" 
-                                   value="{{ record.description }}"
-                                   {% if record_type == 'firefly' %}readonly{% endif %}
-                                   required>
-                            {% if confidence.description %}
-                            <div class="form-help">Confidence: {{ confidence.description|floatformat:0 }}%</div>
-                            {% endif %}
-                        </div>
-                    </div>
-                    
-                    <!-- Accounts -->
-                    <div class="form-section">
-                        <div class="form-section-title">Accounts</div>
                         <div class="form-row">
                             <div class="form-group">
                                 <label class="form-label" for="source_account">Source Account <span class="required-star">*</span></label>
@@ -803,14 +797,13 @@
                     
                     <!-- Category -->
                     <div class="form-section">
-                        <div class="form-section-title">
-                            Category
-                            {% if llm_suggestion %}
-                            <span class="badge-ai" title="AI suggested: {{ llm_suggestion.category }}">🤖 AI</span>
-                            {% endif %}
-                        </div>
                         <div class="form-group">
-                            <label class="form-label" for="category">Category</label>
+                            <label class="form-label" for="category">
+                                Category
+                                {% if llm_suggestion %}
+                                <span class="badge-ai" title="AI suggested: {{ llm_suggestion.category }}">🤖 AI</span>
+                                {% endif %}
+                            </label>
                             {% if record_type == 'paperless' %}
                             <select id="category" name="category" class="form-input">
                                 <option value="">-- Select Category --</option>
@@ -836,32 +829,29 @@
                     </div>
                     
                     {% if record_type == 'paperless' %}
-                    <!-- Transaction Type -->
+                    <!-- Transaction Type and Reference (combined row) -->
                     <div class="form-section">
-                        <div class="form-section-title">Transaction Type</div>
-                        <div class="form-group">
-                            <select id="transaction_type" name="transaction_type" class="form-input" required>
-                                <option value="withdrawal" {% if record.transaction_type == 'withdrawal' or record.transaction_type == 'WITHDRAWAL' %}selected{% endif %}>Withdrawal (Expense)</option>
-                                <option value="deposit" {% if record.transaction_type == 'deposit' or record.transaction_type == 'DEPOSIT' %}selected{% endif %}>Deposit (Income)</option>
-                                <option value="transfer" {% if record.transaction_type == 'transfer' or record.transaction_type == 'TRANSFER' %}selected{% endif %}>Transfer</option>
-                            </select>
-                        </div>
-                    </div>
-                    
-                    <!-- Invoice Number -->
-                    <div class="form-section">
-                        <div class="form-section-title">Reference</div>
-                        <div class="form-group">
-                            <label class="form-label" for="invoice_number">Invoice / Receipt Number</label>
-                            <input type="text" 
-                                   id="invoice_number" 
-                                   name="invoice_number" 
-                                   class="form-input" 
-                                   value="{{ record.invoice_number|default:'' }}"
-                                   placeholder="e.g., INV-2024-001">
-                            {% if confidence.invoice_number %}
-                            <div class="form-help">Confidence: {{ confidence.invoice_number|floatformat:0 }}%</div>
-                            {% endif %}
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label" for="transaction_type">Transaction Type <span class="required-star">*</span></label>
+                                <select id="transaction_type" name="transaction_type" class="form-input" required>
+                                    <option value="withdrawal" {% if record.transaction_type == 'withdrawal' or record.transaction_type == 'WITHDRAWAL' %}selected{% endif %}>Withdrawal (Expense)</option>
+                                    <option value="deposit" {% if record.transaction_type == 'deposit' or record.transaction_type == 'DEPOSIT' %}selected{% endif %}>Deposit (Income)</option>
+                                    <option value="transfer" {% if record.transaction_type == 'transfer' or record.transaction_type == 'TRANSFER' %}selected{% endif %}>Transfer</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="invoice_number">Invoice / Receipt Number</label>
+                                <input type="text" 
+                                       id="invoice_number" 
+                                       name="invoice_number" 
+                                       class="form-input" 
+                                       value="{{ record.invoice_number|default:'' }}"
+                                       placeholder="e.g., INV-2024-001">
+                                {% if confidence.invoice_number %}
+                                <div class="form-help">Confidence: {{ confidence.invoice_number|floatformat:0 }}%</div>
+                                {% endif %}
+                            </div>
                         </div>
                     </div>
                     
@@ -1555,9 +1545,29 @@ function rerunInterpretation() {
         clearTimeout(timeoutId);
         hideAIProgressModal();
         
+        // Check if response is OK first
+        if (!response.ok) {
+            // Try to get error from JSON body if possible
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+                return response.json().then(data => {
+                    throw new Error(data.error || `Server error: ${response.status}`);
+                });
+            }
+            // Server returned HTML error page (timeout, 500, etc.)
+            if (response.status === 504 || response.status === 502) {
+                throw new Error(`Server gateway timeout (${response.status}). The AI request is taking too long. Try increasing the timeout in Settings or try again later.`);
+            } else if (response.status === 500) {
+                throw new Error('Server error occurred. Check server logs for details.');
+            } else {
+                throw new Error(`Server error: ${response.status} ${response.statusText}`);
+            }
+        }
+        
         const contentType = response.headers.get('content-type');
         if (!contentType || !contentType.includes('application/json')) {
-            throw new Error('Server returned non-JSON response. Please try again.');
+            // This shouldn't happen for successful responses but handle it gracefully
+            throw new Error('Server returned unexpected response format. The server may be overloaded. Please try again.');
         }
         return response.json();
     })
