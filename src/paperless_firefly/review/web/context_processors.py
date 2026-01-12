@@ -83,7 +83,10 @@ def _get_page_name(path: str) -> str:
         return path_mappings[path]
 
     # Check prefixes
+    if path.startswith("/unified-review/"):
+        return "Document Review"
     if path.startswith("/extraction/"):
+        # Legacy - kept for backward compatibility
         return "Document Review"
     if path.startswith("/review/"):
         return "Transaction Review"
@@ -112,7 +115,13 @@ def _get_page_description(path: str) -> str:
     if path in descriptions:
         return descriptions[path]
 
+    if path.startswith("/unified-review/"):
+        return (
+            "Review and edit extracted data from a Paperless document. "
+            "Set the amount, date, category, and vendor before importing to Firefly."
+        )
     if path.startswith("/extraction/"):
+        # Legacy - kept for backward compatibility
         return (
             "Review and edit extracted data from a Paperless document. "
             "Set the amount, date, category, and vendor before importing to Firefly."

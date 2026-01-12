@@ -154,7 +154,7 @@
                 <td class="text-sm">{{ run.run_timestamp|slice:":19" }}</td>
                 <td>
                     {% if run.document_id %}
-                    <a href="{% url 'detail' run.document_id %}" class="text-link">Doc #{{ run.document_id }}</a>
+                    <a href="{% url 'unified_review_detail' 'paperless' run.document_id %}" class="text-link">Doc #{{ run.document_id }}</a>
                     {% else %}
                     <span class="text-muted">-</span>
                     {% endif %}

@@ -40,9 +40,8 @@ urlpatterns = [
     ),
     # Extraction from Paperless
     path("extract/", views.run_extract, name="run_extract"),
-    # Single extraction review
-    path("extraction/<int:extraction_id>/", views.review_detail, name="detail"),
-    # Actions
+    # NOTE: Old detail view removed - use unified_review_detail instead
+    # Actions (still use extraction_id as these work on database records)
     path("extraction/<int:extraction_id>/accept/", views.accept_extraction, name="accept"),
     path("extraction/<int:extraction_id>/reject/", views.reject_extraction, name="reject"),
     path("extraction/<int:extraction_id>/skip/", views.skip_extraction, name="skip"),

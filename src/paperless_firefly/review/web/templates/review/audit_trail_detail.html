@@ -188,7 +188,7 @@
                 <span class="label">Document ID</span>
                 <span class="value">
                     {% if run.document_id %}
-                    <a href="{% url 'detail' run.document_id %}">Doc #{{ run.document_id }}</a>
+                    <a href="{% url 'unified_review_detail' 'paperless' run.document_id %}">Doc #{{ run.document_id }}</a>
                     {% if doc_record %}
                     <div class="text-sm text-muted mt-1">{{ doc_record.title|truncatechars:40 }}</div>
                     {% endif %}

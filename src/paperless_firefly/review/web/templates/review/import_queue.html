@@ -229,7 +229,7 @@
             {% for item in failed_items %}
             <tr>
                 <td>
-                    <a href="{% url 'detail' item.id %}">{{ item.title|truncatechars:40 }}</a>
+                    <a href="{% url 'unified_review_detail' 'paperless' item.document_id %}">{{ item.title|truncatechars:40 }}</a>
                 </td>
                 <td class="amount-cell">{{ item.amount }} {{ item.currency }}</td>
                 <td>{{ item.date }}</td>
@@ -276,7 +276,7 @@
             {% for item in ready_items %}
             <tr>
                 <td>
-                    <a href="{% url 'detail' item.id %}">{{ item.title|truncatechars:40 }}</a>
+                    <a href="{% url 'unified_review_detail' 'paperless' item.document_id %}">{{ item.title|truncatechars:40 }}</a>
                 </td>
                 <td class="amount-cell">{{ item.amount }} {{ item.currency }}</td>
                 <td>{{ item.date }}</td>

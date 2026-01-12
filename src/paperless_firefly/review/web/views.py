@@ -167,6 +167,26 @@ def _get_external_urls(user=None):
     }
 
 
+def _get_document_id_for_extraction(store: StateStore, extraction_id: int) -> int | None:
+    """Get the document_id for an extraction record.
+    
+    Args:
+        store: StateStore instance.
+        extraction_id: The extraction record ID.
+        
+    Returns:
+        The document_id if found, None otherwise.
+    """
+    conn = store._get_connection()
+    try:
+        row = conn.execute(
+            "SELECT document_id FROM extractions WHERE id = ?", (extraction_id,)
+        ).fetchone()
+        return row["document_id"] if row else None
+    finally:
+        conn.close()
+
+
 # ============================================================================
 # Landing Page & Authentication
 # ============================================================================
@@ -653,193 +673,9 @@ def _is_llm_enabled_for_user(request: HttpRequest) -> bool:
     return _is_llm_globally_enabled()
 
 
-@login_required
-def review_detail(request: HttpRequest, extraction_id: int) -> HttpResponse:
-    """Show single extraction for review with document preview."""
-    store = _get_store()
-
-    # Get the extraction record
-    pending = store.get_extractions_for_review()
-    record = None
-    for r in pending:
-        if r.id == extraction_id:
-            record = r
-            break
-
-    if not record:
-        # Check if it exists but was already reviewed
-        conn = store._get_connection()
-        try:
-            row = conn.execute(
-                "SELECT * FROM extractions WHERE id = ?", (extraction_id,)
-            ).fetchone()
-            if row:
-                record = ExtractionRecord(
-                    id=row["id"],
-                    document_id=row["document_id"],
-                    external_id=row["external_id"],
-                    extraction_json=row["extraction_json"],
-                    overall_confidence=row["overall_confidence"],
-                    review_state=row["review_state"],
-                    review_decision=row["review_decision"],
-                    reviewed_at=row["reviewed_at"],
-                    created_at=row["created_at"],
-                )
-        finally:
-            conn.close()
-
-    if not record:
-        return render(
-            request, "review/not_found.html", {"extraction_id": extraction_id}, status=404
-        )
-
-    try:
-        data = json.loads(record.extraction_json)
-        extraction = FinanceExtraction.from_dict(data)
-    except Exception as e:
-        logger.error(f"Error parsing extraction {extraction_id}: {e}")
-        return render(request, "review/error.html", {"error": str(e)}, status=500)
-
-    # Get list of all pending for navigation
-    all_pending = store.get_extractions_for_review()
-    pending_ids = [r.id for r in all_pending]
-    current_idx = pending_ids.index(extraction_id) if extraction_id in pending_ids else -1
-    prev_id = pending_ids[current_idx - 1] if current_idx > 0 else None
-    next_id = pending_ids[current_idx + 1] if current_idx < len(pending_ids) - 1 else None
-
-    # Convert confidence scores to percentages for display
-    confidence_pct = {
-        "overall": extraction.confidence.overall * 100,
-        "amount": extraction.confidence.amount * 100,
-        "date": extraction.confidence.date * 100,
-        "currency": extraction.confidence.currency * 100,
-        "description": extraction.confidence.description * 100,
-        "vendor": extraction.confidence.vendor * 100,
-        "invoice_number": extraction.confidence.invoice_number * 100,
-    }
-
-    # Get Firefly accounts for dropdown
-    firefly_accounts = []
-    try:
-        client = _get_firefly_client(request)
-        firefly_accounts = client.list_accounts("asset")
-    except Exception as e:
-        logger.warning(f"Could not fetch Firefly accounts: {e}")
-
-    # LLM context (Spark v1.0 - SPARK_EVALUATION_REPORT.md 6.6/6.7)
-    llm_suggestion = _get_llm_suggestion_for_document(store, extraction.paperless_document_id)
-    llm_globally_enabled = _is_llm_globally_enabled()
-
-    # Get Firefly categories for dropdown
-    firefly_categories = []
-    firefly_categories_json = "[]"  # JSON serialized for JavaScript
-    try:
-        categories_raw = client.list_categories() if firefly_accounts else []
-        firefly_categories = categories_raw
-        # Serialize to JSON for JavaScript use in split transactions
-        firefly_categories_json = json.dumps(
-            [{"id": cat.id, "name": cat.name} for cat in categories_raw]
-        )
-    except Exception as e:
-        logger.warning(f"Could not fetch Firefly categories: {e}")
-
-    # Find potential matching Firefly transactions for this document
-    # Per SPARK_EVALUATION_REPORT.md: match documents to existing Firefly entries
-    matching_transactions = []
-    try:
-        from ...config import load_config
-        from ...matching.engine import MatchingEngine
-
-        # Build extraction dict from FinanceExtraction for the matching engine
-        # Note: proposal.date is already a string (ISO format) per TransactionProposal schema
-        extraction_dict = {
-            "amount": extraction.proposal.amount,
-            "date": extraction.proposal.date,  # Already ISO string, no isoformat() needed
-            "vendor": extraction.proposal.vendor,
-            "description": extraction.proposal.description,
-            "correspondent": getattr(extraction.proposal, "correspondent", None),
-        }
-
-        # Get config for matching engine
-        config = load_config(_get_config_path())
-        engine = MatchingEngine(store, config)
-
-        # Find matches using the matching engine
-        matches = engine.find_matches(
-            document_id=extraction.paperless_document_id,
-            extraction=extraction_dict,
-            max_results=5,
-        )
-
-        # Enrich matches with transaction details from cache
-        for m in matches:
-            cached_tx = store.get_firefly_cache_entry(m.firefly_id)
-            if cached_tx:
-                matching_transactions.append(
-                    {
-                        "firefly_id": m.firefly_id,
-                        "score": round(m.total_score * 100, 1),
-                        "amount": cached_tx.get("amount"),
-                        "date": cached_tx.get("date"),
-                        "description": cached_tx.get("description"),
-                        "destination": cached_tx.get("destination_account"),
-                        "reasons": m.reasons,
-                    }
-                )
-    except Exception as e:
-        logger.warning(f"Could not find matching transactions: {e}")
-
-    # Prepare line items for display (split transactions support)
-    line_items_data = []
-    for idx, item in enumerate(extraction.line_items):
-        line_items_data.append(
-            {
-                "index": idx,
-                "description": item.description,
-                "amount": item.total
-                or (item.quantity * item.unit_price if item.quantity and item.unit_price else None),
-                "quantity": item.quantity,
-                "unit_price": item.unit_price,
-                "category": getattr(item, "category", None),  # Can be set per line item
-            }
-        )
-
-    # Compute weighted category from line items (SSOT: workflow.compute_weighted_category)
-    weighted_category = None
-    if line_items_data:
-        from ..workflow import compute_weighted_category
-
-        weighted_category = compute_weighted_category(line_items_data)
-
-    context = {
-        "record": record,
-        "extraction": extraction,
-        "proposal": extraction.proposal,
-        "confidence": confidence_pct,
-        "provenance": extraction.provenance,
-        "document_id": extraction.paperless_document_id,
-        "prev_id": prev_id,
-        "next_id": next_id,
-        "pending_count": len(pending_ids),
-        "current_position": current_idx + 1 if current_idx >= 0 else 0,
-        "already_reviewed": record.review_decision is not None,
-        "firefly_accounts": firefly_accounts,
-        "firefly_categories": firefly_categories,
-        "firefly_categories_json": firefly_categories_json,  # JSON for JS
-        # Line items for split transactions
-        "line_items": line_items_data,
-        "has_line_items": len(line_items_data) > 0,
-        "weighted_category": weighted_category,  # Computed from splits
-        # Matching transactions
-        "matching_transactions": matching_transactions,
-        "has_matches": len(matching_transactions) > 0,
-        # LLM context
-        "llm_suggestion": llm_suggestion,
-        "llm_globally_enabled": llm_globally_enabled,
-        "llm_opt_out": record.llm_opt_out,
-        **_get_external_urls(request.user if hasattr(request, "user") else None),
-    }
-    return render(request, "review/detail.html", context)
+# NOTE: review_detail view has been removed.
+# Use unified_review_detail instead: /unified-review/paperless/<document_id>/
+# The old URL pattern /extraction/<extraction_id>/ has been removed from urls.py.
 
 
 # ============================================================================
@@ -856,7 +692,7 @@ def accept_extraction(request: HttpRequest, extraction_id: int) -> HttpResponse:
 
     pending = store.get_extractions_for_review()
     if pending:
-        return redirect("detail", extraction_id=pending[0].id)
+        return redirect("unified_review_detail", record_type="paperless", record_id=pending[0].document_id)
     return redirect("list")
 
 
@@ -869,7 +705,7 @@ def reject_extraction(request: HttpRequest, extraction_id: int) -> HttpResponse:
 
     pending = store.get_extractions_for_review()
     if pending:
-        return redirect("detail", extraction_id=pending[0].id)
+        return redirect("unified_review_detail", record_type="paperless", record_id=pending[0].document_id)
     return redirect("list")
 
 
@@ -999,7 +835,8 @@ def skip_extraction(request: HttpRequest, extraction_id: int) -> HttpResponse:
     if extraction_id in pending_ids:
         current_idx = pending_ids.index(extraction_id)
         if current_idx < len(pending_ids) - 1:
-            return redirect("detail", extraction_id=pending_ids[current_idx + 1])
+            next_doc_id = pending[current_idx + 1].document_id
+            return redirect("unified_review_detail", record_type="paperless", record_id=next_doc_id)
 
     return redirect("list")
 
@@ -1157,7 +994,7 @@ def save_extraction(request: HttpRequest, extraction_id: int) -> HttpResponse:
         # Move to next pending item
         pending = store.get_extractions_for_review()
         if pending:
-            return redirect("detail", extraction_id=pending[0].id)
+            return redirect("unified_review_detail", record_type="paperless", record_id=pending[0].document_id)
         return redirect("list")
     else:
         # Just save the data without changing review status
@@ -1165,7 +1002,10 @@ def save_extraction(request: HttpRequest, extraction_id: int) -> HttpResponse:
         # Stay on current page with success message
         from django.contrib import messages
         messages.success(request, "Changes saved. Review and confirm when ready.")
-        return redirect("detail", extraction_id=extraction_id)
+        doc_id = _get_document_id_for_extraction(store, extraction_id)
+        if doc_id:
+            return redirect("unified_review_detail", record_type="paperless", record_id=doc_id)
+        return redirect("list")
 
 
 # ============================================================================
@@ -1529,7 +1369,8 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
             return JsonResponse({"success": False, "error": str(e)}, status=500)
         messages.error(request, f"AI interpretation failed: {e}")
 
-    return redirect("detail", extraction_id=extraction_id)
+    # Redirect to unified review (document_id available from earlier query)
+    return redirect("unified_review_detail", record_type="paperless", record_id=document_id)
 
 
 # ============================================================================
@@ -3262,7 +3103,7 @@ def link_document_to_transaction(request: HttpRequest) -> HttpResponse:
                 return redirect("list")
             else:
                 messages.error(request, "Failed to link document to transaction")
-                return redirect("detail", extraction_id=document_id_int)
+                return redirect("unified_review_detail", record_type="paperless", record_id=document_id_int)
 
         except Exception as e:
             logger.error(f"Error linking doc {document_id} to tx {firefly_id}: {e}")

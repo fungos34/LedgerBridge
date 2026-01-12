@@ -107,7 +107,7 @@
                     {{ match_document.title }} • {{ match_document.amount }} {{ match_document.currency }} • {{ match_document.date }}
                 </div>
             </div>
-            <a href="{% url 'detail' match_document.document_id %}" class="btn btn-outline">
+            <a href="{% url 'unified_review_detail' 'paperless' match_document.document_id %}" class="btn btn-outline">
                 ← Back to Review
             </a>
         </div>

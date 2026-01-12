@@ -542,7 +542,7 @@
                 </div>
                 {% endif %}
                 <div style="margin-top: 0.75rem;">
-                    <a href="{% url 'detail' selected_match.paperless.document_id %}" class="btn btn-outline btn-sm">
+                    <a href="{% url 'unified_review_detail' 'paperless' selected_match.paperless.document_id %}" class="btn btn-outline btn-sm">
                         Edit Details →
                     </a>
                 </div>
@@ -603,7 +603,7 @@
                     ✕ Reject Match
                 </button>
             </form>
-            <button type="button" class="btn btn-outline" onclick="rerunAI({{ selected_match.paperless.document_id }})">
+            <button type="button" class="btn btn-outline" onclick="rerunAI({{ selected_match.paperless.id }})">
                 🤖 Re-run AI
             </button>
         </div>
@@ -903,8 +903,9 @@ function quickLink(documentId, fireflyId) {
     }
 }
 
-function rerunAI(documentId) {
-    fetch(`/extraction/${documentId}/rerun-interpretation/`, {
+function rerunAI(extractionId) {
+    // Note: rerun_interpretation URL uses extraction_id, not document_id
+    fetch(`/extraction/${extractionId}/rerun/`, {
         method: 'POST',
         headers: {
             'X-CSRFToken': '{{ csrf_token }}',

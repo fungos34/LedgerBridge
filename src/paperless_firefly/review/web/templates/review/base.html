@@ -817,7 +817,7 @@
         // Add page-specific context based on URL
         const path = window.location.pathname;
         
-        if (path.includes('/extraction/') || path.includes('/review/')) {
+        if (path.includes('/unified-review/') || path.includes('/extraction/') || path.includes('/review/')) {
             // On a document review page - describe the form fields
             context += `\n\nThis is a document review page. The user can:
 - Edit Amount: The transaction amount extracted from the document
