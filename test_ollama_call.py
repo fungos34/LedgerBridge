@@ -19,7 +19,7 @@ import httpx
 # Configuration - MODIFY THESE VALUES FOR YOUR DEPLOYMENT
 OLLAMA_URL = "http://ollama:11434"  # or http://localhost:11434 if testing locally
 MODEL = "qwen2.5:3b-instruct-q4_K_M"  # or whatever model you have pulled
-TIMEOUT_SECONDS = 120
+TIMEOUT_SECONDS = 200000000
 
 # Sample document OCR content (typical receipt)
 DOCUMENT_CONTENT = """REWE Markt GmbH
