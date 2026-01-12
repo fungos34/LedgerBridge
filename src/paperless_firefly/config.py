@@ -198,6 +198,10 @@ def load_config(config_path: Path) -> Config:
     - FIREFLY_TOKEN
     - SPARK_LLM_ENABLED (true/false)
     - OLLAMA_URL
+    - OLLAMA_MODEL (fast model name)
+    - OLLAMA_MODEL_FALLBACK (fallback model name)
+    - OLLAMA_TIMEOUT (request timeout in seconds)
+    - SPARK_LLM_CACHE_TTL_DAYS (cache expiry)
     """
     if config_path.exists():
         with open(config_path) as f:
@@ -263,11 +267,19 @@ def load_config(config_path: Path) -> Config:
             "OLLAMA_URL", llm_data.get("ollama_url", "http://localhost:11434")
         ),
         auth_header=os.environ.get("OLLAMA_AUTH_HEADER", llm_data.get("auth_header")),
-        model_fast=llm_data.get("model_fast", "qwen2.5:3b-instruct"),
-        model_fallback=llm_data.get("model_fallback", "qwen2.5:7b-instruct"),
-        timeout_seconds=llm_data.get("timeout_seconds", 30),
+        model_fast=os.environ.get(
+            "OLLAMA_MODEL", llm_data.get("model_fast", "qwen2.5:3b-instruct")
+        ),
+        model_fallback=os.environ.get(
+            "OLLAMA_MODEL_FALLBACK", llm_data.get("model_fallback", "qwen2.5:7b-instruct")
+        ),
+        timeout_seconds=int(os.environ.get(
+            "OLLAMA_TIMEOUT", llm_data.get("timeout_seconds", 30)
+        )),
         max_retries=llm_data.get("max_retries", 2),
-        cache_ttl_days=llm_data.get("cache_ttl_days", 30),
+        cache_ttl_days=int(os.environ.get(
+            "SPARK_LLM_CACHE_TTL_DAYS", llm_data.get("cache_ttl_days", 30)
+        )),
         green_threshold=llm_data.get("green_threshold", 0.85),
         calibration_count=llm_data.get("calibration_count", 100),
         max_concurrent=llm_data.get("max_concurrent", 2),
