@@ -5,7 +5,20 @@ These canonical schemas are the ONLY models used across all modules.
 No duplicated "near-same" models allowed.
 """
 
-from .dedupe import ExternalIdComponents, generate_external_id
+from .dedupe import (
+    EXTERNAL_ID_SEPARATOR,
+    HASH_PREFIX_LENGTH,
+    LEGACY_EXTERNAL_ID_PREFIX,
+    PAPERLESS_LINK_MARKER,
+    ExternalIdComponents,
+    compute_file_hash,
+    compute_transaction_hash,
+    extract_document_id_from_external_id,
+    generate_external_id,
+    generate_external_id_v2,
+    is_spark_external_id,
+    parse_external_id,
+)
 from .finance_extraction import (
     ConfidenceScores,
     DocumentClassification,

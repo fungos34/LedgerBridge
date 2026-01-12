@@ -10,6 +10,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from ..schemas.dedupe import compute_transaction_hash, generate_external_id_v2
 from ..schemas.firefly_payload import FireflyTransactionStore, validate_firefly_payload
 
 logger = logging.getLogger(__name__)
@@ -67,16 +68,22 @@ class FireflyDuplicateError(FireflyError):
 @dataclass
 class FireflyTransaction:
     """Firefly transaction representation.
-    
+
     When a Firefly transaction has multiple splits, we represent it as a single
     FireflyTransaction with:
     - amount: The total amount (sum of all splits)
     - has_splits: True if transaction has multiple splits
     - split_count: Number of splits (1 for single transactions)
     - The category/description are from the first split (primary line)
-    
+
     This ensures only one link per Firefly transaction is possible, regardless
     of how many splits it contains.
+
+    External ID handling:
+    - external_id: The actual external_id stored in Firefly (may be None)
+    - computed_external_id: Hash-based ID computed from transaction fields
+      This is always computed and can be used for deduplication even when
+      external_id is not set in Firefly yet.
     """
 
     id: int
@@ -85,6 +92,7 @@ class FireflyTransaction:
     amount: str
     description: str
     external_id: str | None = None
+    computed_external_id: str | None = None  # Hash-based ID for deduplication
     source_name: str | None = None
     destination_name: str | None = None
     internal_reference: str | None = None
@@ -93,6 +101,14 @@ class FireflyTransaction:
     tags: list[str] | None = None
     has_splits: bool = False
     split_count: int = 1
+
+    @property
+    def effective_external_id(self) -> str | None:
+        """Return the external_id to use for deduplication.
+
+        Prefers the stored external_id, falls back to computed_external_id.
+        """
+        return self.external_id or self.computed_external_id
 
 
 @dataclass
@@ -437,15 +453,35 @@ class FireflyClient:
 
             if transactions:
                 tx = transactions[0]
+                tx_date = tx.get("date", "")[:10]
+                source_name = tx.get("source_name")
+                destination_name = tx.get("destination_name")
+                description = tx.get("description", "")
+                amount = tx.get("amount", "")
+
+                # Compute hash-based external_id for deduplication
+                computed_external_id = None
+                try:
+                    computed_external_id = generate_external_id_v2(
+                        amount=amount,
+                        date=tx_date,
+                        source=source_name,
+                        destination=destination_name,
+                        description=description,
+                    )
+                except (ValueError, TypeError):
+                    pass
+
                 return FireflyTransaction(
                     id=int(data.get("id", 0)),
                     type=tx.get("type", ""),
                     date=tx.get("date", ""),
-                    amount=tx.get("amount", ""),
-                    description=tx.get("description", ""),
+                    amount=amount,
+                    description=description,
                     external_id=tx.get("external_id"),
-                    source_name=tx.get("source_name"),
-                    destination_name=tx.get("destination_name"),
+                    computed_external_id=computed_external_id,
+                    source_name=source_name,
+                    destination_name=destination_name,
                 )
         except FireflyAPIError as e:
             if e.status_code == 404:
@@ -551,7 +587,7 @@ class FireflyClient:
     ) -> list[FireflyTransaction]:
         """
         List transactions in a date range.
-        
+
         IMPORTANT: Split transactions in Firefly are returned as a single
         FireflyTransaction with the total amount. This ensures only one link
         per Firefly transaction is possible. The first split's metadata
@@ -584,21 +620,19 @@ class FireflyClient:
             for item in data.get("data", []):
                 attrs = item.get("attributes", {})
                 tx_list = attrs.get("transactions", [])
-                
+
                 if not tx_list:
                     continue
-                
+
                 # Aggregate all splits into a single transaction
                 # Use first split for primary metadata, sum amounts
                 first_split = tx_list[0]
                 split_count = len(tx_list)
                 has_splits = split_count > 1
-                
+
                 # Sum amounts from all splits
-                total_amount = sum(
-                    float(tx.get("amount", 0)) for tx in tx_list
-                )
-                
+                total_amount = sum(float(tx.get("amount", 0)) for tx in tx_list)
+
                 # Collect all unique tags across splits
                 all_tags: list[str] = []
                 for tx in tx_list:
@@ -607,7 +641,7 @@ class FireflyClient:
                         for tag in tx_tags:
                             if tag not in all_tags:
                                 all_tags.append(tag)
-                
+
                 # Build description that includes split info if relevant
                 description = first_split.get("description", "")
                 if has_splits:
@@ -622,11 +656,35 @@ class FireflyClient:
                     notes_suffix = f" [Split: {split_count} parts]"
                 else:
                     notes_suffix = ""
-                
+
                 # Get notes - combine with split indicator
                 existing_notes = first_split.get("notes") or ""
-                combined_notes = (existing_notes + notes_suffix).strip() if notes_suffix else existing_notes or None
-                
+                combined_notes = (
+                    (existing_notes + notes_suffix).strip()
+                    if notes_suffix
+                    else existing_notes or None
+                )
+
+                # Extract date in YYYY-MM-DD format for hash computation
+                tx_date = first_split.get("date", "")[:10]
+                source_name = first_split.get("source_name")
+                destination_name = first_split.get("destination_name")
+
+                # Compute hash-based external_id for deduplication
+                # This is computed even if external_id exists, for consistent dedup
+                computed_external_id = None
+                try:
+                    computed_external_id = generate_external_id_v2(
+                        amount=str(total_amount),
+                        date=tx_date,
+                        source=source_name,
+                        destination=destination_name,
+                        description=description,
+                    )
+                except (ValueError, TypeError):
+                    # If hash computation fails, continue without it
+                    pass
+
                 transactions.append(
                     FireflyTransaction(
                         id=int(item.get("id", 0)),
@@ -635,8 +693,9 @@ class FireflyClient:
                         amount=str(total_amount),
                         description=description,
                         external_id=first_split.get("external_id"),
-                        source_name=first_split.get("source_name"),
-                        destination_name=first_split.get("destination_name"),
+                        computed_external_id=computed_external_id,
+                        source_name=source_name,
+                        destination_name=destination_name,
                         internal_reference=first_split.get("internal_reference"),
                         notes=combined_notes,
                         category_name=first_split.get("category_name"),
@@ -777,4 +836,53 @@ class FireflyClient:
         )
 
         logger.info(f"Updated transaction {transaction_id} with linkage markers")
+        return True
+
+    def set_external_id(
+        self,
+        transaction_id: int,
+        external_id: str,
+    ) -> bool:
+        """
+        Set the external_id for a transaction (without other changes).
+
+        This is used to assign a computed hash-based external_id to Firefly
+        transactions that don't have one, ensuring deduplication across syncs.
+
+        Note: Only sets external_id if the transaction doesn't already have one,
+        to avoid overwriting existing IDs that may have other meanings.
+
+        Args:
+            transaction_id: Firefly transaction ID
+            external_id: External ID to set (typically computed hash)
+
+        Returns:
+            True if updated successfully, False if transaction already has external_id
+        """
+        # Get full transaction data
+        response = self._request("GET", f"/api/v1/transactions/{transaction_id}")
+        data = response.json().get("data", {})
+        attrs = data.get("attributes", {})
+        tx_list = attrs.get("transactions", [])
+
+        if not tx_list:
+            raise FireflyAPIError(500, f"Transaction {transaction_id} has no splits")
+
+        # Check if external_id is already set
+        first_split = tx_list[0]
+        if first_split.get("external_id"):
+            logger.debug(f"Transaction {transaction_id} already has external_id, skipping")
+            return False
+
+        # Set external_id on first split
+        first_split["external_id"] = external_id
+
+        # Send update
+        self._request(
+            "PUT",
+            f"/api/v1/transactions/{transaction_id}",
+            json_data={"transactions": tx_list},
+        )
+
+        logger.info(f"Set external_id for transaction {transaction_id}: {external_id}")
         return True

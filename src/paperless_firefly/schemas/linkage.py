@@ -5,22 +5,31 @@ This module defines THE single source of truth for linkage markers
 used to connect Paperless documents to Firefly transactions.
 
 Linkage Markers:
-1. external_id prefix: "paperless:"
+1. external_id: Two formats supported
+   - Legacy: "paperless:{doc_id}:{hash}:{amount}:{date}"
+   - V2: "{hash}:pl:{doc_id}" (new format for better deduplication)
 2. internal_reference: "PAPERLESS:{doc_id}"
 3. notes: "Paperless doc_id={doc_id}"
 
 A transaction is "unlinked" (not connected to Spark/LedgerBridge) if:
-- external_id does NOT start with EXTERNAL_ID_PREFIX AND
+- external_id is NOT a Spark-generated ID AND
 - internal_reference does NOT contain INTERNAL_REFERENCE_PREFIX AND
 - notes do NOT contain NOTES_MARKER_PREFIX
 """
 
 from typing import NamedTuple
 
+from .dedupe import (
+    LEGACY_EXTERNAL_ID_PREFIX,
+    PAPERLESS_LINK_MARKER,
+    extract_document_id_from_external_id,
+    is_spark_external_id,
+)
+
 # === Linkage Marker Constants ===
 
-# External ID prefix for Paperless-originated transactions
-EXTERNAL_ID_PREFIX = "paperless:"
+# External ID prefix for Paperless-originated transactions (legacy format)
+EXTERNAL_ID_PREFIX = LEGACY_EXTERNAL_ID_PREFIX
 
 # Internal reference format
 INTERNAL_REFERENCE_PREFIX = "PAPERLESS:"
@@ -43,7 +52,7 @@ def build_linkage_markers(document_id: int, external_id: str) -> LinkageMarkers:
 
     Args:
         document_id: Paperless document ID
-        external_id: Full external_id (e.g., "paperless:123:abc:10.00:2024-01-01")
+        external_id: Full external_id (e.g., "paperless:123:abc:10.00:2024-01-01" or "abc123:pl:123")
 
     Returns:
         LinkageMarkers tuple with all three markers
@@ -64,7 +73,7 @@ def is_linked_to_spark(
     Check if a transaction is linked to Spark/LedgerBridge.
 
     A transaction is linked if ANY of the following are true:
-    - external_id starts with "paperless:"
+    - external_id is a Spark-generated ID (legacy or v2 format)
     - internal_reference contains "PAPERLESS:"
     - notes contain "Paperless doc_id="
 
@@ -76,7 +85,8 @@ def is_linked_to_spark(
     Returns:
         True if linked, False otherwise
     """
-    if external_id and external_id.startswith(EXTERNAL_ID_PREFIX):
+    # Check external_id using the SSOT function from dedupe
+    if is_spark_external_id(external_id):
         return True
     if internal_reference and INTERNAL_REFERENCE_PREFIX in internal_reference:
         return True
@@ -93,19 +103,15 @@ def extract_document_id_from_markers(
     """
     Extract Paperless document ID from linkage markers.
 
-    Tries external_id first, then internal_reference, then notes.
+    Tries external_id first (both v2 and legacy formats), then internal_reference, then notes.
 
     Returns:
         Document ID if found, None otherwise
     """
-    # Try external_id (format: paperless:{doc_id}:...)
-    if external_id and external_id.startswith(EXTERNAL_ID_PREFIX):
-        try:
-            parts = external_id.split(":")
-            if len(parts) >= 2:
-                return int(parts[1])
-        except (ValueError, IndexError):
-            pass
+    # Try external_id using SSOT function (handles both v2 and legacy formats)
+    doc_id = extract_document_id_from_external_id(external_id)
+    if doc_id is not None:
+        return doc_id
 
     # Try internal_reference (format: PAPERLESS:{doc_id})
     if internal_reference and INTERNAL_REFERENCE_PREFIX in internal_reference:

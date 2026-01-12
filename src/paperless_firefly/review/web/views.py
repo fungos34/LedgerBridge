@@ -3389,17 +3389,28 @@ def sync_firefly_transactions(request: HttpRequest) -> HttpResponse:
             _firefly_sync_status["progress"] = f"Caching {len(transactions)} transactions..."
 
             # Store in cache and collect IDs for soft-delete check
+            # Also track transactions that need external_id assignment
             synced = 0
+            need_external_id: list[tuple[int, str]] = []  # (firefly_id, computed_external_id)
             current_firefly_ids: set[int] = set()
+            
             for tx in transactions:
                 current_firefly_ids.add(tx.id)
+                
+                # Use the effective external_id (stored or computed)
+                effective_external_id = tx.effective_external_id
+                
+                # Track transactions that need external_id assignment
+                if not tx.external_id and tx.computed_external_id:
+                    need_external_id.append((tx.id, tx.computed_external_id))
+                
                 store.upsert_firefly_cache(
                     firefly_id=tx.id,
                     type_=tx.type,
                     date=tx.date,
                     amount=tx.amount,
                     description=tx.description,
-                    external_id=tx.external_id,
+                    external_id=effective_external_id,  # Use effective (stored or computed)
                     internal_reference=tx.internal_reference,
                     source_account=tx.source_name,
                     destination_account=tx.destination_name,
@@ -3409,12 +3420,30 @@ def sync_firefly_transactions(request: HttpRequest) -> HttpResponse:
                 )
                 synced += 1
 
+            # Set external_id on Firefly transactions that don't have one
+            # This ensures deduplication even for manually entered transactions
+            external_id_set = 0
+            if need_external_id:
+                _firefly_sync_status["progress"] = (
+                    f"Assigning external_id to {len(need_external_id)} transactions..."
+                )
+                for firefly_id, computed_id in need_external_id:
+                    try:
+                        if firefly.set_external_id(firefly_id, computed_id):
+                            external_id_set += 1
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to set external_id for transaction {firefly_id}: {e}"
+                        )
+
             # Soft delete transactions that are no longer in Firefly
             _firefly_sync_status["progress"] = "Checking for deleted transactions..."
             deleted_count = store.soft_delete_missing_firefly_transactions(current_firefly_ids)
 
             _firefly_sync_status["synced_count"] = synced
             result_msg = f"Successfully synced {synced} transactions"
+            if external_id_set > 0:
+                result_msg += f", assigned external_id to {external_id_set}"
             if deleted_count > 0:
                 result_msg += f", soft-deleted {deleted_count} removed from Firefly"
             _firefly_sync_status["result"] = result_msg
