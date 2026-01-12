@@ -505,8 +505,8 @@
                         {% endif %}
                     </div>
                     <div class="record-actions">
-                        <!-- Quick Accept Button (visible when ready) -->
-                        {% if record.ready_for_import %}
+                        <!-- Quick Accept Button (visible when ready, but NOT if already reviewed manually) -->
+                        {% if record.ready_for_import and record.review_decision != 'ACCEPTED' and record.review_decision != 'EDITED' %}
                         <button type="button" 
                                 class="btn-quick-accept" 
                                 onclick="quickAcceptDocument({{ record.document_id }})"

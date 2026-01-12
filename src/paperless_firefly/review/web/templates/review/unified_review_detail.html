@@ -7,23 +7,17 @@
 <style>
     .review-layout {
         display: grid;
-        grid-template-columns: 1fr 1fr 400px;
+        grid-template-columns: 1fr 1fr;
         gap: 1.5rem;
         align-items: start;
-    }
-    
-    @media (max-width: 1400px) {
-        .review-layout {
-            grid-template-columns: 1fr 400px;
-        }
-        .document-viewer {
-            display: none;
-        }
     }
     
     @media (max-width: 1024px) {
         .review-layout {
             grid-template-columns: 1fr;
+        }
+        .document-viewer {
+            display: none;
         }
     }
     
@@ -222,22 +216,47 @@
         word-break: break-word;
     }
     
-    /* Link Section */
+    /* Link Section (now as collapsible card) */
     .link-section {
-        background: white;
-        border-radius: 0.5rem;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
         overflow: hidden;
-        position: sticky;
-        top: 1rem;
-        max-height: calc(100vh - 2rem);
-        overflow-y: auto;
+    }
+    
+    .link-section.collapsed .link-content {
+        display: none;
+    }
+    
+    .link-section .link-header {
+        cursor: pointer;
+        transition: background-color 0.15s ease;
+        user-select: none;
+    }
+    
+    .link-section .link-header:hover {
+        background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%);
+    }
+    
+    .link-section .collapse-icon {
+        font-size: 0.75rem;
+        transition: transform 0.2s ease;
+        margin-left: auto;
+    }
+    
+    .link-section.collapsed .collapse-icon {
+        transform: rotate(-90deg);
     }
     
     .link-header {
         padding: 1rem 1.25rem;
         background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
         color: white;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    
+    .link-header-title {
+        display: flex;
+        flex-direction: column;
     }
     
     .link-header h3 {
@@ -1448,106 +1467,119 @@
             </div>
         </div>
         {% endif %}
-    </div>
-    
-    <!-- Link Section (Right Sidebar) -->
-    <div class="link-section">
-        <div class="link-header">
-            <h3>🔗 Linking</h3>
-            <p>{% if record_type == 'paperless' %}Match to Firefly transaction{% else %}Match to Paperless document{% endif %}</p>
-        </div>
         
-        <!-- Current Link Status -->
-        <div class="link-status {{ link_status }}">
-            {% if link_status == 'linked' %}
-            <div class="link-status-title">✅ Linked</div>
-            <div class="link-status-desc">This record is linked and ready for import</div>
-            {% elif link_status == 'orphan' %}
-            <div class="link-status-title">📍 Orphan</div>
-            <div class="link-status-desc">Confirmed as having no matching record</div>
-            {% else %}
-            <div class="link-status-title">⚠️ Not Linked</div>
-            <div class="link-status-desc">Must be linked or marked as orphan before import</div>
-            {% endif %}
-        </div>
-        
-        {% if linked_record %}
-        <!-- Linked Record Info -->
-        <div class="linked-record-info">
-            <h4>Linked to:</h4>
-            <div class="linked-record-details">
-                {% if record_type == 'paperless' %}
-                <strong>🏦 Firefly #{{ linkage.firefly_id }}</strong><br>
-                {{ linked_record.description|truncatechars:40 }}<br>
-                <span class="text-muted">{{ linked_record.amount }} • {{ linked_record.date }}</span>
-                {% else %}
-                <strong>📄 Document #{{ linked_record.document_id }}</strong><br>
-                {{ linked_record.title|truncatechars:40 }}
-                {% endif %}
-            </div>
-            <div style="margin-top: 0.75rem;">
-                <button type="button" class="btn btn-outline btn-sm" onclick="unlinkRecord()" title="Remove this linkage">
-                    🔓 Unlink
-                </button>
-            </div>
-        </div>
-        {% endif %}
-        
-        {% if link_status == 'pending' %}
-        <!-- Top 3 Suggestions -->
-        <div class="suggestions-section">
-            <div class="suggestions-title">
-                Top Matches (click to link)
-            </div>
-            
-            {% if suggestions %}
-            {% for suggestion in suggestions %}
-            <div class="suggestion-item" 
-                 data-id="{{ suggestion.id }}"
-                 data-type="{{ suggestion.type }}"
-                 onclick="selectSuggestion(this, {{ suggestion.id }}, '{{ suggestion.type }}')">
-                <div class="suggestion-header">
-                    <span class="suggestion-title">
-                        {% if suggestion.type == 'firefly' %}
-                        🏦 {{ suggestion.description|truncatechars:25 }}
-                        {% else %}
-                        📄 {{ suggestion.title|truncatechars:25 }}
-                        {% endif %}
-                    </span>
-                    <span class="suggestion-score">{{ suggestion.score }}%</span>
+        <!-- Linking Card (Collapsible) -->
+        <div class="card card-collapsible mt-4 link-section" id="linking-card">
+            <div class="link-header" onclick="toggleCard('linking-card')">
+                <div class="link-header-title">
+                    <h3>🔗 Linking</h3>
+                    <p style="font-size: 0.75rem; opacity: 0.9; margin: 0;">{% if record_type == 'paperless' %}Match to Firefly transaction{% else %}Match to Paperless document{% endif %}</p>
                 </div>
-                <div class="suggestion-meta">
-                    {{ suggestion.amount|default:"—" }} • {{ suggestion.date|default:"—" }}
-                    {% if suggestion.vendor or suggestion.destination_account %}
-                    • {{ suggestion.vendor|default:suggestion.destination_account|default:"—" }}
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    {% if link_status == 'linked' %}
+                    <span style="background: #dcfce7; color: #166534; padding: 0.125rem 0.5rem; border-radius: 9999px; font-size: 0.625rem; font-weight: 600;">✅ LINKED</span>
+                    {% elif link_status == 'orphan' %}
+                    <span style="background: #fee2e2; color: #991b1b; padding: 0.125rem 0.5rem; border-radius: 9999px; font-size: 0.625rem; font-weight: 600;">📍 ORPHAN</span>
+                    {% else %}
+                    <span style="background: #fef3c7; color: #92400e; padding: 0.125rem 0.5rem; border-radius: 9999px; font-size: 0.625rem; font-weight: 600;">⚠️ PENDING</span>
+                    {% endif %}
+                    <span class="collapse-icon" style="color: white;">▼</span>
+                </div>
+            </div>
+            <div class="link-content">
+                <!-- Current Link Status -->
+                <div class="link-status {{ link_status }}">
+                    {% if link_status == 'linked' %}
+                    <div class="link-status-title">✅ Linked</div>
+                    <div class="link-status-desc">This record is linked and ready for import</div>
+                    {% elif link_status == 'orphan' %}
+                    <div class="link-status-title">📍 Orphan</div>
+                    <div class="link-status-desc">Confirmed as having no matching record</div>
+                    {% else %}
+                    <div class="link-status-title">⚠️ Not Linked</div>
+                    <div class="link-status-desc">Must be linked or marked as orphan before import</div>
                     {% endif %}
                 </div>
-                <div class="suggestion-actions">
-                    <button type="button" class="btn btn-sm btn-primary" 
-                            onclick="event.stopPropagation(); quickLink({{ record.id }}, {{ suggestion.id }})">
-                        🔗 Link
+                
+                {% if linked_record %}
+                <!-- Linked Record Info -->
+                <div class="linked-record-info">
+                    <h4>Linked to:</h4>
+                    <div class="linked-record-details">
+                        {% if record_type == 'paperless' %}
+                        <strong>🏦 Firefly #{{ linkage.firefly_id }}</strong><br>
+                        {{ linked_record.description|truncatechars:40 }}<br>
+                        <span class="text-muted">{{ linked_record.amount }} • {{ linked_record.date }}</span>
+                        {% else %}
+                        <strong>📄 Document #{{ linked_record.document_id }}</strong><br>
+                        {{ linked_record.title|truncatechars:40 }}
+                        {% endif %}
+                    </div>
+                    <div style="margin-top: 0.75rem;">
+                        <button type="button" class="btn btn-outline btn-sm" onclick="unlinkRecord()" title="Remove this linkage">
+                            🔓 Unlink
+                        </button>
+                    </div>
+                </div>
+                {% endif %}
+                
+                {% if link_status == 'pending' %}
+                <!-- Top 3 Suggestions -->
+                <div class="suggestions-section">
+                    <div class="suggestions-title">
+                        Top Matches (click to link)
+                    </div>
+                    
+                    {% if suggestions %}
+                    {% for suggestion in suggestions %}
+                    <div class="suggestion-item" 
+                         data-id="{{ suggestion.id }}"
+                         data-type="{{ suggestion.type }}"
+                         onclick="selectSuggestion(this, {{ suggestion.id }}, '{{ suggestion.type }}')">
+                        <div class="suggestion-header">
+                            <span class="suggestion-title">
+                                {% if suggestion.type == 'firefly' %}
+                                🏦 {{ suggestion.description|truncatechars:25 }}
+                                {% else %}
+                                📄 {{ suggestion.title|truncatechars:25 }}
+                                {% endif %}
+                            </span>
+                            <span class="suggestion-score">{{ suggestion.score }}%</span>
+                        </div>
+                        <div class="suggestion-meta">
+                            {{ suggestion.amount|default:"—" }} • {{ suggestion.date|default:"—" }}
+                            {% if suggestion.vendor or suggestion.destination_account %}
+                            • {{ suggestion.vendor|default:suggestion.destination_account|default:"—" }}
+                            {% endif %}
+                        </div>
+                        <div class="suggestion-actions">
+                            <button type="button" class="btn btn-sm btn-primary" 
+                                    onclick="event.stopPropagation(); quickLink({{ record.id }}, {{ suggestion.id }})">
+                                🔗 Link
+                            </button>
+                        </div>
+                    </div>
+                    {% endfor %}
+                    {% else %}
+                    <p class="text-muted text-sm">No matching records found</p>
+                    {% endif %}
+                    
+                    <button type="button" class="btn btn-outline btn-sm mt-3" onclick="loadMoreSuggestions()">
+                        🔄 Load More Suggestions
                     </button>
                 </div>
+                
+                <!-- Mark as Orphan -->
+                <div class="orphan-section">
+                    <h4>📍 No Match?</h4>
+                    <p>If this record has no matching partner (e.g., cash payment, no receipt), mark it as orphan.</p>
+                    <button type="button" class="btn btn-warning btn-sm" onclick="markAsOrphan()">
+                        Mark as Orphan
+                    </button>
+                </div>
+                {% endif %}
             </div>
-            {% endfor %}
-            {% else %}
-            <p class="text-muted text-sm">No matching records found</p>
-            {% endif %}
-            
-            <button type="button" class="btn btn-outline btn-sm mt-3" onclick="loadMoreSuggestions()">
-                🔄 Load More Suggestions
-            </button>
         </div>
-        
-        <!-- Mark as Orphan -->
-        <div class="orphan-section">
-            <h4>📍 No Match?</h4>
-            <p>If this record has no matching partner (e.g., cash payment, no receipt), mark it as orphan.</p>
-            <button type="button" class="btn btn-warning btn-sm" onclick="markAsOrphan()">
-                Mark as Orphan
-            </button>
-        </div>
-        {% endif %}
     </div>
 </div>
 
