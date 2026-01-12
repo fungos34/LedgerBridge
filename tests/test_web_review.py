@@ -153,6 +153,7 @@ def populated_state_db(temp_state_db, sample_extraction_json):
             overall_confidence REAL NOT NULL,
             review_state TEXT NOT NULL,
             created_at TEXT NOT NULL,
+            updated_at TEXT,
             reviewed_at TEXT,
             review_decision TEXT
         );
@@ -650,6 +651,7 @@ def populated_reconciliation_db(tmp_path, sample_extraction_json):
             overall_confidence REAL NOT NULL,
             review_state TEXT NOT NULL,
             created_at TEXT NOT NULL,
+            updated_at TEXT,
             reviewed_at TEXT,
             review_decision TEXT
         );

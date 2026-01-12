@@ -209,6 +209,7 @@ class StateStore:
                     overall_confidence REAL NOT NULL,
                     review_state TEXT NOT NULL,
                     created_at TEXT NOT NULL,
+                    updated_at TEXT,
                     reviewed_at TEXT,
                     review_decision TEXT,
                     FOREIGN KEY (document_id) REFERENCES paperless_documents(document_id)
@@ -445,14 +446,29 @@ class StateStore:
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
         with self._transaction() as conn:
-            cursor = conn.execute(
-                """
-                UPDATE extractions
-                SET extraction_json = ?, updated_at = ?
-                WHERE id = ?
-                """,
-                (updated_json, now, extraction_id),
-            )
+            # Check if updated_at column exists (for backwards compatibility)
+            cursor = conn.execute("PRAGMA table_info(extractions)")
+            columns = [row[1] for row in cursor.fetchall()]
+            
+            if "updated_at" in columns:
+                cursor = conn.execute(
+                    """
+                    UPDATE extractions
+                    SET extraction_json = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (updated_json, now, extraction_id),
+                )
+            else:
+                # Fallback for databases without updated_at column
+                cursor = conn.execute(
+                    """
+                    UPDATE extractions
+                    SET extraction_json = ?
+                    WHERE id = ?
+                    """,
+                    (updated_json, extraction_id),
+                )
             return cursor.rowcount > 0
 
     def update_extraction_status(

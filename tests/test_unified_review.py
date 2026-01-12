@@ -70,6 +70,7 @@ def unified_review_db(tmp_path):
             overall_confidence REAL NOT NULL,
             review_state TEXT NOT NULL,
             created_at TEXT NOT NULL,
+            updated_at TEXT,
             reviewed_at TEXT,
             review_decision TEXT,
             llm_opt_out INTEGER DEFAULT 0
