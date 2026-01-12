@@ -425,7 +425,7 @@
                             {% endif %}
                         </div>
                         <div class="record-meta">
-                            <span class="record-amount">{{ record.currency }} {{ record.amount|default:"—" }}</span>
+                            <span class="record-amount">{{ record.currency|default:"EUR" }} {{ record.amount|floatformat:2|default:"—" }}</span>
                             <span>{{ record.date|default:"No date" }}</span>
                             {% if record.vendor %}
                             <span>→ {{ record.vendor|truncatechars:20 }}</span>
@@ -494,10 +494,10 @@
                     <div class="record-info">
                         <div class="record-title" title="{{ record.description }}">{{ record.description|truncatechars:30 }}</div>
                         <div class="record-meta">
-                            <span class="record-amount">{{ record.amount|default:"—" }}</span>
+                            <span class="record-amount">{{ record.currency|default:"EUR" }} {{ record.amount|floatformat:2|default:"—" }}</span>
                             <span>{{ record.date|default:"No date" }}</span>
-                            {% if record.destination_account %}
-                            <span>→ {{ record.destination_account|truncatechars:20 }}</span>
+                            {% if record.source_account or record.destination_account %}
+                            <span title="{{ record.source_account|default:'?' }} → {{ record.destination_account|default:'?' }}">{{ record.source_account|default:"?"|truncatechars:10 }} → {{ record.destination_account|default:"?"|truncatechars:10 }}</span>
                             {% endif %}
                         </div>
                     </div>

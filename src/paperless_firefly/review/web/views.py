@@ -4172,10 +4172,37 @@ def api_quick_link(request: HttpRequest) -> JsonResponse:
     mark_orphan = body.get("mark_orphan", False)
     confidence = body.get("confidence")
 
-    if not paperless_id:
-        return JsonResponse({"success": False, "error": "paperless_id required"}, status=400)
-
     store = _get_store()
+
+    # Handle marking Firefly transaction as orphan (no matching document)
+    if mark_orphan and firefly_id and not paperless_id:
+        try:
+            firefly_id_int = int(firefly_id)
+            # Update firefly cache to mark as orphan
+            conn = store._get_connection()
+            try:
+                conn.execute(
+                    "UPDATE firefly_cache SET match_status = 'ORPHAN_CONFIRMED' WHERE firefly_id = ?",
+                    (firefly_id_int,),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+            
+            return JsonResponse(
+                {
+                    "success": True,
+                    "message": f"Firefly transaction {firefly_id} marked as orphan (no receipt)",
+                    "link_type": "ORPHAN",
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error marking Firefly transaction as orphan: {e}")
+            return JsonResponse({"success": False, "error": str(e)}, status=500)
+
+    # For paperless documents, paperless_id is required
+    if not paperless_id:
+        return JsonResponse({"success": False, "error": "paperless_id required for document operations"}, status=400)
 
     try:
         # Get extraction for document

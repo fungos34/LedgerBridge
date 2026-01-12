@@ -1555,10 +1555,7 @@ function rerunInterpretation() {
                 });
             }
             // Server returned HTML error page (timeout, 500, etc.)
-            if (response.status === 524) {
-                // Cloudflare-specific timeout (100 seconds)
-                throw new Error('Cloudflare timeout (524). The AI request exceeded the 100-second Cloudflare limit. If using Cloudflare proxy, reduce the LLM timeout to under 90 seconds in Settings.');
-            } else if (response.status === 504 || response.status === 502) {
+            if (response.status === 524 || response.status === 504 || response.status === 502) {
                 throw new Error(`Server gateway timeout (${response.status}). The AI request is taking too long. Try increasing the timeout in Settings or try again later.`);
             } else if (response.status === 500) {
                 throw new Error('Server error occurred. Check server logs for details.');
