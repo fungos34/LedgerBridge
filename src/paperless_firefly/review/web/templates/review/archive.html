@@ -1,45 +1,198 @@
 {% extends "review/base.html" %}
 
-{% block title %}Archive{% endblock %}
+{% block title %}Archive - SparkLink{% endblock %}
 
 {% block extra_css %}
 <style>
+    .page-header {
+        margin-bottom: 1.5rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 1rem;
+    }
+
+    .page-header-content h1 {
+        font-size: 1.5rem;
+        font-weight: 700;
+        margin-bottom: 0.25rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .page-header-content .text-muted {
+        font-size: 0.875rem;
+        color: var(--gray-500);
+    }
+
+    .archive-stats {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+    }
+
+    @media (max-width: 768px) {
+        .archive-stats {
+            grid-template-columns: repeat(2, 1fr);
+        }
+    }
+
+    .stat-card {
+        background: white;
+        border-radius: 0.75rem;
+        padding: 1.25rem;
+        text-align: center;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        border: 1px solid var(--gray-100);
+        transition: transform 0.15s, box-shadow 0.15s;
+    }
+
+    .stat-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    }
+
+    .stat-card .stat-value {
+        font-size: 2rem;
+        font-weight: 700;
+        line-height: 1;
+    }
+
+    .stat-card .stat-label {
+        font-size: 0.75rem;
+        color: var(--gray-500);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-top: 0.5rem;
+    }
+
+    .stat-card.imported { border-left: 4px solid var(--green-500); }
+    .stat-card.imported .stat-value { color: var(--green-600); }
+
+    .stat-card.rejected { border-left: 4px solid var(--yellow-500); }
+    .stat-card.rejected .stat-value { color: var(--yellow-600); }
+
+    .stat-card.failed { border-left: 4px solid var(--red-500); }
+    .stat-card.failed .stat-value { color: var(--red-600); }
+
+    .stat-card.total { border-left: 4px solid var(--gray-400); }
+    .stat-card.total .stat-value { color: var(--gray-700); }
+
     .archive-actions {
         display: flex;
         gap: 0.5rem;
         flex-wrap: wrap;
     }
-    
-    .status-imported {
-        background: #dcfce7;
-        color: #166534;
-    }
-    
-    .status-rejected {
-        background: #fef3c7;
-        color: #92400e;
-    }
-    
-    .status-failed {
-        background: #fee2e2;
-        color: #991b1b;
-    }
-    
-    .status-pending {
-        background: #dbeafe;
-        color: #1e40af;
-    }
-    
-    .filter-row {
+
+    .filter-container {
+        background: white;
+        border-radius: 0.75rem;
+        padding: 1rem 1.25rem;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
         display: flex;
         gap: 1rem;
-        margin-bottom: 1rem;
         align-items: center;
         flex-wrap: wrap;
     }
+
+    .filter-container label {
+        font-weight: 500;
+        font-size: 0.875rem;
+        color: var(--gray-600);
+    }
+
+    .filter-container .form-input {
+        padding: 0.5rem 0.75rem;
+        border: 1px solid var(--gray-200);
+        border-radius: 0.5rem;
+        font-size: 0.875rem;
+        transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    .filter-container .form-input:focus {
+        outline: none;
+        border-color: var(--primary-500);
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+
+    .filter-container .search-input {
+        flex: 1;
+        min-width: 200px;
+    }
+
+    .archive-table-container {
+        background: white;
+        border-radius: 0.75rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        overflow: hidden;
+    }
+
+    #archive-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    #archive-table th,
+    #archive-table td {
+        padding: 1rem 1.25rem;
+        text-align: left;
+        border-bottom: 1px solid var(--gray-100);
+    }
+
+    #archive-table th {
+        background: var(--gray-50);
+        font-weight: 600;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--gray-500);
+    }
+
+    #archive-table tbody tr {
+        transition: background 0.15s;
+    }
+
+    #archive-table tbody tr:hover {
+        background: var(--gray-50);
+    }
+
+    .status-badge {
+        display: inline-block;
+        padding: 0.25rem 0.75rem;
+        border-radius: 9999px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
     
-    .filter-row .form-input {
-        width: auto;
+    .status-imported {
+        background: var(--green-100);
+        color: var(--green-700);
+    }
+    
+    .status-rejected {
+        background: var(--yellow-100);
+        color: var(--yellow-700);
+    }
+    
+    .status-failed {
+        background: var(--red-100);
+        color: var(--red-700);
+    }
+    
+    .status-pending {
+        background: var(--blue-100);
+        color: var(--blue-700);
+    }
+
+    .doc-title {
+        font-weight: 600;
+        color: var(--gray-900);
+        margin-bottom: 0.25rem;
     }
     
     .archive-item-details {
@@ -47,35 +200,147 @@
         color: var(--gray-500);
         margin-top: 0.25rem;
     }
+
+    .amount-cell {
+        font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+        font-size: 0.875rem;
+        font-weight: 500;
+    }
+
+    .date-cell {
+        font-size: 0.875rem;
+        color: var(--gray-600);
+    }
+
+    .action-btn {
+        padding: 0.375rem 0.625rem;
+        font-size: 0.75rem;
+        border-radius: 0.375rem;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        transition: all 0.15s;
+        cursor: pointer;
+        border: 1px solid;
+    }
+
+    .action-btn-outline {
+        background: white;
+        color: var(--gray-600);
+        border-color: var(--gray-200);
+    }
+
+    .action-btn-outline:hover {
+        background: var(--gray-50);
+        border-color: var(--gray-300);
+        color: var(--gray-900);
+    }
+
+    .action-btn-secondary {
+        background: var(--gray-100);
+        color: var(--gray-700);
+        border-color: var(--gray-200);
+    }
+
+    .action-btn-secondary:hover {
+        background: var(--gray-200);
+    }
+
+    .action-btn-danger {
+        background: var(--red-50);
+        color: var(--red-600);
+        border-color: var(--red-200);
+    }
+
+    .action-btn-danger:hover {
+        background: var(--red-100);
+    }
+
+    .empty-state {
+        text-align: center;
+        padding: 4rem 2rem;
+        color: var(--gray-500);
+        background: white;
+        border-radius: 0.75rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+
+    .empty-state-icon {
+        font-size: 4rem;
+        margin-bottom: 1rem;
+        opacity: 0.5;
+    }
+
+    .empty-state h3 {
+        font-size: 1.125rem;
+        font-weight: 600;
+        color: var(--gray-700);
+        margin-bottom: 0.5rem;
+    }
+
+    .empty-state p {
+        max-width: 400px;
+        margin: 0 auto;
+    }
+
+    .empty-state .btn {
+        margin-top: 1.5rem;
+    }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="card">
-    <div class="card-header">
-        <h2>Archive ({{ items|length }} items)</h2>
-        <div class="archive-actions">
-            <a href="{% url 'list' %}" class="btn btn-outline">
-                ← Back to Queue
-            </a>
-        </div>
+<!-- Page Header -->
+<div class="page-header">
+    <div class="page-header-content">
+        <h1>📦 Archive</h1>
+        <p class="text-muted">Processed and reviewed extractions</p>
     </div>
-    
-    {% if items %}
-    <div class="card-body">
-        <div class="filter-row">
-            <label>Filter by status:</label>
-            <select id="status-filter" class="form-input" onchange="filterTable()">
-                <option value="">All</option>
-                <option value="Imported">Imported</option>
-                <option value="Rejected">Rejected</option>
-                <option value="Failed">Failed</option>
-                <option value="Approved">Approved (pending import)</option>
-            </select>
-            <input type="text" id="search-filter" class="form-input" placeholder="Search..." oninput="filterTable()">
-        </div>
+    <div class="archive-actions">
+        <a href="{% url 'list' %}" class="btn btn-outline">
+            ← Back to Queue
+        </a>
     </div>
-    
+</div>
+
+{% if items %}
+<!-- Stats Cards -->
+<div class="archive-stats">
+    <div class="stat-card total">
+        <div class="stat-value">{{ items|length }}</div>
+        <div class="stat-label">Total</div>
+    </div>
+    <div class="stat-card imported">
+        <div class="stat-value" id="stat-imported">0</div>
+        <div class="stat-label">Imported</div>
+    </div>
+    <div class="stat-card rejected">
+        <div class="stat-value" id="stat-rejected">0</div>
+        <div class="stat-label">Rejected</div>
+    </div>
+    <div class="stat-card failed">
+        <div class="stat-value" id="stat-failed">0</div>
+        <div class="stat-label">Failed</div>
+    </div>
+</div>
+
+<!-- Filter Container -->
+<div class="filter-container">
+    <label for="status-filter">Status:</label>
+    <select id="status-filter" class="form-input" onchange="filterTable()">
+        <option value="">All</option>
+        <option value="Imported">Imported</option>
+        <option value="Rejected">Rejected</option>
+        <option value="Failed">Failed</option>
+        <option value="Approved">Approved</option>
+    </select>
+    <label for="search-filter">Search:</label>
+    <input type="text" id="search-filter" class="form-input search-input" placeholder="Search by title or vendor..." oninput="filterTable()">
+</div>
+
+<!-- Archive Table -->
+<div class="archive-table-container">
     <table id="archive-table">
         <thead>
             <tr>
@@ -92,21 +357,19 @@
             {% for item in items %}
             <tr data-status="{{ item.status }}" data-title="{{ item.title|lower }}" data-vendor="{{ item.vendor|default:''|lower }}">
                 <td>
-                    <div class="mb-1">
-                        <strong>{{ item.title|truncatechars:50 }}</strong>
-                    </div>
+                    <div class="doc-title">{{ item.title|truncatechars:50 }}</div>
                     <div class="archive-item-details">
                         Doc #{{ item.document_id }}
-                        {% if item.external_id %}| External: {{ item.external_id|truncatechars:20 }}{% endif %}
+                        {% if item.external_id %}· External: {{ item.external_id|truncatechars:20 }}{% endif %}
                     </div>
                 </td>
-                <td class="text-mono">
+                <td class="amount-cell">
                     {{ item.amount }} {{ item.currency }}
                 </td>
-                <td>{{ item.date }}</td>
-                <td>{{ item.vendor|default:"-"|truncatechars:30 }}</td>
+                <td class="date-cell">{{ item.date }}</td>
+                <td>{{ item.vendor|default:"—"|truncatechars:30 }}</td>
                 <td>
-                    <span class="badge status-{{ item.status_class }}">
+                    <span class="status-badge status-{{ item.status_class }}">
                         {{ item.status }}
                     </span>
                     {% if item.firefly_id %}
@@ -115,34 +378,34 @@
                     </div>
                     {% endif %}
                     {% if item.import_error %}
-                    <div class="archive-item-details mt-1" style="color: #dc2626;">
+                    <div class="archive-item-details mt-1" style="color: var(--red-600);">
                         {{ item.import_error|truncatechars:50 }}
                     </div>
                     {% endif %}
                 </td>
-                <td>
-                    <div>{{ item.reviewed_at|default:item.created_at }}</div>
+                <td class="date-cell">
+                    {{ item.reviewed_at|default:item.created_at }}
                 </td>
                 <td class="text-right">
                     <div class="archive-actions">
                         {% if item.status == 'Imported' and item.firefly_id %}
                         <a href="{{ firefly_url }}/transactions/show/{{ item.firefly_id }}" 
                            target="_blank" 
-                           class="btn btn-sm btn-outline"
+                           class="action-btn action-btn-outline"
                            title="View in Firefly III">
                             🔗 Firefly
                         </a>
                         {% endif %}
                         <a href="{{ paperless_url }}/documents/{{ item.document_id }}/" 
                            target="_blank" 
-                           class="btn btn-sm btn-outline"
+                           class="action-btn action-btn-outline"
                            title="View in Paperless-ngx">
                             📄 Paperless
                         </a>
                         {% if item.status != 'Imported' %}
                         <form method="post" action="{% url 'reset_extraction' item.id %}" style="display: inline;">
                             {% csrf_token %}
-                            <button type="submit" class="btn btn-sm btn-secondary" 
+                            <button type="submit" class="action-btn action-btn-secondary" 
                                     onclick="return confirm('Reset this extraction for re-review?');"
                                     title="Reset to pending review">
                                 🔄 Reset
@@ -152,7 +415,7 @@
                         {% if item.status == 'Rejected' and not item.firefly_id %}
                         <form method="post" action="{% url 'delete_extraction' item.id %}" style="display: inline;">
                             {% csrf_token %}
-                            <button type="submit" class="btn btn-sm btn-danger" 
+                            <button type="submit" class="action-btn action-btn-danger" 
                                     onclick="return confirm('Permanently delete this extraction? The document in Paperless will not be affected.');"
                                     title="Delete this extraction permanently">
                                 🗑️ Delete
@@ -165,20 +428,36 @@
             {% endfor %}
         </tbody>
     </table>
-    {% else %}
-    <div class="empty-state">
-        <h3>📦 Archive is empty</h3>
-        <p>No processed extractions yet.</p>
-        <p class="mt-4">
-            <a href="{% url 'list' %}" class="btn btn-primary">
-                Go to Review Queue
-            </a>
-        </p>
-    </div>
-    {% endif %}
 </div>
+{% else %}
+<div class="empty-state">
+    <div class="empty-state-icon">📦</div>
+    <h3>Archive is empty</h3>
+    <p>No processed extractions yet. Items will appear here after being imported or rejected.</p>
+    <a href="{% url 'list' %}" class="btn btn-primary">
+        Go to Review Queue
+    </a>
+</div>
+{% endif %}
 
 <script>
+// Calculate stats on load
+document.addEventListener('DOMContentLoaded', function() {
+    const rows = document.querySelectorAll('#archive-table tbody tr');
+    let imported = 0, rejected = 0, failed = 0;
+    
+    rows.forEach(row => {
+        const status = row.getAttribute('data-status');
+        if (status === 'Imported') imported++;
+        else if (status === 'Rejected') rejected++;
+        else if (status === 'Failed') failed++;
+    });
+    
+    document.getElementById('stat-imported').textContent = imported;
+    document.getElementById('stat-rejected').textContent = rejected;
+    document.getElementById('stat-failed').textContent = failed;
+});
+
 function filterTable() {
     const statusFilter = document.getElementById('status-filter').value.toLowerCase();
     const searchFilter = document.getElementById('search-filter').value.toLowerCase();

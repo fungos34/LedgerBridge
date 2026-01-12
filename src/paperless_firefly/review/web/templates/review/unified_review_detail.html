@@ -1879,7 +1879,7 @@ function rerunInterpretation() {
             'X-Requested-With': 'XMLHttpRequest'
         },
         body: new URLSearchParams({
-            'document_id': '{{ record.document_id }}',
+            'document_id': '{{ record_id }}',
             'priority': '10',  // Higher priority for user-triggered
             'run_immediately': 'true'
         })
