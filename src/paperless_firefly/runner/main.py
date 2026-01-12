@@ -410,8 +410,9 @@ def cmd_import(
                     store.delete_import(external_id)
 
             # Check if linked to existing Firefly transaction
-            linked_firefly_id = row.get("linked_firefly_id")
-            link_type = row.get("link_type")
+            # Note: sqlite3.Row supports bracket notation but not .get() method
+            linked_firefly_id = row["linked_firefly_id"] if row["linked_firefly_id"] else None
+            link_type = row["link_type"] if row["link_type"] else None
 
             # Build Firefly payload (handles splits automatically)
             logger.debug(f"Building payload with source_account={default_source_account}")
