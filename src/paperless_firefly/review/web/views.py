@@ -5123,7 +5123,7 @@ def _run_ai_job_now(request: HttpRequest, store: StateStore, job: dict) -> bool:
                 final_state="COMPLETED",
                 duration_ms=duration_ms,
                 llm_result=suggestions_data,
-                suggested_category=suggestion.suggestions.get("category", {}).get("value") if suggestion.suggestions.get("category") else None,
+                suggested_category=suggestion.suggestions["category"].value if "category" in suggestion.suggestions else None,
                 decision_source="USER_RUN_NOW",
             )
             
