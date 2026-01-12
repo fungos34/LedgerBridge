@@ -62,6 +62,25 @@ class UserProfile(models.Model):
         blank=True, default="", help_text="URL to Firefly Importer for bank statement imports"
     )
 
+    # LLM/Ollama settings
+    llm_enabled = models.BooleanField(
+        default=False, help_text="Enable LLM-assisted categorization"
+    )
+    ollama_url = models.URLField(
+        blank=True, default="", help_text="Ollama server URL (e.g., http://localhost:11434)"
+    )
+    ollama_model = models.CharField(
+        max_length=100, blank=True, default="",
+        help_text="Fast model name (e.g., qwen2.5:3b-instruct-q4_K_M)"
+    )
+    ollama_model_fallback = models.CharField(
+        max_length=100, blank=True, default="",
+        help_text="Fallback model for complex cases (e.g., qwen2.5:7b-instruct-q4_K_M)"
+    )
+    ollama_timeout = models.IntegerField(
+        default=30, help_text="Request timeout in seconds"
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

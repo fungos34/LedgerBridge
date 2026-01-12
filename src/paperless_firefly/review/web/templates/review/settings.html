@@ -323,6 +323,104 @@
                 <div class="form-help">URL to Firefly Importer for bank statement imports</div>
             </div>
         </div>
+        
+        <!-- LLM / Ollama Settings -->
+        <div class="settings-section">
+            <div class="settings-section-title">
+                🤖 AI Assistant (Ollama)
+                {% if llm_status == 'connected' %}
+                <span class="status-indicator connected">● Connected</span>
+                {% elif llm_status %}
+                <span class="status-indicator disconnected">● {{ llm_status }}</span>
+                {% else %}
+                <span class="status-indicator unknown">● Disabled</span>
+                {% endif %}
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label" style="display: flex; align-items: center; gap: 0.5rem;">
+                    <input type="checkbox" 
+                           name="llm_enabled" 
+                           id="llm_enabled"
+                           {% if profile.llm_enabled %}checked{% endif %}
+                           onchange="toggleLLMSettings()">
+                    Enable AI-assisted categorization & chatbot
+                </label>
+                <div class="form-help">Uses local Ollama LLM for category suggestions and document Q&A</div>
+            </div>
+            
+            <div id="llm-settings" style="{% if not profile.llm_enabled %}opacity: 0.5; pointer-events: none;{% endif %}">
+                <div class="form-group">
+                    <label class="form-label" for="ollama_url">Ollama Server URL</label>
+                    <input type="url" 
+                           name="ollama_url" 
+                           id="ollama_url"
+                           class="form-input"
+                           value="{{ profile.ollama_url }}"
+                           placeholder="{{ default_ollama_url }}">
+                    <div class="form-help">
+                        Leave empty to use default: <code>{{ default_ollama_url }}</code><br>
+                        For Docker, use <code>host.docker.internal:11434</code> or the host IP
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label" for="ollama_model">Primary Model</label>
+                        <input type="text" 
+                               name="ollama_model" 
+                               id="ollama_model"
+                               class="form-input"
+                               list="model-list"
+                               value="{{ profile.ollama_model }}"
+                               placeholder="{{ default_ollama_model }}">
+                        <div class="form-help">Fast model for most requests</div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label" for="ollama_model_fallback">Fallback Model</label>
+                        <input type="text" 
+                               name="ollama_model_fallback" 
+                               id="ollama_model_fallback"
+                               class="form-input"
+                               list="model-list"
+                               value="{{ profile.ollama_model_fallback }}"
+                               placeholder="{{ default_ollama_model_fallback }}">
+                        <div class="form-help">Larger model for complex cases</div>
+                    </div>
+                </div>
+                
+                <datalist id="model-list">
+                    {% for model in available_models %}
+                    <option value="{{ model }}">
+                    {% endfor %}
+                </datalist>
+                
+                <div class="form-group">
+                    <label class="form-label" for="ollama_timeout">Request Timeout (seconds)</label>
+                    <input type="number" 
+                           name="ollama_timeout" 
+                           id="ollama_timeout"
+                           class="form-input"
+                           value="{{ profile.ollama_timeout|default:30 }}"
+                           min="5" max="300" step="5"
+                           style="max-width: 150px;">
+                    <div class="form-help">How long to wait for LLM response (default: 30s)</div>
+                </div>
+                
+                {% if available_models %}
+                <div class="account-list">
+                    <strong>Available Models on Server:</strong>
+                    {% for model in available_models %}
+                    <div class="account-item">
+                        <span>{{ model }}</span>
+                        <button type="button" class="btn btn-xs btn-outline" onclick="document.getElementById('ollama_model').value='{{ model }}'">Use as Primary</button>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+        </div>
     </div>
     
     <div class="form-actions">
@@ -335,6 +433,18 @@
 function toggleVisibility(inputId) {
     const input = document.getElementById(inputId);
     input.type = input.type === 'password' ? 'text' : 'password';
+}
+
+function toggleLLMSettings() {
+    const checkbox = document.getElementById('llm_enabled');
+    const settings = document.getElementById('llm-settings');
+    if (checkbox.checked) {
+        settings.style.opacity = '1';
+        settings.style.pointerEvents = 'auto';
+    } else {
+        settings.style.opacity = '0.5';
+        settings.style.pointerEvents = 'none';
+    }
 }
 </script>
 {% endblock %}

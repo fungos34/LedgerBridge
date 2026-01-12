@@ -616,7 +616,7 @@ class TestSparkAIService:
         result = service.chat("What is SparkLink?")
         assert result is None
 
-    @patch.object(SparkAIService, '_call_ollama')
+    @patch.object(SparkAIService, '_call_ollama_text')
     def test_chat_returns_response(
         self, mock_call: MagicMock, store: StateStore, mock_config_enabled: MagicMock, categories: list[str]
     ) -> None:

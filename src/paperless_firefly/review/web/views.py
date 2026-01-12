@@ -333,6 +333,16 @@ def user_settings(request: HttpRequest) -> HttpResponse:
         profile.syncthing_url = request.POST.get("syncthing_url", "")
         profile.importer_url = request.POST.get("importer_url", "")
 
+        # LLM/Ollama settings
+        profile.llm_enabled = request.POST.get("llm_enabled") == "on"
+        profile.ollama_url = request.POST.get("ollama_url", "")
+        profile.ollama_model = request.POST.get("ollama_model", "")
+        profile.ollama_model_fallback = request.POST.get("ollama_model_fallback", "")
+        try:
+            profile.ollama_timeout = int(request.POST.get("ollama_timeout", 30))
+        except ValueError:
+            profile.ollama_timeout = 30
+
         try:
             profile.auto_import_threshold = float(request.POST.get("auto_import_threshold", 0.85))
             profile.review_threshold = float(request.POST.get("review_threshold", 0.60))
@@ -376,11 +386,40 @@ def user_settings(request: HttpRequest) -> HttpResponse:
         except Exception as e:
             firefly_status = f"error: {e}"
 
+    # Get LLM status
+    llm_status = None
+    if profile.llm_enabled or getattr(settings, "SPARK_LLM_ENABLED", False):
+        ollama_url = profile.ollama_url or getattr(settings, "OLLAMA_URL", "http://localhost:11434")
+        try:
+            import httpx
+            resp = httpx.get(f"{ollama_url}/api/tags", timeout=5)
+            if resp.status_code == 200:
+                llm_status = "connected"
+                # Get available models
+                try:
+                    models_data = resp.json().get("models", [])
+                    available_models = [m.get("name", "") for m in models_data]
+                except Exception:
+                    available_models = []
+            else:
+                llm_status = f"error: HTTP {resp.status_code}"
+                available_models = []
+        except Exception as e:
+            llm_status = f"error: {e}"
+            available_models = []
+    else:
+        available_models = []
+
     context = {
         "profile": profile,
         "paperless_status": paperless_status,
         "firefly_status": firefly_status,
         "firefly_accounts": firefly_accounts,
+        "llm_status": llm_status,
+        "available_models": available_models,
+        "default_ollama_url": getattr(settings, "OLLAMA_URL", "http://localhost:11434"),
+        "default_ollama_model": getattr(settings, "OLLAMA_MODEL", "qwen2.5:3b-instruct"),
+        "default_ollama_model_fallback": getattr(settings, "OLLAMA_MODEL_FALLBACK", "qwen2.5:7b-instruct"),
         **_get_external_urls(request.user if hasattr(request, "user") else None),
     }
     return render(request, "review/settings.html", context)
@@ -4476,7 +4515,7 @@ def api_chat(request: HttpRequest) -> JsonResponse:
     """API endpoint for the documentation chatbot.
     
     Uses SparkAI service to answer questions about the software
-    with documentation context.
+    with documentation context. Respects user's LLM settings from profile.
     
     Args:
         request: HTTP request with 'question' in JSON body.
@@ -4485,8 +4524,9 @@ def api_chat(request: HttpRequest) -> JsonResponse:
         JSON response with chatbot answer.
     """
     from pathlib import Path
-    from ...config import load_config
+    from ...config import load_config, LLMConfig
     from ...spark_ai import SparkAIService
+    from .models import UserProfile
     
     store = _get_store()
     
@@ -4513,7 +4553,7 @@ def api_chat(request: HttpRequest) -> JsonResponse:
                 "error": "Question is required"
             }, status=400)
         
-        # Load config
+        # Load base config
         config_path = Path(getattr(settings, "STATE_DB_PATH", "/app/data/state.db")).parent / "config.yaml"
         if not config_path.exists():
             config_path = Path("/app/config/config.yaml")
@@ -4526,10 +4566,27 @@ def api_chat(request: HttpRequest) -> JsonResponse:
         
         config = load_config(config_path)
         
+        # Override with user profile settings if available
+        try:
+            profile = UserProfile.objects.get(user=request.user)
+            if profile.llm_enabled:
+                # User has enabled LLM in their profile
+                config.llm.enabled = True
+                if profile.ollama_url:
+                    config.llm.ollama_url = profile.ollama_url
+                if profile.ollama_model:
+                    config.llm.model_fast = profile.ollama_model
+                if profile.ollama_model_fallback:
+                    config.llm.model_fallback = profile.ollama_model_fallback
+                if profile.ollama_timeout:
+                    config.llm.timeout_seconds = profile.ollama_timeout
+        except UserProfile.DoesNotExist:
+            pass
+        
         if not config.llm.enabled:
             return JsonResponse({
                 "success": False,
-                "error": "LLM service is not enabled. Enable it in config with llm.enabled: true"
+                "error": "LLM service is not enabled. Enable it in Settings → AI Assistant or set SPARK_LLM_ENABLED=true"
             }, status=400)
         
         # Create AI service (no categories needed for chat)
@@ -4549,7 +4606,7 @@ def api_chat(request: HttpRequest) -> JsonResponse:
         if not response:
             return JsonResponse({
                 "success": False,
-                "error": "LLM service failed to generate response"
+                "error": "LLM service failed to generate response. Check Ollama URL and model in Settings."
             }, status=500)
         
         return JsonResponse({
