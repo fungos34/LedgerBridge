@@ -189,13 +189,13 @@ def _get_document_id_for_extraction(store: StateStore, extraction_id: int) -> in
 
 def _get_user_id_for_filter(request: HttpRequest) -> int | None:
     """Get user_id for filtering data, or None for superuser access.
-    
+
     Superusers can see all documents/extractions (return None).
     Regular users can only see their own documents (return user.id).
-    
+
     Args:
         request: The HTTP request with authenticated user.
-        
+
     Returns:
         User ID for filtering, or None for superuser/all access.
     """
@@ -1145,6 +1145,7 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
     from pathlib import Path
 
     store = _get_store()
+    user_id = _get_user_id_for_filter(request)
 
     # Detect if this is an AJAX request
     is_ajax = (
@@ -1289,24 +1290,23 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
                                     else:
                                         document_content += f"  - {item}\n"
 
-                    # Get linked bank transaction if available
+                    # Get linked bank transaction if available (filtered by user)
                     bank_transaction = None
                     linkage = store.get_linkage_by_extraction(extraction_id)
                     if linkage and linkage.get("firefly_id"):
                         firefly_id = linkage["firefly_id"]
-                        # Get cached firefly transaction
-                        conn = store._get_connection()
-                        try:
-                            ff_row = conn.execute(
-                                """SELECT firefly_id, amount, date, description,
-                                          source_account, destination_account, category_name
-                                   FROM firefly_cache WHERE firefly_id = ?""",
-                                (firefly_id,),
-                            ).fetchone()
-                            if ff_row:
-                                bank_transaction = dict(ff_row)
-                        finally:
-                            conn.close()
+                        # Get cached firefly transaction (filtered by user)
+                        cached_tx = store.get_firefly_cache_entry(firefly_id, user_id=user_id)
+                        if cached_tx:
+                            bank_transaction = {
+                                "firefly_id": cached_tx.get("firefly_id"),
+                                "amount": cached_tx.get("amount"),
+                                "date": cached_tx.get("date"),
+                                "description": cached_tx.get("description"),
+                                "source_account": cached_tx.get("source_account"),
+                                "destination_account": cached_tx.get("destination_account"),
+                                "category_name": cached_tx.get("category_name"),
+                            }
 
                     # Get previous interpretation decisions
                     previous_decisions = store.get_interpretation_runs(document_id)[:3]
@@ -1521,7 +1521,7 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
 
 def _get_ready_to_import_count(store: StateStore, user_id: int | None = None) -> int:
     """Get count of extractions ready to import (linked or orphan only).
-    
+
     Args:
         store: StateStore instance.
         user_id: If provided, only count extractions owned by this user or shared.
@@ -1819,7 +1819,7 @@ def dismiss_failed_import(request: HttpRequest, external_id: str) -> HttpRespons
 @require_http_methods(["POST"])
 def run_extract(request: HttpRequest) -> HttpResponse:
     """Trigger extraction from Paperless and sync Firefly transactions.
-    
+
     Uses user-specific API tokens from their profile if configured,
     otherwise falls back to environment/config defaults.
     """
@@ -1832,10 +1832,10 @@ def run_extract(request: HttpRequest) -> HttpResponse:
     tag = request.POST.get("tag", "finance/inbox")
     limit = int(request.POST.get("limit", 10))
     sync_firefly = request.POST.get("sync_firefly", "true").lower() in ("true", "1", "yes", "on")
-    
+
     # Get user_id for ownership of extracted documents
     extract_user_id = request.user.id if request.user.is_authenticated else None
-    
+
     # Get user-specific API tokens from profile (if available)
     # These override environment/config defaults
     user_paperless_token = None
@@ -1843,7 +1843,7 @@ def run_extract(request: HttpRequest) -> HttpResponse:
     user_firefly_token = None
     user_firefly_url = None
     user_filter_tag = None
-    
+
     if request.user.is_authenticated:
         try:
             profile = request.user.profile
@@ -1885,7 +1885,7 @@ def run_extract(request: HttpRequest) -> HttpResponse:
                 config_path = Path("/app/config/config.yaml")
 
             config = load_config(config_path)
-            
+
             # Override config with user-specific tokens (user profile > env > config)
             paperless_url = user_paperless_url or config.paperless.base_url
             paperless_token = user_paperless_token or config.paperless.token
@@ -1894,27 +1894,27 @@ def run_extract(request: HttpRequest) -> HttpResponse:
             filter_tag = user_filter_tag or tag
 
             _extraction_status["progress"] = f"Extracting documents with tag '{filter_tag}'..."
-            
+
             # Create Paperless client with user tokens
             paperless = PaperlessClient(
                 base_url=paperless_url,
                 token=paperless_token,
             )
-            
+
             store = _get_store()
             router = ExtractorRouter()
-            
+
             # Get documents to process
             docs = list(paperless.list_documents(tags=[filter_tag]))[:limit]
-            
+
             if not docs:
                 _extraction_status["result"] = "No documents to process"
                 _extraction_status["progress"] = "Done"
                 return
-            
+
             extracted = 0
             skipped = 0
-            
+
             for doc in docs:
                 # Check if already processed
                 existing = store.get_extraction_by_document(doc.id)
@@ -1922,14 +1922,14 @@ def run_extract(request: HttpRequest) -> HttpResponse:
                     logger.info(f"Skipping doc {doc.id} - already extracted")
                     skipped += 1
                     continue
-                
+
                 _extraction_status["progress"] = f"Processing: {doc.title[:50]}..."
-                
+
                 try:
                     # Download original file
                     file_bytes, filename = paperless.download_original(doc.id)
                     source_hash = compute_file_hash(file_bytes)
-                    
+
                     # Extract
                     extraction = router.extract(
                         document=doc,
@@ -1938,7 +1938,7 @@ def run_extract(request: HttpRequest) -> HttpResponse:
                         paperless_base_url=paperless_url,
                         default_source_account=config.firefly.default_source_account,
                     )
-                    
+
                     # Save to store (with user_id for ownership)
                     store.upsert_document(
                         document_id=doc.id,
@@ -1949,8 +1949,9 @@ def run_extract(request: HttpRequest) -> HttpResponse:
                         tags=doc.tags,
                         user_id=extract_user_id,
                     )
-                    
+
                     import json
+
                     store.save_extraction(
                         document_id=doc.id,
                         external_id=extraction.proposal.external_id,
@@ -1959,12 +1960,12 @@ def run_extract(request: HttpRequest) -> HttpResponse:
                         review_state=extraction.confidence.review_state.value,
                         user_id=extract_user_id,
                     )
-                    
+
                     extracted += 1
-                    
-                except Exception as e:
+
+                except Exception:
                     logger.exception(f"Failed to extract doc {doc.id}")
-            
+
             result_msg = f"Extracted: {extracted}, Skipped: {skipped}"
 
             # Also sync Firefly transactions if requested
@@ -2504,8 +2505,13 @@ def toggle_document_listing(request: HttpRequest, document_id: int) -> HttpRespo
 # ============================================================================
 
 
-def _get_reconciliation_dashboard_stats(store: StateStore) -> dict:
-    """Get comprehensive statistics for reconciliation dashboard."""
+def _get_reconciliation_dashboard_stats(store: StateStore, user_id: int | None = None) -> dict:
+    """Get comprehensive statistics for reconciliation dashboard.
+
+    Args:
+        store: StateStore instance.
+        user_id: User ID for filtering. None means show all (superuser).
+    """
     conn = store._get_connection()
     try:
         # Paperless documents pending (not yet linked or confirmed orphan)
@@ -2516,10 +2522,16 @@ def _get_reconciliation_dashboard_stats(store: StateStore) -> dict:
                OR review_decision IS NULL"""
         ).fetchone()[0]
 
-        # Firefly transactions unmatched
-        firefly_unmatched = conn.execute(
-            "SELECT COUNT(*) FROM firefly_cache WHERE match_status = 'UNMATCHED'"
-        ).fetchone()[0]
+        # Firefly transactions unmatched (filtered by user_id)
+        if user_id is not None:
+            firefly_unmatched = conn.execute(
+                "SELECT COUNT(*) FROM firefly_cache WHERE match_status = 'UNMATCHED' AND (user_id = ? OR user_id IS NULL)",
+                (user_id,),
+            ).fetchone()[0]
+        else:
+            firefly_unmatched = conn.execute(
+                "SELECT COUNT(*) FROM firefly_cache WHERE match_status = 'UNMATCHED'"
+            ).fetchone()[0]
 
         # Auto-matched
         auto_matched = conn.execute(
@@ -2593,8 +2605,11 @@ def reconciliation_dashboard_legacy(request: HttpRequest) -> HttpResponse:
     """
     store = _get_store()
 
-    # Get dashboard stats
-    stats = _get_reconciliation_dashboard_stats(store)
+    # Get user_id for filtering (None for superuser = see all)
+    user_id = _get_user_id_for_filter(request)
+
+    # Get dashboard stats (filtered by user)
+    stats = _get_reconciliation_dashboard_stats(store, user_id=user_id)
 
     # Get filter tags from user profile or default
     filter_tags = "finance/inbox"
@@ -2686,18 +2701,29 @@ def reconciliation_dashboard_legacy(request: HttpRequest) -> HttpResponse:
     finally:
         conn.close()
 
-    # Get Firefly records (cached transactions, excluding soft-deleted)
+    # Get Firefly records (cached transactions, excluding soft-deleted, filtered by user)
     firefly_records = []
     conn = store._get_connection()
     try:
-        rows = conn.execute(
-            """SELECT fc.*, pd.title as linked_document_title
-               FROM firefly_cache fc
-               LEFT JOIN paperless_documents pd ON fc.matched_document_id = pd.document_id
-               WHERE fc.deleted_at IS NULL
-               ORDER BY fc.date DESC
-               LIMIT 100"""
-        ).fetchall()
+        if user_id is not None:
+            rows = conn.execute(
+                """SELECT fc.*, pd.title as linked_document_title
+                   FROM firefly_cache fc
+                   LEFT JOIN paperless_documents pd ON fc.matched_document_id = pd.document_id
+                   WHERE fc.deleted_at IS NULL AND (fc.user_id = ? OR fc.user_id IS NULL)
+                   ORDER BY fc.date DESC
+                   LIMIT 100""",
+                (user_id,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """SELECT fc.*, pd.title as linked_document_title
+                   FROM firefly_cache fc
+                   LEFT JOIN paperless_documents pd ON fc.matched_document_id = pd.document_id
+                   WHERE fc.deleted_at IS NULL
+                   ORDER BY fc.date DESC
+                   LIMIT 100"""
+            ).fetchall()
 
         for row in rows:
             record = dict(row)
@@ -2895,11 +2921,11 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
     try:
         # Get filter tags
         tags = request.POST.get("tags", "finance/inbox")
-        
+
         # Get user-specific tokens from profile
         paperless_url = settings.PAPERLESS_BASE_URL
         paperless_token = settings.PAPERLESS_TOKEN
-        
+
         if request.user.is_authenticated:
             try:
                 profile = request.user.profile
@@ -3093,6 +3119,9 @@ def reconciliation_list_legacy(request: HttpRequest) -> HttpResponse:
     """
     store = _get_store()
 
+    # Get user_id for filtering (None for superuser = see all)
+    user_id = _get_user_id_for_filter(request)
+
     # Check if we're coming from "Link to Bank Transaction" flow
     match_document_id = request.GET.get("match_document")
     match_document_info = None
@@ -3131,8 +3160,8 @@ def reconciliation_list_legacy(request: HttpRequest) -> HttpResponse:
         # Format score as percentage
         proposal["score_pct"] = proposal.get("match_score", 0) * 100
 
-    # Get reconciliation stats
-    stats = _get_reconciliation_stats(store)
+    # Get reconciliation stats (filtered by user)
+    stats = _get_reconciliation_stats(store, user_id=user_id)
 
     context = {
         "proposals": proposals,
@@ -3152,6 +3181,7 @@ def reconciliation_detail(request: HttpRequest, proposal_id: int) -> HttpRespons
     Displays transaction and document side-by-side with matching details.
     """
     store = _get_store()
+    user_id = _get_user_id_for_filter(request)
 
     # Get the proposal
     proposal = store.get_proposal_by_id(proposal_id)
@@ -3171,8 +3201,8 @@ def reconciliation_detail(request: HttpRequest, proposal_id: int) -> HttpRespons
         except (json.JSONDecodeError, TypeError):
             pass
 
-    # Get full transaction details from Firefly cache
-    tx_details = store.get_firefly_cache_entry(proposal["firefly_id"])
+    # Get full transaction details from Firefly cache (filtered by user)
+    tx_details = store.get_firefly_cache_entry(proposal["firefly_id"], user_id=user_id)
 
     # Get document details
     doc_record = store.get_document(proposal["document_id"])
@@ -3421,6 +3451,7 @@ def link_document_to_transaction(request: HttpRequest) -> HttpResponse:
         return redirect("list")
 
     store = _get_store()
+    user_id = _get_user_id_for_filter(request)
 
     if request.method == "POST":
         # Perform the actual linking
@@ -3468,9 +3499,9 @@ def link_document_to_transaction(request: HttpRequest) -> HttpResponse:
             return redirect("list")
 
     # GET: Show confirmation page
-    # Get document and transaction details for confirmation
+    # Get document and transaction details for confirmation (filtered by user)
     extraction_record = store.get_extraction_by_document(document_id_int)
-    tx_cache = store.get_firefly_cache_entry(firefly_id_int)
+    tx_cache = store.get_firefly_cache_entry(firefly_id_int, user_id=user_id)
 
     context = {
         "document_id": document_id_int,
@@ -3503,8 +3534,11 @@ def unlinked_transactions_legacy(request: HttpRequest) -> HttpResponse:
     """
     store = _get_store()
 
-    # Get unmatched transactions from cache (UNMATCHED status)
-    unmatched = store.get_unmatched_firefly_transactions()
+    # Get user_id for filtering (None for superuser = see all)
+    user_id = _get_user_id_for_filter(request)
+
+    # Get unmatched transactions from cache (UNMATCHED status), filtered by user
+    unmatched = store.get_unmatched_firefly_transactions(user_id=user_id)
 
     # Parse and format for display
     transactions = []
@@ -3561,12 +3595,12 @@ def sync_firefly_transactions(request: HttpRequest) -> HttpResponse:
     # Get sync parameters from form
     days = int(request.POST.get("days", 90))
     type_filter = request.POST.get("type_filter", "")  # Empty = all types
-    
+
     # Get user-specific tokens (capture before thread starts)
     sync_user_id = request.user.id if request.user.is_authenticated else None
     user_firefly_url = None
     user_firefly_token = None
-    
+
     if request.user.is_authenticated:
         try:
             profile = request.user.profile
@@ -3600,7 +3634,7 @@ def sync_firefly_transactions(request: HttpRequest) -> HttpResponse:
                 config_path = Path("/app/config/config.yaml")
 
             config = load_config(config_path)
-            
+
             # Use user-specific tokens if available, otherwise use config
             firefly_url = user_firefly_url or config.firefly.base_url
             firefly_token = user_firefly_token or config.firefly.token
@@ -3716,8 +3750,13 @@ def api_sync_firefly_status(request: HttpRequest) -> JsonResponse:
     return JsonResponse(_firefly_sync_status)
 
 
-def _get_reconciliation_stats(store: StateStore) -> dict:
-    """Get statistics for reconciliation dashboard."""
+def _get_reconciliation_stats(store: StateStore, user_id: int | None = None) -> dict:
+    """Get statistics for reconciliation dashboard.
+
+    Args:
+        store: StateStore instance.
+        user_id: User ID for filtering. None means show all (superuser).
+    """
     conn = store._get_connection()
     try:
         # Pending proposals
@@ -3745,15 +3784,25 @@ def _get_reconciliation_stats(store: StateStore) -> dict:
         auto_count = auto_matched["count"] if auto_matched else 0
 
         # Unmatched transactions (in cache with UNMATCHED status, excluding soft-deleted)
-        unmatched = conn.execute(
-            "SELECT COUNT(*) as count FROM firefly_cache WHERE match_status = 'UNMATCHED' AND deleted_at IS NULL"
-        ).fetchone()
-        unmatched_count = unmatched["count"] if unmatched else 0
+        # Filtered by user_id for regular users
+        if user_id is not None:
+            unmatched = conn.execute(
+                "SELECT COUNT(*) as count FROM firefly_cache WHERE match_status = 'UNMATCHED' AND deleted_at IS NULL AND (user_id = ? OR user_id IS NULL)",
+                (user_id,),
+            ).fetchone()
+            soft_deleted = conn.execute(
+                "SELECT COUNT(*) as count FROM firefly_cache WHERE deleted_at IS NOT NULL AND (user_id = ? OR user_id IS NULL)",
+                (user_id,),
+            ).fetchone()
+        else:
+            unmatched = conn.execute(
+                "SELECT COUNT(*) as count FROM firefly_cache WHERE match_status = 'UNMATCHED' AND deleted_at IS NULL"
+            ).fetchone()
+            soft_deleted = conn.execute(
+                "SELECT COUNT(*) as count FROM firefly_cache WHERE deleted_at IS NOT NULL"
+            ).fetchone()
 
-        # Soft-deleted count for information
-        soft_deleted = conn.execute(
-            "SELECT COUNT(*) as count FROM firefly_cache WHERE deleted_at IS NOT NULL"
-        ).fetchone()
+        unmatched_count = unmatched["count"] if unmatched else 0
         soft_deleted_count = soft_deleted["count"] if soft_deleted else 0
 
         return {
@@ -3869,6 +3918,7 @@ def audit_trail_detail(request: HttpRequest, run_id: int) -> HttpResponse:
     Show detailed view of a single interpretation run.
     """
     store = _get_store()
+    user_id = _get_user_id_for_filter(request)
 
     conn = store._get_connection()
     try:
@@ -3916,10 +3966,10 @@ def audit_trail_detail(request: HttpRequest, run_id: int) -> HttpResponse:
         if run.get("document_id"):
             doc_record = store.get_document(run["document_id"])
 
-        # Get related transaction info if available
+        # Get related transaction info if available (filtered by user)
         tx_details = None
         if run.get("firefly_id"):
-            tx_details = store.get_firefly_cache_entry(run["firefly_id"])
+            tx_details = store.get_firefly_cache_entry(run["firefly_id"], user_id=user_id)
 
     finally:
         conn.close()
@@ -3944,11 +3994,19 @@ def _get_top_match_suggestions(
     record_type: str,
     record_id: int,
     max_results: int = 3,
+    user_id: int | None = None,
 ) -> list[dict]:
     """Get top matching suggestions for linking.
 
     For Paperless documents: find matching Firefly transactions
     For Firefly transactions: find matching Paperless documents
+
+    Args:
+        store: StateStore instance.
+        record_type: Either "paperless" or "firefly".
+        record_id: Document ID or Firefly transaction ID.
+        max_results: Maximum number of suggestions to return.
+        user_id: User ID for filtering. None means show all (superuser).
 
     Returns list of suggested matches with confidence scores.
     """
@@ -3984,7 +4042,7 @@ def _get_top_match_suggestions(
                 )
 
                 for match in matches:
-                    cached_tx = store.get_firefly_cache_entry(match.firefly_id)
+                    cached_tx = store.get_firefly_cache_entry(match.firefly_id, user_id=user_id)
                     if cached_tx:
                         suggestions.append(
                             {
@@ -4005,8 +4063,8 @@ def _get_top_match_suggestions(
                 pass
 
         elif record_type == "firefly":
-            # Get Firefly transaction from cache
-            tx = store.get_firefly_cache_entry(record_id)
+            # Get Firefly transaction from cache (filtered by user)
+            tx = store.get_firefly_cache_entry(record_id, user_id=user_id)
             if not tx:
                 return []
 
@@ -4229,7 +4287,11 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
                 if record["needs_linking"]:
                     try:
                         suggestions = _get_top_match_suggestions(
-                            store, "paperless", record["document_id"], max_results=5
+                            store,
+                            "paperless",
+                            record["document_id"],
+                            max_results=5,
+                            user_id=user_id,
                         )
                         record["match_count"] = len(suggestions)
                     except Exception:
@@ -4257,26 +4319,45 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
     finally:
         conn.close()
 
-    # Get Firefly records (unmatched transactions)
+    # Get Firefly records (unmatched transactions), filtered by user
     firefly_records = []
     conn = store._get_connection()
     try:
-        rows = conn.execute(
-            """
-            SELECT fc.*, l.extraction_id as linked_extraction_id,
-                   e.document_id as linked_document_id,
-                   pd.title as linked_document_title
-            FROM firefly_cache fc
-            LEFT JOIN linkage l ON fc.firefly_id = l.firefly_id
-            LEFT JOIN extractions e ON l.extraction_id = e.id
-            LEFT JOIN paperless_documents pd ON e.document_id = pd.document_id
-            WHERE fc.deleted_at IS NULL
-            ORDER BY
-                CASE WHEN fc.match_status = 'UNMATCHED' THEN 0 ELSE 1 END,
-                fc.date DESC
-            LIMIT 100
-            """
-        ).fetchall()
+        if user_id is not None:
+            rows = conn.execute(
+                """
+                SELECT fc.*, l.extraction_id as linked_extraction_id,
+                       e.document_id as linked_document_id,
+                       pd.title as linked_document_title
+                FROM firefly_cache fc
+                LEFT JOIN linkage l ON fc.firefly_id = l.firefly_id
+                LEFT JOIN extractions e ON l.extraction_id = e.id
+                LEFT JOIN paperless_documents pd ON e.document_id = pd.document_id
+                WHERE fc.deleted_at IS NULL AND (fc.user_id = ? OR fc.user_id IS NULL)
+                ORDER BY
+                    CASE WHEN fc.match_status = 'UNMATCHED' THEN 0 ELSE 1 END,
+                    fc.date DESC
+                LIMIT 100
+                """,
+                (user_id,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT fc.*, l.extraction_id as linked_extraction_id,
+                       e.document_id as linked_document_id,
+                       pd.title as linked_document_title
+                FROM firefly_cache fc
+                LEFT JOIN linkage l ON fc.firefly_id = l.firefly_id
+                LEFT JOIN extractions e ON l.extraction_id = e.id
+                LEFT JOIN paperless_documents pd ON e.document_id = pd.document_id
+                WHERE fc.deleted_at IS NULL
+                ORDER BY
+                    CASE WHEN fc.match_status = 'UNMATCHED' THEN 0 ELSE 1 END,
+                    fc.date DESC
+                LIMIT 100
+                """
+            ).fetchall()
 
         for row in rows:
             record = dict(row)
@@ -4434,6 +4515,7 @@ def unified_review_detail(request: HttpRequest, record_type: str, record_id: int
         record_id: Document ID (paperless) or Transaction ID (firefly)
     """
     store = _get_store()
+    user_id = _get_user_id_for_filter(request)
 
     record_data = {}
     extraction_data = {}
@@ -4490,8 +4572,8 @@ def unified_review_detail(request: HttpRequest, record_type: str, record_id: int
         source_data = extraction_data.get("provenance", {})
 
     elif record_type == "firefly":
-        # Get Firefly transaction from cache
-        tx = store.get_firefly_cache_entry(record_id)
+        # Get Firefly transaction from cache (filtered by user)
+        tx = store.get_firefly_cache_entry(record_id, user_id=user_id)
         if not tx:
             return render(
                 request,
@@ -4533,8 +4615,10 @@ def unified_review_detail(request: HttpRequest, record_type: str, record_id: int
             status=404,
         )
 
-    # Get top match suggestions
-    suggestions = _get_top_match_suggestions(store, record_type, record_id, max_results=3)
+    # Get top match suggestions (filtered by user)
+    suggestions = _get_top_match_suggestions(
+        store, record_type, record_id, max_results=3, user_id=user_id
+    )
 
     # Get Firefly accounts and categories for dropdowns
     firefly_accounts = []
@@ -4557,9 +4641,11 @@ def unified_review_detail(request: HttpRequest, record_type: str, record_id: int
     if linkage:
         if linkage.get("link_type") == "LINKED" or linkage.get("link_type") == "AUTO_LINKED":
             link_status = "linked"
-            # Get linked record info
+            # Get linked record info (filtered by user)
             if record_type == "paperless" and linkage.get("firefly_id"):
-                linked_record = store.get_firefly_cache_entry(linkage["firefly_id"])
+                linked_record = store.get_firefly_cache_entry(
+                    linkage["firefly_id"], user_id=user_id
+                )
                 if linked_record:
                     # Format date for display
                     linked_record = dict(linked_record)
@@ -4778,7 +4864,10 @@ def api_link_suggestions(request: HttpRequest, record_type: str, record_id: int)
     Returns top 3 suggested matches from the other source.
     """
     store = _get_store()
-    suggestions = _get_top_match_suggestions(store, record_type, record_id, max_results=3)
+    user_id = _get_user_id_for_filter(request)
+    suggestions = _get_top_match_suggestions(
+        store, record_type, record_id, max_results=3, user_id=user_id
+    )
     return JsonResponse({"suggestions": suggestions})
 
 
@@ -5191,6 +5280,7 @@ def api_suggest_splits(request: HttpRequest, document_id: int) -> JsonResponse:
     from ...spark_ai import SparkAIService
 
     store = _get_store()
+    user_id = _get_user_id_for_filter(request)
 
     try:
         # Get extraction data
@@ -5215,30 +5305,23 @@ def api_suggest_splits(request: HttpRequest, document_id: int) -> JsonResponse:
             except json.JSONDecodeError:
                 pass
 
-        # Get linked bank transaction if available
+        # Get linked bank transaction if available (filtered by user)
         if not bank_data:
             linkage = store.get_linkage_by_extraction(extraction.id)
             if linkage and linkage.get("firefly_id"):
-                # Fetch from cache
-                conn = store._get_connection()
-                try:
-                    row = conn.execute(
-                        "SELECT transaction_json FROM firefly_cache WHERE firefly_id = ?",
-                        (linkage["firefly_id"],),
-                    ).fetchone()
-                    if row:
-                        try:
-                            txn_data = json.loads(row["transaction_json"])
-                            bank_data = {
-                                "amount": txn_data.get("amount"),
-                                "date": txn_data.get("date"),
-                                "description": txn_data.get("description"),
-                                "category_name": txn_data.get("category_name"),
-                            }
-                        except (json.JSONDecodeError, TypeError):
-                            pass
-                finally:
-                    conn.close()
+                # Use StateStore method with user_id filtering
+                cached_tx = store.get_firefly_cache_entry(linkage["firefly_id"], user_id=user_id)
+                if cached_tx and cached_tx.get("transaction_json"):
+                    try:
+                        txn_data = json.loads(cached_tx["transaction_json"])
+                        bank_data = {
+                            "amount": txn_data.get("amount"),
+                            "date": txn_data.get("date"),
+                            "description": txn_data.get("description"),
+                            "category_name": txn_data.get("category_name"),
+                        }
+                    except (json.JSONDecodeError, TypeError):
+                        pass
 
         # Load config and create SparkAI service
         config_path = (
@@ -5454,6 +5537,7 @@ def _run_ai_job_now(request: HttpRequest, store: StateStore, job: dict) -> bool:
 
     job_id = job["id"]
     document_id = job["document_id"]
+    user_id = _get_user_id_for_filter(request)
     # Note: extraction_id is stored in job but we fetch extraction by document_id instead
 
     # Check if AI is opted out for this document
@@ -5540,11 +5624,11 @@ def _run_ai_job_now(request: HttpRequest, store: StateStore, job: dict) -> bool:
         raw_text = extraction_data.get("raw_text", "")
         confidence = extraction_data.get("confidence", {})
 
-        # Get linked bank transaction if available
+        # Get linked bank transaction if available (filtered by user)
         bank_transaction = None
         linkage = store.get_linkage_by_extraction(ext.id) if ext else None
         if linkage and linkage.get("firefly_id"):
-            firefly_tx = store.get_firefly_cache_entry(linkage["firefly_id"])
+            firefly_tx = store.get_firefly_cache_entry(linkage["firefly_id"], user_id=user_id)
             if firefly_tx:
                 bank_transaction = {
                     "amount": firefly_tx.get("amount"),

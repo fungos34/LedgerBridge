@@ -1163,16 +1163,35 @@ class StateStore:
                     ),
                 )
 
-    def get_unmatched_firefly_transactions(self) -> list[dict[str, Any]]:
-        """Get cached Firefly transactions that are not yet matched (excludes soft-deleted)."""
+    def get_unmatched_firefly_transactions(
+        self, user_id: int | None = None
+    ) -> list[dict[str, Any]]:
+        """Get cached Firefly transactions that are not yet matched (excludes soft-deleted).
+        
+        Args:
+            user_id: Filter by user ID. If None, returns all users' transactions
+                     (for superuser access). If set, returns only that user's
+                     transactions plus legacy records (user_id IS NULL).
+        """
         with self._transaction() as conn:
-            rows = conn.execute(
+            if user_id is not None:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM firefly_cache
+                    WHERE match_status = 'UNMATCHED' AND deleted_at IS NULL
+                      AND (user_id = ? OR user_id IS NULL)
+                    ORDER BY date DESC
+                """,
+                    (user_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM firefly_cache
+                    WHERE match_status = 'UNMATCHED' AND deleted_at IS NULL
+                    ORDER BY date DESC
                 """
-                SELECT * FROM firefly_cache
-                WHERE match_status = 'UNMATCHED' AND deleted_at IS NULL
-                ORDER BY date DESC
-            """
-            ).fetchall()
+                ).fetchall()
             return [dict(row) for row in rows]
 
     def update_firefly_match_status(
@@ -1193,12 +1212,27 @@ class StateStore:
                 (status, document_id, confidence, firefly_id),
             )
 
-    def get_firefly_cache_entry(self, firefly_id: int) -> dict[str, Any] | None:
-        """Get a single cached Firefly transaction."""
+    def get_firefly_cache_entry(
+        self, firefly_id: int, user_id: int | None = None
+    ) -> dict[str, Any] | None:
+        """Get a single cached Firefly transaction.
+        
+        Args:
+            firefly_id: The Firefly transaction ID.
+            user_id: Filter by user ID. If None, returns the entry regardless of owner
+                     (for superuser access). If set, returns only if owned by that user
+                     or legacy records (user_id IS NULL).
+        """
         with self._transaction() as conn:
-            row = conn.execute(
-                "SELECT * FROM firefly_cache WHERE firefly_id = ?", (firefly_id,)
-            ).fetchone()
+            if user_id is not None:
+                row = conn.execute(
+                    "SELECT * FROM firefly_cache WHERE firefly_id = ? AND (user_id = ? OR user_id IS NULL)",
+                    (firefly_id, user_id),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT * FROM firefly_cache WHERE firefly_id = ?", (firefly_id,)
+                ).fetchone()
             return dict(row) if row else None
 
     def soft_delete_firefly_cache(self, firefly_id: int) -> bool:
