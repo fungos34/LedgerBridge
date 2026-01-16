@@ -4393,9 +4393,7 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
                 record["is_linked"] = link_type == "LINKED" or link_type == "AUTO_LINKED"
                 record["is_orphan"] = link_type == "ORPHAN"
                 # Track if this was auto-matched so users can easily review
-                record["is_auto_matched"] = (
-                    linked_by == "AUTO" or link_type == "AUTO_LINKED"
-                )
+                record["is_auto_matched"] = linked_by == "AUTO" or link_type == "AUTO_LINKED"
 
                 # Review status
                 record["needs_review"] = (
@@ -4437,7 +4435,9 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
                             # Extract overall confidence from suggestions (as percentage 0-100)
                             try:
                                 suggestions = json.loads(ai_job["suggestions_json"])
-                                record["ai_confidence"] = round(float(suggestions.get("overall_confidence", 0.0)) * 100)
+                                record["ai_confidence"] = round(
+                                    float(suggestions.get("overall_confidence", 0.0)) * 100
+                                )
                             except (json.JSONDecodeError, TypeError, ValueError):
                                 record["ai_confidence"] = 0
                 except Exception:
@@ -6991,10 +6991,27 @@ def sync_assistant(request):
     context = {
         "has_firefly_token": has_firefly_token,
         "entity_types": [
-            {"key": "category", "name": "Categories", "icon": "📁"},
-            {"key": "tag", "name": "Tags", "icon": "🏷️"},
-            {"key": "account", "name": "Accounts", "icon": "🏦"},
-            {"key": "piggy_bank", "name": "Piggy Banks", "icon": "🐷"},
+            # Core Entities - Layer 0
+            {"key": "category", "name": "Categories", "icon": "📁", "group": "Core"},
+            {"key": "tag", "name": "Tags", "icon": "🏷️", "group": "Core"},
+            {"key": "budget", "name": "Budgets", "icon": "💰", "group": "Core"},
+            {"key": "currency", "name": "Currencies", "icon": "💱", "group": "Core"},
+            # Accounts - Layer 1
+            {"key": "account", "name": "Accounts", "icon": "🏦", "group": "Accounts"},
+            # Planning - Layer 1-2
+            {"key": "piggy_bank", "name": "Piggy Banks", "icon": "🐷", "group": "Planning"},
+            {"key": "bill", "name": "Bills", "icon": "📋", "group": "Planning"},
+            # Automation - Layer 0-2
+            {"key": "rule_group", "name": "Rule Groups", "icon": "📂", "group": "Automation"},
+            {"key": "rule", "name": "Rules", "icon": "⚙️", "group": "Automation"},
+            {
+                "key": "recurrence",
+                "name": "Recurring Transactions",
+                "icon": "🔄",
+                "group": "Automation",
+            },
+            # Transactions - Layer 3
+            {"key": "transaction", "name": "Transactions", "icon": "💳", "group": "Transactions"},
         ],
     }
     return render(request, "review/sync_assistant.html", context)
@@ -7007,6 +7024,14 @@ def api_sync_fetch(request, entity_type: str):
     Fetch entities from user's Firefly into their pool.
 
     POST /api/sync/fetch/<entity_type>/
+
+    For transactions, accepts optional JSON body:
+    {
+        "start_date": "YYYY-MM-DD",
+        "end_date": "YYYY-MM-DD",
+        "type_filter": "withdrawal|deposit|transfer",
+        "limit": 100
+    }
     """
     from ...services.sync_fingerprints import (
         compute_fingerprint,
@@ -7015,8 +7040,20 @@ def api_sync_fetch(request, entity_type: str):
     )
     from .models import SyncPoolRecord, UserProfile
 
-    # Validate entity type
-    valid_types = ["category", "tag", "account", "piggy_bank"]
+    # Validate entity type - now supports all entity types
+    valid_types = [
+        "category",
+        "tag",
+        "account",
+        "piggy_bank",
+        "budget",
+        "bill",
+        "rule_group",
+        "rule",
+        "recurrence",
+        "currency",
+        "transaction",
+    ]
     if entity_type not in valid_types:
         return JsonResponse(
             {"success": False, "error": f"Invalid entity type: {entity_type}"}, status=400
@@ -7049,13 +7086,30 @@ def api_sync_fetch(request, entity_type: str):
             status=400,
         )
 
+    # Parse optional request body for transaction filters
+    start_date = None
+    end_date = None
+    type_filter = None
+    limit = None
+
+    if request.body:
+        try:
+            body = json.loads(request.body)
+            start_date = body.get("start_date")
+            end_date = body.get("end_date")
+            type_filter = body.get("type_filter")
+            limit = body.get("limit")
+        except json.JSONDecodeError:
+            pass
+
     try:
         from ...firefly_client.client import FireflyClient
 
         client = FireflyClient(firefly_url, firefly_token)
 
-        # Fetch entities from Firefly
+        # Fetch entities from Firefly based on type
         entities = []
+
         if entity_type == "category":
             raw_entities = client.list_categories()
             entities = [
@@ -7073,6 +7127,61 @@ def api_sync_fetch(request, entity_type: str):
         elif entity_type == "piggy_bank":
             raw_entities = client.list_piggy_banks()
             entities = [{"id": e["id"], "attrs": e} for e in raw_entities]
+        elif entity_type == "budget":
+            raw_entities = client.list_budgets()
+            entities = [{"id": e["id"], "attrs": e} for e in raw_entities]
+        elif entity_type == "bill":
+            raw_entities = client.list_bills()
+            entities = [{"id": e["id"], "attrs": e} for e in raw_entities]
+        elif entity_type == "rule_group":
+            raw_entities = client.list_rule_groups()
+            entities = [{"id": e["id"], "attrs": e} for e in raw_entities]
+        elif entity_type == "rule":
+            raw_entities = client.list_rules()
+            entities = [{"id": e["id"], "attrs": e} for e in raw_entities]
+        elif entity_type == "recurrence":
+            raw_entities = client.list_recurrences()
+            entities = [{"id": e["id"], "attrs": e} for e in raw_entities]
+        elif entity_type == "currency":
+            raw_entities = client.list_currencies()
+            # Only include enabled currencies
+            entities = [{"id": e["id"], "attrs": e} for e in raw_entities if e.get("enabled")]
+        elif entity_type == "transaction":
+            # Transactions require date range
+            if not start_date or not end_date:
+                # Default to last 30 days
+                from datetime import datetime, timedelta
+
+                end_date = datetime.now().strftime("%Y-%m-%d")
+                start_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+
+            raw_transactions = client.list_transactions(
+                start_date=start_date,
+                end_date=end_date,
+                type_filter=type_filter,
+                limit=limit,
+            )
+            entities = [
+                {
+                    "id": tx.id,
+                    "attrs": {
+                        "type": tx.type,
+                        "date": tx.date,
+                        "amount": tx.amount,
+                        "description": tx.description,
+                        "source_name": tx.source_name,
+                        "destination_name": tx.destination_name,
+                        "category_name": tx.category_name,
+                        "tags": tx.tags,
+                        "notes": tx.notes,
+                        "external_id": tx.external_id,
+                        "internal_reference": tx.internal_reference,
+                        "has_splits": tx.has_splits,
+                        "split_count": tx.split_count,
+                    },
+                }
+                for tx in raw_transactions
+            ]
 
         # Upsert into pool
         created_count = 0
@@ -7131,8 +7240,20 @@ def api_sync_pool(request, entity_type: str):
     """
     from .models import SyncPoolRecord, SyncPoolShare
 
-    # Validate entity type
-    valid_types = ["category", "tag", "account", "piggy_bank"]
+    # Validate entity type - now supports all entity types
+    valid_types = [
+        "category",
+        "tag",
+        "account",
+        "piggy_bank",
+        "budget",
+        "bill",
+        "rule_group",
+        "rule",
+        "recurrence",
+        "currency",
+        "transaction",
+    ]
     if entity_type not in valid_types:
         return JsonResponse(
             {"success": False, "error": f"Invalid entity type: {entity_type}"}, status=400
@@ -7294,8 +7415,11 @@ def api_sync_import(request):
 
     POST /api/sync/import/
     Body: {"record_ids": [...]}
+
+    Imports are performed in dependency order to ensure referenced entities exist.
     """
     from ...firefly_client.client import FireflyClient
+    from ...services.reference_mapper import ReferenceMapper
     from ...services.sync_fingerprints import compute_fingerprint, normalize_entity_data
     from .models import SyncImportLog, SyncPoolRecord, SyncPoolShare, UserProfile
 
@@ -7340,12 +7464,16 @@ def api_sync_import(request):
 
     if len(accessible_ids) != len(record_ids):
         return JsonResponse(
-            {"success": False, "error": "You can only import records you own or that are shared with you"},
+            {
+                "success": False,
+                "error": "You can only import records you own or that are shared with you",
+            },
             status=403,
         )
 
-    # Get records
-    records = SyncPoolRecord.objects.filter(id__in=record_ids).select_related("owner")
+    # Get records and sort by import layer (dependencies first)
+    records = list(SyncPoolRecord.objects.filter(id__in=record_ids).select_related("owner"))
+    records.sort(key=lambda r: SyncPoolRecord.IMPORT_LAYERS.get(r.entity_type, 99))
 
     # Connect to user's Firefly
     firefly_url = profile.firefly_url or getattr(settings, "FIREFLY_BASE_URL", None)
@@ -7353,6 +7481,7 @@ def api_sync_import(request):
 
     try:
         client = FireflyClient(firefly_url, firefly_token)
+        mapper = ReferenceMapper(client)
     except Exception as e:
         return JsonResponse(
             {"success": False, "error": f"Could not connect to Firefly: {e}"},
@@ -7444,6 +7573,171 @@ def api_sync_import(request):
                         )
                         result["status"] = "created"
 
+            elif record.entity_type == "budget":
+                existing = client.find_budget_by_name(data.get("name", ""))
+                if existing:
+                    result["status"] = "skipped"
+                    result["reason"] = "Already exists"
+                    target_firefly_id = existing["id"]
+                else:
+                    target_firefly_id = client.create_budget(
+                        name=data.get("name", ""),
+                        auto_budget_type=data.get("auto_budget_type"),
+                        auto_budget_amount=data.get("auto_budget_amount"),
+                        auto_budget_period=data.get("auto_budget_period"),
+                        notes=data.get("notes"),
+                    )
+                    result["status"] = "created"
+
+            elif record.entity_type == "bill":
+                existing = client.find_bill_by_name(data.get("name", ""))
+                if existing:
+                    result["status"] = "skipped"
+                    result["reason"] = "Already exists"
+                    target_firefly_id = existing["id"]
+                else:
+                    target_firefly_id = client.create_bill(
+                        name=data.get("name", ""),
+                        amount_min=data.get("amount_min", "0"),
+                        amount_max=data.get("amount_max", "0"),
+                        date=data.get("date", ""),
+                        repeat_freq=data.get("repeat_freq", "monthly"),
+                        skip=data.get("skip", 0),
+                        active=data.get("active", True),
+                        notes=data.get("notes"),
+                    )
+                    result["status"] = "created"
+
+            elif record.entity_type == "rule_group":
+                existing = client.find_rule_group_by_title(data.get("title", ""))
+                if existing:
+                    result["status"] = "skipped"
+                    result["reason"] = "Already exists"
+                    target_firefly_id = existing["id"]
+                else:
+                    target_firefly_id = client.create_rule_group(
+                        title=data.get("title", ""),
+                        order=data.get("order"),
+                        active=data.get("active", True),
+                        description=data.get("description"),
+                    )
+                    result["status"] = "created"
+
+            elif record.entity_type == "rule":
+                existing = client.find_rule_by_title(data.get("title", ""))
+                if existing:
+                    result["status"] = "skipped"
+                    result["reason"] = "Already exists"
+                    target_firefly_id = existing["id"]
+                else:
+                    # Need to resolve rule group
+                    rule_group_title = data.get("rule_group_title", "")
+                    rule_group_id = (
+                        mapper.resolve_rule_group(rule_group_title) if rule_group_title else None
+                    )
+
+                    if not rule_group_id:
+                        # Create a default rule group
+                        rule_group_id = client.create_rule_group(title="Imported Rules")
+
+                    target_firefly_id = client.create_rule(
+                        title=data.get("title", ""),
+                        rule_group_id=rule_group_id,
+                        triggers=data.get("triggers", []),
+                        actions=data.get("actions", []),
+                        order=data.get("order"),
+                        active=data.get("active", True),
+                        strict=data.get("strict", False),
+                        description=data.get("description"),
+                    )
+                    result["status"] = "created"
+
+            elif record.entity_type == "recurrence":
+                existing = client.find_recurrence_by_title(data.get("title", ""))
+                if existing:
+                    result["status"] = "skipped"
+                    result["reason"] = "Already exists"
+                    target_firefly_id = existing["id"]
+                else:
+                    # Recurrences have embedded transactions that need account resolution
+                    transactions = data.get("transactions", [])
+                    # For now, import as-is - account names will be used directly
+                    target_firefly_id = client.create_recurrence(
+                        title=data.get("title", ""),
+                        first_date=data.get("first_date", ""),
+                        repeat_freq=data.get("repeat_freq", "monthly"),
+                        transactions=transactions,
+                        notes=data.get("notes"),
+                        active=data.get("active", True),
+                    )
+                    result["status"] = "created"
+
+            elif record.entity_type == "currency":
+                # Currencies can only be enabled, not created
+                existing = client.find_currency_by_code(data.get("code", ""))
+                if existing and existing.get("enabled"):
+                    result["status"] = "skipped"
+                    result["reason"] = "Already enabled"
+                    target_firefly_id = existing["id"]
+                elif existing:
+                    # Enable it
+                    client.enable_currency(data.get("code", ""))
+                    result["status"] = "created"
+                    result["reason"] = "Enabled"
+                    target_firefly_id = existing["id"]
+                else:
+                    result["status"] = "error"
+                    result["error"] = f"Currency {data.get('code')} not available in Firefly"
+
+            elif record.entity_type == "transaction":
+                # Check if transaction already exists via external_id
+                external_id = data.get("external_id")
+                if external_id:
+                    existing = client.find_by_external_id(external_id)
+                    if existing:
+                        result["status"] = "skipped"
+                        result["reason"] = "Already exists (external_id match)"
+                        target_firefly_id = existing.id
+                    else:
+                        # Create the transaction with proper payload
+                        from ...schemas.firefly_payload import (
+                            FireflyTransactionSplit,
+                            FireflyTransactionStore,
+                        )
+
+                        # Resolve accounts by name
+                        source_name = data.get("source_name", "")
+                        dest_name = data.get("destination_name", "")
+                        tx_type = data.get("type", "withdrawal")
+
+                        split = FireflyTransactionSplit(
+                            type=tx_type,
+                            date=str(data.get("date", ""))[:10],
+                            amount=str(data.get("amount", "0")),
+                            description=data.get("description", "Imported transaction"),
+                            source_name=source_name,
+                            destination_name=dest_name,
+                            category_name=data.get("category_name"),
+                            tags=data.get("tags"),
+                            notes=data.get("notes"),
+                            external_id=external_id,
+                        )
+
+                        payload = FireflyTransactionStore(
+                            transactions=[split],
+                            error_if_duplicate_hash=False,
+                        )
+
+                        target_firefly_id = client.create_transaction(payload, skip_duplicates=True)
+                        if target_firefly_id:
+                            result["status"] = "created"
+                        else:
+                            result["status"] = "skipped"
+                            result["reason"] = "Duplicate detected"
+                else:
+                    result["status"] = "error"
+                    result["error"] = "Transaction missing external_id"
+
             result["target_firefly_id"] = target_firefly_id
 
         except Exception as e:
@@ -7517,8 +7811,20 @@ def api_sync_preview(request, entity_type: str):
     from ...firefly_client.client import FireflyClient
     from .models import SyncPoolRecord, SyncPoolShare, UserProfile
 
-    # Validate entity type
-    valid_types = ["category", "tag", "account", "piggy_bank"]
+    # Validate entity type - all supported types
+    valid_types = [
+        "category",
+        "tag",
+        "budget",
+        "rule_group",
+        "currency",
+        "account",
+        "bill",
+        "piggy_bank",
+        "rule",
+        "recurrence",
+        "transaction",
+    ]
     if entity_type not in valid_types:
         return JsonResponse(
             {"success": False, "error": f"Invalid entity type: {entity_type}"}, status=400
@@ -7574,11 +7880,48 @@ def api_sync_preview(request, entity_type: str):
         elif entity_type == "piggy_bank":
             for pb in client.list_piggy_banks():
                 existing_names.add(pb["name"].lower().strip())
+        elif entity_type == "budget":
+            for budget in client.list_budgets():
+                existing_names.add(budget["name"].lower().strip())
+        elif entity_type == "bill":
+            for bill in client.list_bills():
+                existing_names.add(bill["name"].lower().strip())
+        elif entity_type == "rule_group":
+            for rg in client.list_rule_groups():
+                existing_names.add(rg["title"].lower().strip())
+        elif entity_type == "rule":
+            for rule in client.list_rules():
+                existing_names.add(rule["title"].lower().strip())
+        elif entity_type == "recurrence":
+            for rec in client.list_recurrences():
+                existing_names.add(rec["title"].lower().strip())
+        elif entity_type == "currency":
+            for cur in client.list_currencies():
+                if cur.get("enabled"):
+                    existing_names.add(cur["code"].lower().strip())
+        elif entity_type == "transaction":
+            # Transactions use external_id, not name matching
+            # Get all imported external_ids from user's Firefly
+            # This is expensive, so for preview we just mark all as "create"
+            pass
 
         previews = []
         for record in shared_records:
-            name_lower = record.name.lower().strip()
-            status = "skip" if name_lower in existing_names else "create"
+            if entity_type == "transaction":
+                # For transactions, check external_id if available
+                try:
+                    data = json.loads(record.data_json)
+                    external_id = data.get("external_id")
+                    if external_id:
+                        existing = client.find_by_external_id(external_id)
+                        status = "skip" if existing else "create"
+                    else:
+                        status = "error"  # No external_id
+                except (json.JSONDecodeError, Exception):
+                    status = "create"
+            else:
+                name_lower = record.name.lower().strip()
+                status = "skip" if name_lower in existing_names else "create"
             previews.append(
                 {
                     "id": record.id,
@@ -7595,4 +7938,3 @@ def api_sync_preview(request, entity_type: str):
             {"success": False, "error": str(e)},
             status=500,
         )
-

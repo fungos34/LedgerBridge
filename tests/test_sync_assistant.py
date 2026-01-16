@@ -377,3 +377,268 @@ class TestFireflyClientExtensions:
         tag = client.find_tag_by_name("nonexistent")
 
         assert tag is None
+
+
+class TestNewEntityFingerprints:
+    """Tests for fingerprint computation of newly added entity types."""
+
+    def test_budget_fingerprint_stable(self):
+        """Budget fingerprint is stable and case-insensitive."""
+        from paperless_firefly.services.sync_fingerprints import compute_budget_fingerprint
+
+        data1 = {"name": "Monthly Groceries", "auto_budget_type": "rollover"}
+        data2 = {"name": "monthly groceries", "auto_budget_type": "rollover"}
+
+        assert compute_budget_fingerprint(data1) == compute_budget_fingerprint(data2)
+
+    def test_budget_fingerprint_includes_auto_budget_type(self):
+        """Budget fingerprint changes with auto_budget_type."""
+        from paperless_firefly.services.sync_fingerprints import compute_budget_fingerprint
+
+        data1 = {"name": "Groceries", "auto_budget_type": "rollover"}
+        data2 = {"name": "Groceries", "auto_budget_type": "reset"}
+
+        assert compute_budget_fingerprint(data1) != compute_budget_fingerprint(data2)
+
+    def test_budget_fingerprint_requires_name(self):
+        """Budget fingerprint raises if name is empty."""
+        from paperless_firefly.services.sync_fingerprints import compute_budget_fingerprint
+
+        with pytest.raises(ValueError, match="Budget must have a name"):
+            compute_budget_fingerprint({"name": ""})
+
+    def test_bill_fingerprint_stable(self):
+        """Bill fingerprint is stable and case-insensitive."""
+        from paperless_firefly.services.sync_fingerprints import compute_bill_fingerprint
+
+        data1 = {"name": "Electric Bill", "amount_min": "50.00", "amount_max": "100.00", "repeat_freq": "monthly"}
+        data2 = {"name": "electric bill", "amount_min": "50.00", "amount_max": "100.00", "repeat_freq": "monthly"}
+
+        assert compute_bill_fingerprint(data1) == compute_bill_fingerprint(data2)
+
+    def test_bill_fingerprint_includes_amounts(self):
+        """Bill fingerprint changes with amount range."""
+        from paperless_firefly.services.sync_fingerprints import compute_bill_fingerprint
+
+        data1 = {"name": "Electric Bill", "amount_min": "50.00", "amount_max": "100.00"}
+        data2 = {"name": "Electric Bill", "amount_min": "60.00", "amount_max": "120.00"}
+
+        assert compute_bill_fingerprint(data1) != compute_bill_fingerprint(data2)
+
+    def test_rule_group_fingerprint_uses_title(self):
+        """Rule group fingerprint uses title field."""
+        from paperless_firefly.services.sync_fingerprints import compute_rule_group_fingerprint
+
+        data1 = {"title": "Auto Categorization"}
+        data2 = {"title": "auto categorization"}
+
+        assert compute_rule_group_fingerprint(data1) == compute_rule_group_fingerprint(data2)
+
+    def test_rule_group_fingerprint_requires_title(self):
+        """Rule group fingerprint raises if title is empty."""
+        from paperless_firefly.services.sync_fingerprints import compute_rule_group_fingerprint
+
+        with pytest.raises(ValueError, match="Rule group must have a title"):
+            compute_rule_group_fingerprint({"title": ""})
+
+    def test_currency_fingerprint_stable(self):
+        """Currency fingerprint is based on code."""
+        from paperless_firefly.services.sync_fingerprints import compute_currency_fingerprint
+
+        data1 = {"code": "EUR", "name": "Euro", "symbol": "€"}
+        data2 = {"code": "eur", "name": "EURO", "symbol": "€"}
+
+        # Should be same (code is normalized)
+        assert compute_currency_fingerprint(data1) == compute_currency_fingerprint(data2)
+
+    def test_currency_fingerprint_requires_code(self):
+        """Currency fingerprint raises if code is empty."""
+        from paperless_firefly.services.sync_fingerprints import compute_currency_fingerprint
+
+        with pytest.raises(ValueError, match="Currency must have a code"):
+            compute_currency_fingerprint({"code": ""})
+
+    def test_rule_fingerprint_uses_title(self):
+        """Rule fingerprint is based on title."""
+        from paperless_firefly.services.sync_fingerprints import compute_rule_fingerprint
+
+        data1 = {"title": "Tag groceries", "rule_group_id": 1}
+        data2 = {"title": "tag groceries", "rule_group_id": 1}
+
+        assert compute_rule_fingerprint(data1) == compute_rule_fingerprint(data2)
+
+    def test_recurrence_fingerprint_uses_title(self):
+        """Recurrence fingerprint is based on title."""
+        from paperless_firefly.services.sync_fingerprints import compute_recurrence_fingerprint
+
+        data1 = {"title": "Monthly Rent", "repeat_freq": "monthly"}
+        data2 = {"title": "monthly rent", "repeat_freq": "monthly"}
+
+        assert compute_recurrence_fingerprint(data1) == compute_recurrence_fingerprint(data2)
+
+    def test_transaction_fingerprint_uses_external_id(self):
+        """Transaction fingerprint is based on external_id."""
+        from paperless_firefly.services.sync_fingerprints import compute_transaction_fingerprint
+
+        data1 = {"external_id": "TX-123", "description": "Coffee", "amount": "5.00"}
+        data2 = {"external_id": "TX-123", "description": "Different", "amount": "10.00"}
+
+        # Same external_id should produce same fingerprint
+        assert compute_transaction_fingerprint(data1) == compute_transaction_fingerprint(data2)
+
+    def test_transaction_fingerprint_without_external_id(self):
+        """Transaction fingerprint falls back to hash fields."""
+        from paperless_firefly.services.sync_fingerprints import compute_transaction_fingerprint
+
+        data1 = {"description": "Coffee", "amount": "5.00", "date": "2024-01-15"}
+        data2 = {"description": "Coffee", "amount": "5.00", "date": "2024-01-15"}
+
+        # Should produce same fingerprint based on content
+        assert compute_transaction_fingerprint(data1) == compute_transaction_fingerprint(data2)
+
+
+class TestNewEntityFingerprints:
+    """Tests for compute_fingerprint registry with new entity types."""
+
+    def test_compute_fingerprint_all_new_types(self):
+        """Generic compute_fingerprint works for all new entity types."""
+        from paperless_firefly.services.sync_fingerprints import compute_fingerprint
+
+        budget_data = {"name": "Test Budget"}
+        bill_data = {"name": "Test Bill", "amount_min": "10.00", "amount_max": "20.00"}
+        rule_group_data = {"title": "Test Rule Group"}
+        currency_data = {"code": "EUR"}
+        rule_data = {"title": "Test Rule"}
+        recurrence_data = {"title": "Test Recurrence"}
+        # Transaction requires date for fingerprint fallback
+        transaction_data = {"external_id": "TX-123", "date": "2024-01-15", "amount": "10.00", "description": "Test"}
+
+        # All should succeed and produce hex strings
+        # Most produce 64-character hex strings (SHA256)
+        assert len(compute_fingerprint("budget", budget_data)) == 64
+        assert len(compute_fingerprint("bill", bill_data)) == 64
+        assert len(compute_fingerprint("rule_group", rule_group_data)) == 64
+        assert len(compute_fingerprint("currency", currency_data)) == 64
+        assert len(compute_fingerprint("rule", rule_data)) == 64
+        assert len(compute_fingerprint("recurrence", recurrence_data)) == 64
+        # Transaction uses generate_external_id_v2 which produces 16-character hex
+        tx_fp = compute_fingerprint("transaction", transaction_data)
+        assert len(tx_fp) > 0
+        assert all(c in "0123456789abcdef" for c in tx_fp)
+
+
+class TestNormalizeEntityDataNewTypes:
+    """Tests for entity data normalization of new types."""
+
+    def test_normalize_budget(self):
+        """Normalize budget extracts relevant fields."""
+        from paperless_firefly.services.sync_fingerprints import normalize_entity_data
+
+        raw = {
+            "name": "Groceries",
+            "auto_budget_type": "rollover",
+            "auto_budget_amount": "500.00",
+            "notes": "Monthly budget",
+            "extra_field": "ignored",
+        }
+        normalized = normalize_entity_data("budget", raw)
+
+        assert "name" in normalized
+        assert "auto_budget_type" in normalized
+        assert "extra_field" not in normalized
+
+    def test_normalize_bill(self):
+        """Normalize bill extracts relevant fields."""
+        from paperless_firefly.services.sync_fingerprints import normalize_entity_data
+
+        raw = {
+            "name": "Electric",
+            "amount_min": "50.00",
+            "amount_max": "100.00",
+            "date": "2024-01-15",
+            "repeat_freq": "monthly",
+            "extra_field": "ignored",
+        }
+        normalized = normalize_entity_data("bill", raw)
+
+        assert "name" in normalized
+        assert "amount_min" in normalized
+        assert "repeat_freq" in normalized
+        assert "extra_field" not in normalized
+
+    def test_normalize_transaction(self):
+        """Normalize transaction extracts relevant fields."""
+        from paperless_firefly.services.sync_fingerprints import normalize_entity_data
+
+        raw = {
+            "external_id": "TX-123",
+            "description": "Coffee",
+            "amount": "5.00",
+            "date": "2024-01-15",
+            "type": "withdrawal",
+            "source_name": "Wallet",
+            "destination_name": "Starbucks",
+            "extra_field": "ignored",
+        }
+        normalized = normalize_entity_data("transaction", raw)
+
+        assert "external_id" in normalized
+        assert "description" in normalized
+        assert "source_name" in normalized
+        assert "extra_field" not in normalized
+
+
+class TestGetEntityNameNewTypes:
+    """Tests for get_entity_name with new types."""
+
+    def test_get_name_budget(self):
+        """Get name for budget."""
+        from paperless_firefly.services.sync_fingerprints import get_entity_name
+
+        data = {"name": "Monthly Groceries", "auto_budget_type": "rollover"}
+        assert get_entity_name("budget", data) == "Monthly Groceries"
+
+    def test_get_name_bill(self):
+        """Get name for bill."""
+        from paperless_firefly.services.sync_fingerprints import get_entity_name
+
+        data = {"name": "Electric Bill", "amount_min": "50.00"}
+        assert get_entity_name("bill", data) == "Electric Bill"
+
+    def test_get_name_rule_group(self):
+        """Get name for rule group (uses title)."""
+        from paperless_firefly.services.sync_fingerprints import get_entity_name
+
+        data = {"title": "Auto Categorization", "description": "Rules for auto-tagging"}
+        assert get_entity_name("rule_group", data) == "Auto Categorization"
+
+    def test_get_name_rule(self):
+        """Get name for rule (uses title)."""
+        from paperless_firefly.services.sync_fingerprints import get_entity_name
+
+        data = {"title": "Tag groceries", "rule_group_id": 1}
+        assert get_entity_name("rule", data) == "Tag groceries"
+
+    def test_get_name_recurrence(self):
+        """Get name for recurrence (uses title)."""
+        from paperless_firefly.services.sync_fingerprints import get_entity_name
+
+        data = {"title": "Monthly Rent", "repeat_freq": "monthly"}
+        assert get_entity_name("recurrence", data) == "Monthly Rent"
+
+    def test_get_name_currency(self):
+        """Get name for currency (uses code - name format)."""
+        from paperless_firefly.services.sync_fingerprints import get_entity_name
+
+        data = {"code": "EUR", "name": "Euro"}
+        name = get_entity_name("currency", data)
+        assert "EUR" in name  # Code should be included
+
+    def test_get_name_transaction(self):
+        """Get name for transaction (includes date and description)."""
+        from paperless_firefly.services.sync_fingerprints import get_entity_name
+
+        data = {"description": "Coffee at Starbucks", "amount": "5.00", "date": "2024-01-15"}
+        name = get_entity_name("transaction", data)
+        assert "Coffee at Starbucks" in name
+        assert "5.00" in name

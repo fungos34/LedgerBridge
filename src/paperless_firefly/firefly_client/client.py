@@ -1096,3 +1096,575 @@ class FireflyClient:
 
         logger.info(f"Set external_id for transaction {transaction_id}: {external_id}")
         return True
+
+    # =========================================================================
+    # Budget Methods (Sync Assistant - Everything)
+    # =========================================================================
+
+    def list_budgets(self) -> list[dict]:
+        """
+        List all budgets from Firefly.
+
+        Returns:
+            List of budget dictionaries with id, name, auto_budget_type, etc.
+        """
+        budgets = []
+        page = 1
+
+        while True:
+            response = self._request("GET", "/api/v1/budgets", params={"page": page})
+            data = response.json()
+
+            for item in data.get("data", []):
+                attrs = item.get("attributes", {})
+                budgets.append(
+                    {
+                        "id": int(item.get("id", 0)),
+                        "name": attrs.get("name", ""),
+                        "auto_budget_type": attrs.get("auto_budget_type"),
+                        "auto_budget_amount": attrs.get("auto_budget_amount"),
+                        "auto_budget_period": attrs.get("auto_budget_period"),
+                        "notes": attrs.get("notes"),
+                        "active": attrs.get("active", True),
+                    }
+                )
+
+            # Check for more pages
+            meta = data.get("meta", {}).get("pagination", {})
+            if page >= meta.get("total_pages", 1):
+                break
+            page += 1
+
+        return budgets
+
+    def create_budget(
+        self,
+        name: str,
+        auto_budget_type: str | None = None,
+        auto_budget_amount: str | None = None,
+        auto_budget_period: str | None = None,
+        notes: str | None = None,
+    ) -> int:
+        """
+        Create a new budget in Firefly.
+
+        Args:
+            name: Budget name
+            auto_budget_type: Optional (reset, rollover, none)
+            auto_budget_amount: Optional budget amount
+            auto_budget_period: Optional period (daily, weekly, monthly, quarterly, yearly)
+            notes: Optional notes
+
+        Returns:
+            Budget ID
+        """
+        payload: dict = {"name": name}
+        if auto_budget_type:
+            payload["auto_budget_type"] = auto_budget_type
+        if auto_budget_amount:
+            payload["auto_budget_amount"] = auto_budget_amount
+        if auto_budget_period:
+            payload["auto_budget_period"] = auto_budget_period
+        if notes:
+            payload["notes"] = notes
+
+        response = self._request("POST", "/api/v1/budgets", json_data=payload)
+        data = response.json()
+        return int(data.get("data", {}).get("id", 0))
+
+    def find_budget_by_name(self, name: str) -> dict | None:
+        """
+        Find a budget by exact name match.
+
+        Args:
+            name: Budget name to search for
+
+        Returns:
+            Budget dict or None if not found
+        """
+        budgets = self.list_budgets()
+        name_lower = name.lower().strip()
+        for budget in budgets:
+            if budget["name"].lower().strip() == name_lower:
+                return budget
+        return None
+
+    # =========================================================================
+    # Bill Methods (Sync Assistant - Everything)
+    # =========================================================================
+
+    def list_bills(self) -> list[dict]:
+        """
+        List all bills from Firefly.
+
+        Returns:
+            List of bill dictionaries
+        """
+        bills = []
+        page = 1
+
+        while True:
+            response = self._request("GET", "/api/v1/bills", params={"page": page})
+            data = response.json()
+
+            for item in data.get("data", []):
+                attrs = item.get("attributes", {})
+                bills.append(
+                    {
+                        "id": int(item.get("id", 0)),
+                        "name": attrs.get("name", ""),
+                        "amount_min": attrs.get("amount_min"),
+                        "amount_max": attrs.get("amount_max"),
+                        "date": attrs.get("date"),
+                        "repeat_freq": attrs.get("repeat_freq"),
+                        "skip": attrs.get("skip", 0),
+                        "active": attrs.get("active", True),
+                        "notes": attrs.get("notes"),
+                        "currency_code": attrs.get("currency_code"),
+                    }
+                )
+
+            # Check for more pages
+            meta = data.get("meta", {}).get("pagination", {})
+            if page >= meta.get("total_pages", 1):
+                break
+            page += 1
+
+        return bills
+
+    def create_bill(
+        self,
+        name: str,
+        amount_min: str,
+        amount_max: str,
+        date: str,
+        repeat_freq: str,
+        skip: int = 0,
+        active: bool = True,
+        notes: str | None = None,
+        currency_code: str = "EUR",
+    ) -> int:
+        """
+        Create a new bill in Firefly.
+
+        Args:
+            name: Bill name
+            amount_min: Minimum amount
+            amount_max: Maximum amount
+            date: Next expected date (YYYY-MM-DD)
+            repeat_freq: Repeat frequency (weekly, monthly, quarterly, yearly, etc.)
+            skip: Number of periods to skip
+            active: Whether the bill is active
+            notes: Optional notes
+            currency_code: Currency code (default EUR)
+
+        Returns:
+            Bill ID
+        """
+        payload = {
+            "name": name,
+            "amount_min": amount_min,
+            "amount_max": amount_max,
+            "date": date,
+            "repeat_freq": repeat_freq,
+            "skip": skip,
+            "active": active,
+            "currency_code": currency_code,
+        }
+        if notes:
+            payload["notes"] = notes
+
+        response = self._request("POST", "/api/v1/bills", json_data=payload)
+        data = response.json()
+        return int(data.get("data", {}).get("id", 0))
+
+    def find_bill_by_name(self, name: str) -> dict | None:
+        """
+        Find a bill by exact name match.
+
+        Args:
+            name: Bill name to search for
+
+        Returns:
+            Bill dict or None if not found
+        """
+        bills = self.list_bills()
+        name_lower = name.lower().strip()
+        for bill in bills:
+            if bill["name"].lower().strip() == name_lower:
+                return bill
+        return None
+
+    # =========================================================================
+    # Rule Group Methods (Sync Assistant - Everything)
+    # =========================================================================
+
+    def list_rule_groups(self) -> list[dict]:
+        """
+        List all rule groups from Firefly.
+
+        Returns:
+            List of rule group dictionaries
+        """
+        rule_groups = []
+        page = 1
+
+        while True:
+            response = self._request("GET", "/api/v1/rule-groups", params={"page": page})
+            data = response.json()
+
+            for item in data.get("data", []):
+                attrs = item.get("attributes", {})
+                rule_groups.append(
+                    {
+                        "id": int(item.get("id", 0)),
+                        "title": attrs.get("title", ""),
+                        "order": attrs.get("order"),
+                        "active": attrs.get("active", True),
+                        "description": attrs.get("description"),
+                    }
+                )
+
+            # Check for more pages
+            meta = data.get("meta", {}).get("pagination", {})
+            if page >= meta.get("total_pages", 1):
+                break
+            page += 1
+
+        return rule_groups
+
+    def create_rule_group(
+        self,
+        title: str,
+        order: int | None = None,
+        active: bool = True,
+        description: str | None = None,
+    ) -> int:
+        """
+        Create a new rule group in Firefly.
+
+        Args:
+            title: Rule group title
+            order: Optional order position
+            active: Whether active
+            description: Optional description
+
+        Returns:
+            Rule group ID
+        """
+        payload: dict = {"title": title, "active": active}
+        if order is not None:
+            payload["order"] = order
+        if description:
+            payload["description"] = description
+
+        response = self._request("POST", "/api/v1/rule-groups", json_data=payload)
+        data = response.json()
+        return int(data.get("data", {}).get("id", 0))
+
+    def find_rule_group_by_title(self, title: str) -> dict | None:
+        """
+        Find a rule group by exact title match.
+
+        Args:
+            title: Rule group title to search for
+
+        Returns:
+            Rule group dict or None if not found
+        """
+        rule_groups = self.list_rule_groups()
+        title_lower = title.lower().strip()
+        for rg in rule_groups:
+            if rg["title"].lower().strip() == title_lower:
+                return rg
+        return None
+
+    # =========================================================================
+    # Rule Methods (Sync Assistant - Everything)
+    # =========================================================================
+
+    def list_rules(self) -> list[dict]:
+        """
+        List all rules from Firefly.
+
+        Returns:
+            List of rule dictionaries with triggers and actions
+        """
+        rules = []
+        page = 1
+
+        while True:
+            response = self._request("GET", "/api/v1/rules", params={"page": page})
+            data = response.json()
+
+            for item in data.get("data", []):
+                attrs = item.get("attributes", {})
+                rules.append(
+                    {
+                        "id": int(item.get("id", 0)),
+                        "title": attrs.get("title", ""),
+                        "rule_group_id": attrs.get("rule_group_id"),
+                        "rule_group_title": attrs.get("rule_group_title"),
+                        "order": attrs.get("order"),
+                        "active": attrs.get("active", True),
+                        "strict": attrs.get("strict", False),
+                        "triggers": attrs.get("triggers", []),
+                        "actions": attrs.get("actions", []),
+                        "description": attrs.get("description"),
+                    }
+                )
+
+            # Check for more pages
+            meta = data.get("meta", {}).get("pagination", {})
+            if page >= meta.get("total_pages", 1):
+                break
+            page += 1
+
+        return rules
+
+    def create_rule(
+        self,
+        title: str,
+        rule_group_id: int,
+        triggers: list[dict],
+        actions: list[dict],
+        order: int | None = None,
+        active: bool = True,
+        strict: bool = False,
+        description: str | None = None,
+    ) -> int:
+        """
+        Create a new rule in Firefly.
+
+        Args:
+            title: Rule title
+            rule_group_id: Parent rule group ID
+            triggers: List of trigger definitions
+            actions: List of action definitions
+            order: Optional order position
+            active: Whether active
+            strict: Whether all triggers must match (AND) vs any (OR)
+            description: Optional description
+
+        Returns:
+            Rule ID
+        """
+        payload: dict = {
+            "title": title,
+            "rule_group_id": rule_group_id,
+            "triggers": triggers,
+            "actions": actions,
+            "active": active,
+            "strict": strict,
+        }
+        if order is not None:
+            payload["order"] = order
+        if description:
+            payload["description"] = description
+
+        response = self._request("POST", "/api/v1/rules", json_data=payload)
+        data = response.json()
+        return int(data.get("data", {}).get("id", 0))
+
+    def find_rule_by_title(self, title: str) -> dict | None:
+        """
+        Find a rule by exact title match.
+
+        Args:
+            title: Rule title to search for
+
+        Returns:
+            Rule dict or None if not found
+        """
+        rules = self.list_rules()
+        title_lower = title.lower().strip()
+        for rule in rules:
+            if rule["title"].lower().strip() == title_lower:
+                return rule
+        return None
+
+    # =========================================================================
+    # Recurrence Methods (Sync Assistant - Everything)
+    # =========================================================================
+
+    def list_recurrences(self) -> list[dict]:
+        """
+        List all recurring transactions from Firefly.
+
+        Returns:
+            List of recurrence dictionaries
+        """
+        recurrences = []
+        page = 1
+
+        while True:
+            response = self._request("GET", "/api/v1/recurrences", params={"page": page})
+            data = response.json()
+
+            for item in data.get("data", []):
+                attrs = item.get("attributes", {})
+                recurrences.append(
+                    {
+                        "id": int(item.get("id", 0)),
+                        "title": attrs.get("title", ""),
+                        "first_date": attrs.get("first_date"),
+                        "latest_date": attrs.get("latest_date"),
+                        "repeat_freq": attrs.get("repeat_until"),
+                        "repetitions": attrs.get("repetitions", []),
+                        "transactions": attrs.get("transactions", []),
+                        "notes": attrs.get("notes"),
+                        "active": attrs.get("active", True),
+                    }
+                )
+
+            # Check for more pages
+            meta = data.get("meta", {}).get("pagination", {})
+            if page >= meta.get("total_pages", 1):
+                break
+            page += 1
+
+        return recurrences
+
+    def create_recurrence(
+        self,
+        title: str,
+        first_date: str,
+        repeat_freq: str,
+        transactions: list[dict],
+        repeat_until: str | None = None,
+        nr_of_repetitions: int | None = None,
+        apply_rules: bool = True,
+        active: bool = True,
+        notes: str | None = None,
+    ) -> int:
+        """
+        Create a new recurring transaction in Firefly.
+
+        Args:
+            title: Recurrence title
+            first_date: First occurrence date (YYYY-MM-DD)
+            repeat_freq: Frequency (daily, weekly, monthly, etc.)
+            transactions: List of transaction definitions
+            repeat_until: Optional end date
+            nr_of_repetitions: Optional number of repetitions
+            apply_rules: Whether to apply rules to generated transactions
+            active: Whether active
+            notes: Optional notes
+
+        Returns:
+            Recurrence ID
+        """
+        # Build repetitions array
+        repetitions = [
+            {
+                "type": repeat_freq,
+                "moment": "",
+            }
+        ]
+
+        payload: dict = {
+            "title": title,
+            "first_date": first_date,
+            "repetitions": repetitions,
+            "transactions": transactions,
+            "apply_rules": apply_rules,
+            "active": active,
+        }
+        if repeat_until:
+            payload["repeat_until"] = repeat_until
+        if nr_of_repetitions:
+            payload["nr_of_repetitions"] = nr_of_repetitions
+        if notes:
+            payload["notes"] = notes
+
+        response = self._request("POST", "/api/v1/recurrences", json_data=payload)
+        data = response.json()
+        return int(data.get("data", {}).get("id", 0))
+
+    def find_recurrence_by_title(self, title: str) -> dict | None:
+        """
+        Find a recurrence by exact title match.
+
+        Args:
+            title: Recurrence title to search for
+
+        Returns:
+            Recurrence dict or None if not found
+        """
+        recurrences = self.list_recurrences()
+        title_lower = title.lower().strip()
+        for rec in recurrences:
+            if rec["title"].lower().strip() == title_lower:
+                return rec
+        return None
+
+    # =========================================================================
+    # Currency Methods (Sync Assistant - Everything)
+    # =========================================================================
+
+    def list_currencies(self) -> list[dict]:
+        """
+        List all currencies from Firefly.
+
+        Returns:
+            List of currency dictionaries
+        """
+        currencies = []
+        page = 1
+
+        while True:
+            response = self._request("GET", "/api/v1/currencies", params={"page": page})
+            data = response.json()
+
+            for item in data.get("data", []):
+                attrs = item.get("attributes", {})
+                currencies.append(
+                    {
+                        "id": int(item.get("id", 0)),
+                        "code": attrs.get("code", ""),
+                        "name": attrs.get("name", ""),
+                        "symbol": attrs.get("symbol", ""),
+                        "decimal_places": attrs.get("decimal_places", 2),
+                        "enabled": attrs.get("enabled", False),
+                        "default": attrs.get("default", False),
+                    }
+                )
+
+            # Check for more pages
+            meta = data.get("meta", {}).get("pagination", {})
+            if page >= meta.get("total_pages", 1):
+                break
+            page += 1
+
+        return currencies
+
+    def enable_currency(self, code: str) -> bool:
+        """
+        Enable a currency in Firefly.
+
+        Args:
+            code: Currency code (e.g., 'USD', 'EUR')
+
+        Returns:
+            True if enabled successfully
+        """
+        code = code.upper().strip()
+        response = self._request("POST", f"/api/v1/currencies/{code}/enable")
+        return response.status_code == 204 or response.status_code == 200
+
+    def find_currency_by_code(self, code: str) -> dict | None:
+        """
+        Find a currency by code.
+
+        Args:
+            code: Currency code to search for
+
+        Returns:
+            Currency dict or None if not found
+        """
+        currencies = self.list_currencies()
+        code_upper = code.upper().strip()
+        for curr in currencies:
+            if curr["code"].upper().strip() == code_upper:
+                return curr
+        return None

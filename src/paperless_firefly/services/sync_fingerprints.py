@@ -13,6 +13,8 @@ import hashlib
 import json
 from typing import Any
 
+from ..schemas.dedupe import generate_external_id_v2
+
 
 def compute_fingerprint(entity_type: str, data: dict[str, Any]) -> str:
     """
@@ -135,6 +137,199 @@ FINGERPRINT_FUNCTIONS = {
 }
 
 
+def compute_budget_fingerprint(data: dict[str, Any]) -> str:
+    """
+    Compute fingerprint for a Firefly budget.
+
+    Fingerprint components:
+    - name (normalized: lowercase, stripped)
+
+    Auto-budget settings are excluded as they may vary between instances.
+    """
+    name = str(data.get("name", "")).lower().strip()
+    if not name:
+        raise ValueError("Budget must have a name")
+
+    content = f"budget:{name}"
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def compute_rule_group_fingerprint(data: dict[str, Any]) -> str:
+    """
+    Compute fingerprint for a Firefly rule group.
+
+    Fingerprint components:
+    - title (normalized: lowercase, stripped)
+
+    Order is excluded as it may vary between instances.
+    """
+    title = str(data.get("title", "")).lower().strip()
+    if not title:
+        raise ValueError("Rule group must have a title")
+
+    content = f"rule_group:{title}"
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def compute_currency_fingerprint(data: dict[str, Any]) -> str:
+    """
+    Compute fingerprint for a Firefly currency.
+
+    Fingerprint components:
+    - code (normalized: uppercase, stripped)
+
+    Code is the only identifier needed as currencies are globally unique.
+    """
+    code = str(data.get("code", "")).upper().strip()
+    if not code:
+        raise ValueError("Currency must have a code")
+
+    content = f"currency:{code}"
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def compute_bill_fingerprint(data: dict[str, Any]) -> str:
+    """
+    Compute fingerprint for a Firefly bill.
+
+    Fingerprint components:
+    - name (normalized)
+    - amount_min (normalized to 2 decimal places)
+    - amount_max (normalized to 2 decimal places)
+
+    Date and repeat frequency are excluded as they may vary.
+    """
+    name = str(data.get("name", "")).lower().strip()
+    if not name:
+        raise ValueError("Bill must have a name")
+
+    # Normalize amounts
+    amount_min = data.get("amount_min")
+    amount_max = data.get("amount_max")
+
+    try:
+        amount_min = f"{float(amount_min):.2f}" if amount_min else "0.00"
+    except (ValueError, TypeError):
+        amount_min = "0.00"
+
+    try:
+        amount_max = f"{float(amount_max):.2f}" if amount_max else "0.00"
+    except (ValueError, TypeError):
+        amount_max = "0.00"
+
+    content = f"bill:{name}:{amount_min}:{amount_max}"
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def compute_rule_fingerprint(data: dict[str, Any]) -> str:
+    """
+    Compute fingerprint for a Firefly rule.
+
+    Fingerprint components:
+    - title (normalized)
+    - triggers hash (sorted JSON of trigger definitions)
+    - actions hash (sorted JSON of action definitions)
+
+    This captures the semantic content of the rule.
+    """
+    title = str(data.get("title", "")).lower().strip()
+    if not title:
+        raise ValueError("Rule must have a title")
+
+    # Hash triggers - sort for determinism
+    triggers = data.get("triggers", [])
+    if triggers:
+        # Extract only type and value for fingerprinting
+        trigger_data = [{"type": t.get("type", ""), "value": t.get("value", "")} for t in triggers]
+        triggers_str = json.dumps(
+            sorted(trigger_data, key=lambda t: (t["type"], t["value"])), sort_keys=True
+        )
+    else:
+        triggers_str = "[]"
+    triggers_hash = hashlib.sha256(triggers_str.encode()).hexdigest()[:8]
+
+    # Hash actions - sort for determinism
+    actions = data.get("actions", [])
+    if actions:
+        # Extract only type and value for fingerprinting
+        action_data = [{"type": a.get("type", ""), "value": a.get("value", "")} for a in actions]
+        actions_str = json.dumps(
+            sorted(action_data, key=lambda a: (a["type"], a["value"])), sort_keys=True
+        )
+    else:
+        actions_str = "[]"
+    actions_hash = hashlib.sha256(actions_str.encode()).hexdigest()[:8]
+
+    content = f"rule:{title}:{triggers_hash}:{actions_hash}"
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def compute_recurrence_fingerprint(data: dict[str, Any]) -> str:
+    """
+    Compute fingerprint for a Firefly recurrence.
+
+    Fingerprint components:
+    - title (normalized)
+    - first_date
+    - repeat_freq
+
+    This identifies the recurrence pattern.
+    """
+    title = str(data.get("title", "")).lower().strip()
+    if not title:
+        raise ValueError("Recurrence must have a title")
+
+    first_date = str(data.get("first_date", ""))[:10]  # YYYY-MM-DD
+    repeat_freq = str(data.get("repeat_freq", "")).lower().strip()
+
+    content = f"recurrence:{title}:{first_date}:{repeat_freq}"
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def compute_transaction_fingerprint(data: dict[str, Any]) -> str:
+    """
+    Compute fingerprint for a Firefly transaction.
+
+    Uses the same algorithm as generate_external_id_v2 for consistency
+    with the existing deduplication system.
+
+    Fingerprint components:
+    - date (YYYY-MM-DD)
+    - amount
+    - source_name
+    - destination_name
+    - description
+    """
+    date = str(data.get("date", ""))[:10]  # YYYY-MM-DD
+    amount = str(data.get("amount", "0"))
+    source_name = data.get("source_name", "") or ""
+    destination_name = data.get("destination_name", "") or ""
+    description = data.get("description", "") or ""
+
+    # Use the existing external_id generation for consistency
+    return generate_external_id_v2(
+        amount=amount,
+        date=date,
+        source=source_name,
+        destination=destination_name,
+        description=description,
+    )
+
+
+# Update registry with all fingerprint functions
+FINGERPRINT_FUNCTIONS.update(
+    {
+        "budget": compute_budget_fingerprint,
+        "rule_group": compute_rule_group_fingerprint,
+        "currency": compute_currency_fingerprint,
+        "bill": compute_bill_fingerprint,
+        "rule": compute_rule_fingerprint,
+        "recurrence": compute_recurrence_fingerprint,
+        "transaction": compute_transaction_fingerprint,
+    }
+)
+
+
 def normalize_entity_data(entity_type: str, raw_data: dict[str, Any]) -> dict[str, Any]:
     """
     Normalize entity data for storage and display.
@@ -142,7 +337,7 @@ def normalize_entity_data(entity_type: str, raw_data: dict[str, Any]) -> dict[st
     Extracts relevant fields and provides consistent structure.
 
     Args:
-        entity_type: One of 'category', 'tag', 'account', 'piggy_bank'
+        entity_type: One of the supported entity types
         raw_data: Raw data from Firefly API (attributes dict)
 
     Returns:
@@ -174,6 +369,78 @@ def normalize_entity_data(entity_type: str, raw_data: dict[str, Any]) -> dict[st
             "current_amount": raw_data.get("current_amount"),
             "notes": raw_data.get("notes"),
         }
+    elif entity_type == "budget":
+        return {
+            "name": raw_data.get("name", ""),
+            "auto_budget_type": raw_data.get("auto_budget_type"),
+            "auto_budget_amount": raw_data.get("auto_budget_amount"),
+            "auto_budget_period": raw_data.get("auto_budget_period"),
+            "notes": raw_data.get("notes"),
+        }
+    elif entity_type == "rule_group":
+        return {
+            "title": raw_data.get("title", ""),
+            "order": raw_data.get("order"),
+            "active": raw_data.get("active", True),
+            "description": raw_data.get("description"),
+        }
+    elif entity_type == "currency":
+        return {
+            "code": raw_data.get("code", ""),
+            "name": raw_data.get("name", ""),
+            "symbol": raw_data.get("symbol", ""),
+            "decimal_places": raw_data.get("decimal_places", 2),
+            "enabled": raw_data.get("enabled", False),
+        }
+    elif entity_type == "bill":
+        return {
+            "name": raw_data.get("name", ""),
+            "amount_min": raw_data.get("amount_min"),
+            "amount_max": raw_data.get("amount_max"),
+            "date": raw_data.get("date"),
+            "repeat_freq": raw_data.get("repeat_freq"),
+            "skip": raw_data.get("skip", 0),
+            "active": raw_data.get("active", True),
+            "notes": raw_data.get("notes"),
+        }
+    elif entity_type == "rule":
+        return {
+            "title": raw_data.get("title", ""),
+            "rule_group_id": raw_data.get("rule_group_id"),
+            "rule_group_title": raw_data.get("rule_group_title"),
+            "order": raw_data.get("order"),
+            "active": raw_data.get("active", True),
+            "strict": raw_data.get("strict", False),
+            "triggers": raw_data.get("triggers", []),
+            "actions": raw_data.get("actions", []),
+            "description": raw_data.get("description"),
+        }
+    elif entity_type == "recurrence":
+        return {
+            "title": raw_data.get("title", ""),
+            "first_date": raw_data.get("first_date"),
+            "repeat_freq": raw_data.get("repeat_freq"),
+            "latest_date": raw_data.get("latest_date"),
+            "repetitions": raw_data.get("repetitions", []),
+            "transactions": raw_data.get("transactions", []),
+            "notes": raw_data.get("notes"),
+            "active": raw_data.get("active", True),
+        }
+    elif entity_type == "transaction":
+        return {
+            "type": raw_data.get("type", ""),
+            "date": raw_data.get("date", ""),
+            "amount": raw_data.get("amount", ""),
+            "description": raw_data.get("description", ""),
+            "source_name": raw_data.get("source_name"),
+            "destination_name": raw_data.get("destination_name"),
+            "category_name": raw_data.get("category_name"),
+            "tags": raw_data.get("tags", []),
+            "notes": raw_data.get("notes"),
+            "external_id": raw_data.get("external_id"),
+            "internal_reference": raw_data.get("internal_reference"),
+            "splits": raw_data.get("splits", []),
+        }
     else:
         raise ValueError(f"Unsupported entity type: {entity_type}")
 
@@ -191,4 +458,15 @@ def get_entity_name(entity_type: str, data: dict[str, Any]) -> str:
     """
     if entity_type == "tag":
         return data.get("tag", data.get("name", "Unknown"))
+    elif entity_type in ("rule_group", "rule", "recurrence"):
+        return data.get("title", "Unknown")
+    elif entity_type == "currency":
+        code = data.get("code", "")
+        name = data.get("name", "")
+        return f"{code} - {name}" if name else code or "Unknown"
+    elif entity_type == "transaction":
+        desc = data.get("description", "")
+        date = str(data.get("date", ""))[:10]
+        amount = data.get("amount", "")
+        return f"{date}: {desc} ({amount})" if desc else f"{date}: ({amount})"
     return data.get("name", "Unknown")

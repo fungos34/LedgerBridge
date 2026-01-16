@@ -65,13 +65,35 @@
     }
 
     .entity-cards {
+        display: flex;
+        flex-direction: column;
+        gap: 2rem;
+    }
+
+    .entity-group {
+        margin-bottom: 1rem;
+    }
+
+    .entity-group-header {
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: var(--gray-800);
+        margin-bottom: 1rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 2px solid var(--gray-200);
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .entity-group-cards {
         display: grid;
         grid-template-columns: 1fr;
         gap: 1.5rem;
     }
 
     @media (min-width: 1024px) {
-        .entity-cards {
+        .entity-group-cards {
             grid-template-columns: repeat(2, 1fr);
         }
     }
@@ -596,8 +618,16 @@
     {% endif %}
 
     <div class="entity-cards">
-        {% for entity in entity_types %}
-        <div class="entity-card" data-entity-type="{{ entity.key }}">
+        {% regroup entity_types by group as entity_groups %}
+        {% for group in entity_groups %}
+        <div class="entity-group">
+            <h2 class="entity-group-header">
+                {% if group.grouper == "Core" %}🎯{% elif group.grouper == "Accounts" %}🏦{% elif group.grouper == "Planning" %}📊{% elif group.grouper == "Automation" %}⚙️{% else %}💳{% endif %}
+                {{ group.grouper }}
+            </h2>
+            <div class="entity-group-cards">
+            {% for entity in group.list %}
+            <div class="entity-card" data-entity-type="{{ entity.key }}">
             <div class="entity-card-header">
                 <div class="entity-card-title">
                     <span>{{ entity.icon }}</span>
@@ -626,6 +656,15 @@
                                 <option value="expense">Expense</option>
                                 <option value="revenue">Revenue</option>
                                 <option value="liability">Liability</option>
+                            </select>
+                            {% elif entity.key == 'transaction' %}
+                            <input type="date" class="fetch-filter" id="date-start-{{ entity.key }}" placeholder="Start Date" title="Start Date">
+                            <input type="date" class="fetch-filter" id="date-end-{{ entity.key }}" placeholder="End Date" title="End Date">
+                            <select class="fetch-filter" id="tx-type-filter-{{ entity.key }}">
+                                <option value="">All Types</option>
+                                <option value="withdrawal">Withdrawals</option>
+                                <option value="deposit">Deposits</option>
+                                <option value="transfer">Transfers</option>
                             </select>
                             {% endif %}
                             <button type="button" class="btn-fetch" onclick="fetchEntities('{{ entity.key }}')">
@@ -695,6 +734,9 @@
             </div>
         </div>
         {% endfor %}
+        </div>
+        </div>
+        {% endfor %}
     </div>
 </div>
 
@@ -761,12 +803,41 @@ async function fetchEntities(entityType) {
     btn.disabled = true;
     
     try {
+        // Build request body with filters
+        const body = {};
+        
+        // Account type filter
+        if (entityType === 'account') {
+            const accountTypeFilter = document.getElementById(`account-type-filter-${entityType}`);
+            if (accountTypeFilter && accountTypeFilter.value) {
+                body.account_type = accountTypeFilter.value;
+            }
+        }
+        
+        // Transaction filters
+        if (entityType === 'transaction') {
+            const dateStart = document.getElementById(`date-start-${entityType}`);
+            const dateEnd = document.getElementById(`date-end-${entityType}`);
+            const txType = document.getElementById(`tx-type-filter-${entityType}`);
+            
+            if (dateStart && dateStart.value) {
+                body.start_date = dateStart.value;
+            }
+            if (dateEnd && dateEnd.value) {
+                body.end_date = dateEnd.value;
+            }
+            if (txType && txType.value) {
+                body.type = txType.value;
+            }
+        }
+        
         const response = await fetch(`/api/sync/fetch/${entityType}/`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'X-CSRFToken': CSRF_TOKEN
-            }
+            },
+            body: JSON.stringify(body)
         });
         
         const data = await response.json();

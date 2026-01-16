@@ -505,22 +505,59 @@ class SyncPoolRecord(models.Model):
     """
     Pool record fetched from a user's Firefly instance.
     
-    Stores entity data (categories, tags, accounts, piggy banks) that users
-    can share with other Sparklink users for cross-instance synchronization.
+    Stores entity data (categories, tags, accounts, piggy banks, budgets, bills,
+    rules, recurrences, currencies, and transactions) that users can share with
+    other Sparklink users for cross-instance synchronization.
     """
 
-    # Entity types
+    # Entity types - Layer 0 (No dependencies)
     ENTITY_CATEGORY = "category"
     ENTITY_TAG = "tag"
+    ENTITY_BUDGET = "budget"
+    ENTITY_RULE_GROUP = "rule_group"
+    ENTITY_CURRENCY = "currency"
+    # Layer 1 (Depends on Layer 0)
     ENTITY_ACCOUNT = "account"
+    ENTITY_BILL = "bill"
+    # Layer 2 (Depends on Layer 0-1)
     ENTITY_PIGGY_BANK = "piggy_bank"
+    ENTITY_RULE = "rule"
+    ENTITY_RECURRENCE = "recurrence"
+    # Layer 3 (Depends on all above)
+    ENTITY_TRANSACTION = "transaction"
 
     ENTITY_TYPE_CHOICES = [
+        # Layer 0 - No dependencies
         (ENTITY_CATEGORY, "Category"),
         (ENTITY_TAG, "Tag"),
+        (ENTITY_BUDGET, "Budget"),
+        (ENTITY_RULE_GROUP, "Rule Group"),
+        (ENTITY_CURRENCY, "Currency"),
+        # Layer 1 - Depends on Layer 0
         (ENTITY_ACCOUNT, "Account"),
+        (ENTITY_BILL, "Bill"),
+        # Layer 2 - Depends on Layer 0-1
         (ENTITY_PIGGY_BANK, "Piggy Bank"),
+        (ENTITY_RULE, "Rule"),
+        (ENTITY_RECURRENCE, "Recurrence"),
+        # Layer 3 - Depends on all above
+        (ENTITY_TRANSACTION, "Transaction"),
     ]
+    
+    # Import layer for dependency ordering
+    IMPORT_LAYERS = {
+        ENTITY_CATEGORY: 0,
+        ENTITY_TAG: 0,
+        ENTITY_BUDGET: 0,
+        ENTITY_RULE_GROUP: 0,
+        ENTITY_CURRENCY: 0,
+        ENTITY_ACCOUNT: 1,
+        ENTITY_BILL: 1,
+        ENTITY_PIGGY_BANK: 2,
+        ENTITY_RULE: 2,
+        ENTITY_RECURRENCE: 2,
+        ENTITY_TRANSACTION: 3,
+    }
 
     # Ownership
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="sync_pool_records")
