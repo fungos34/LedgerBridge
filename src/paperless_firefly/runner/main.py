@@ -362,10 +362,14 @@ def cmd_import(
     from ..state_store.sqlite_store import ImportStatus
 
     # Query extractions ready for import
+    # Requirements for import:
+    # 1. Not already imported (or previous import failed)
+    # 2. Confirmed in review (AUTO, ACCEPTED, EDITED, or ORPHAN_CONFIRMED)
+    # 3. MUST be linked to a Firefly transaction OR marked as orphan
     conn = store._get_connection()
     try:
         if auto_only:
-            # Only AUTO confidence, no review required
+            # Only AUTO confidence, no review required, but still needs linkage
             rows = conn.execute(
                 """
                 SELECT e.*, l.firefly_id as linked_firefly_id, l.link_type
@@ -374,10 +378,15 @@ def cmd_import(
                 LEFT JOIN linkage l ON e.id = l.extraction_id
                 WHERE e.review_state = 'AUTO'
                 AND (i.id IS NULL OR i.status = 'FAILED')
+                AND (
+                    (l.firefly_id IS NOT NULL AND l.link_type = 'LINKED')
+                    OR (l.link_type = 'ORPHAN')
+                )
             """
             ).fetchall()
         else:
             # AUTO + reviewed/accepted/orphan_confirmed (includes failed imports for retry)
+            # Must also be linked or orphaned
             rows = conn.execute(
                 """
                 SELECT e.*, l.firefly_id as linked_firefly_id, l.link_type
@@ -386,6 +395,10 @@ def cmd_import(
                 LEFT JOIN linkage l ON e.id = l.extraction_id
                 WHERE (i.id IS NULL OR i.status = 'FAILED')
                 AND (e.review_state = 'AUTO' OR e.review_decision IN ('ACCEPTED', 'EDITED', 'ORPHAN_CONFIRMED'))
+                AND (
+                    (l.firefly_id IS NOT NULL AND l.link_type = 'LINKED')
+                    OR (l.link_type = 'ORPHAN')
+                )
             """
             ).fetchall()
     finally:

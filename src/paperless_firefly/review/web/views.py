@@ -2925,10 +2925,14 @@ def confirm_orphan(request: HttpRequest) -> HttpResponse:
 @require_http_methods(["POST"])
 def run_auto_match(request: HttpRequest) -> HttpResponse:
     """
-    Run the automatic matching algorithm on all pending records.
+    Run the automatic matching algorithm on currently cached records.
 
     This creates match proposals for Paperless documents that match
     Firefly transactions based on amount, date, and other criteria.
+    
+    IMPORTANT: This does NOT refetch data from Paperless or Firefly APIs.
+    It only uses records that are already cached/listed in the UI.
+    Use the separate sync buttons to refresh data from APIs first.
     """
     from ...config import load_config
     from ...services.reconciliation import ReconciliationService
@@ -2947,7 +2951,8 @@ def run_auto_match(request: HttpRequest) -> HttpResponse:
             user_id=user_id,
         )
 
-        result = service.run_reconciliation(dry_run=False)
+        # skip_sync=True: Only match against already-cached data, don't refetch APIs
+        result = service.run_reconciliation(dry_run=False, skip_sync=True)
 
         if result.success:
             msg = f"Auto-match complete: {result.proposals_created} proposals created, {result.auto_linked} auto-linked"
@@ -5727,6 +5732,10 @@ def api_chat(request: HttpRequest) -> JsonResponse:
 
     Uses SparkAI service to answer questions about the software
     with documentation context. Respects user's LLM settings from profile.
+    
+    IMPORTANT: The chatbot respects the global AI lock. If the AI is busy
+    processing document jobs, the chatbot will wait up to 30 seconds
+    and then timeout gracefully.
 
     Args:
         request: HTTP request with 'question' in JSON body.
@@ -5738,6 +5747,7 @@ def api_chat(request: HttpRequest) -> JsonResponse:
 
     from ...config import load_config
     from ...spark_ai import SparkAIService
+    from .apps import AI_CHATBOT_LOCK_TIMEOUT, acquire_ai_lock, release_ai_lock
     from .models import UserProfile
 
     store = _get_store()
@@ -5804,21 +5814,35 @@ def api_chat(request: HttpRequest) -> JsonResponse:
                 status=400,
             )
 
-        # Create AI service (no categories needed for chat)
-        ai_service = SparkAIService(store, config, categories=[])
+        # Acquire AI lock - chatbot waits up to timeout, then gives up
+        lock_acquired = acquire_ai_lock(timeout=AI_CHATBOT_LOCK_TIMEOUT)
+        if not lock_acquired:
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": "AI is currently busy processing documents. Please try again in a few moments.",
+                },
+                status=503,  # Service Unavailable
+            )
 
-        # Load documentation context
-        documentation = _load_documentation_context()
+        try:
+            # Create AI service (no categories needed for chat)
+            ai_service = SparkAIService(store, config, categories=[])
 
-        # Get response
-        response = ai_service.chat(
-            question=question,
-            documentation=documentation,
-            page_context=page_context,
-            conversation_history=conversation_history,
-        )
+            # Load documentation context
+            documentation = _load_documentation_context()
 
-        ai_service.close()
+            # Get response
+            response = ai_service.chat(
+                question=question,
+                documentation=documentation,
+                page_context=page_context,
+                conversation_history=conversation_history,
+            )
+
+            ai_service.close()
+        finally:
+            release_ai_lock()
 
         if not response:
             return JsonResponse(

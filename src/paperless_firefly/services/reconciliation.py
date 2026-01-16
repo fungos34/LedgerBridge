@@ -126,11 +126,12 @@ class ReconciliationService:
         self,
         full_sync: bool = False,
         dry_run: bool = False,
+        skip_sync: bool = False,
     ) -> ReconciliationResult:
         """Run the full reconciliation pipeline.
 
         This is the main entry point for reconciliation. It:
-        1. Syncs Firefly transactions to local cache
+        1. Syncs Firefly transactions to local cache (unless skip_sync=True)
         2. Matches unlinked transactions against Paperless documents
         3. Creates proposals for potential matches
         4. Auto-links high-confidence matches
@@ -144,6 +145,8 @@ class ReconciliationService:
         Args:
             full_sync: If True, clear cache and sync all transactions.
             dry_run: If True, don't write to Firefly or create proposals.
+            skip_sync: If True, skip fetching data from Firefly/Paperless APIs.
+                       Use this when you want to match only against already-cached data.
 
         Returns:
             ReconciliationResult with statistics and status.
@@ -152,14 +155,17 @@ class ReconciliationService:
         result = ReconciliationResult(state=ReconciliationState.SYNCING)
 
         try:
-            # Phase 1: Sync Firefly transactions
-            logger.info("Starting reconciliation - Phase 1: Sync")
-            sync_result = self.sync_service.sync_transactions(full_sync=full_sync)
-            result.transactions_synced = sync_result.transactions_synced
-            result.transactions_skipped = sync_result.transactions_skipped
+            # Phase 1: Sync Firefly transactions (unless skipped)
+            if skip_sync:
+                logger.info("Skipping sync phase (skip_sync=True) - using cached data only")
+            else:
+                logger.info("Starting reconciliation - Phase 1: Sync")
+                sync_result = self.sync_service.sync_transactions(full_sync=full_sync)
+                result.transactions_synced = sync_result.transactions_synced
+                result.transactions_skipped = sync_result.transactions_skipped
 
-            if sync_result.errors:
-                result.errors.extend(sync_result.errors)
+                if sync_result.errors:
+                    result.errors.extend(sync_result.errors)
 
             # Phase 2: Match and propose
             result.state = ReconciliationState.MATCHING

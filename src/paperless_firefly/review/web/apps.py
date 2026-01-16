@@ -21,6 +21,52 @@ _ai_worker_started = False
 _ai_worker_thread = None
 _ai_worker_shutdown = threading.Event()
 
+# Global lock for AI model access - ensures only ONE AI call at a time across
+# all users and all request types (queue jobs + chatbot)
+# This is a GLOBAL lock that prevents the AI model from being overwhelmed.
+_ai_model_lock = threading.Lock()
+
+# Timeout for chatbot to acquire the lock (in seconds)
+# If the lock is held by the queue worker, chatbot waits up to this time
+AI_CHATBOT_LOCK_TIMEOUT = 30.0
+
+
+def acquire_ai_lock(timeout: float | None = None) -> bool:
+    """Acquire the global AI model lock.
+    
+    Args:
+        timeout: Maximum time to wait for the lock. None = wait indefinitely.
+        
+    Returns:
+        True if lock was acquired, False if timed out.
+    """
+    if timeout is None:
+        _ai_model_lock.acquire()
+        return True
+    return _ai_model_lock.acquire(blocking=True, timeout=timeout)
+
+
+def release_ai_lock() -> None:
+    """Release the global AI model lock."""
+    try:
+        _ai_model_lock.release()
+    except RuntimeError:
+        # Lock was not held - ignore
+        pass
+
+
+def is_ai_busy() -> bool:
+    """Check if the AI model is currently busy (lock held).
+    
+    Returns:
+        True if AI is busy processing another request.
+    """
+    acquired = _ai_model_lock.acquire(blocking=False)
+    if acquired:
+        _ai_model_lock.release()
+        return False
+    return True
+
 
 class WebConfig(AppConfig):
     """Django app configuration for the review web application."""
@@ -301,13 +347,21 @@ def _record_job_completion(user_id: int | None):
 
 
 def _process_ai_queue_with_intervals():
-    """Process AI jobs respecting per-user intervals.
+    """Process AI jobs ONE AT A TIME globally, respecting per-user intervals.
+    
+    CRITICAL: The AI model can only handle ONE job at a time across ALL users.
+    This function uses the global _ai_model_lock to ensure sequential processing.
     
     Logic:
-    - For each user with pending jobs, check if their interval has elapsed
-    - If batch_size > 1, process that many jobs sequentially without interval delays
-    - Only one job at a time (AI handles one job at a time)
-    - After processing batch, record completion time for interval tracking
+    - Get all pending jobs from all users
+    - Find the FIRST eligible job (user's interval elapsed + schedule enabled)
+    - Process ONLY that one job with the global AI lock held
+    - Return - the next job will be picked up in the next poll cycle
+    
+    This ensures:
+    - AI model never receives concurrent requests
+    - Chatbot can wait for lock and timeout gracefully
+    - Fair scheduling across users based on their individual intervals
     """
     logger.info("AI worker checking for pending jobs...")
 
@@ -357,95 +411,97 @@ def _process_ai_queue_with_intervals():
         )
         queue_service = AIJobQueueService(state_store=state_store, config=config)
 
-        # Get all pending jobs
+        # Get all pending jobs - we'll pick the first eligible one
         all_jobs = state_store.get_next_ai_jobs(limit=50, check_schedule=True)
         if not all_jobs:
             logger.info("No pending AI jobs in queue")
             return
 
-        # Group jobs by user_id
-        jobs_by_user: dict[int | None, list] = {}
+        # Find the first eligible job across all users
+        job_to_process = None
+        job_user_id = None
+        
         for job in all_jobs:
-            user_id = job.get("user_id")
-            if user_id not in jobs_by_user:
-                jobs_by_user[user_id] = []
-            jobs_by_user[user_id].append(job)
-
-        logger.info(f"Found jobs for {len(jobs_by_user)} user(s)")
-
-        # Process jobs for each user that's ready
-        for user_id, user_jobs in jobs_by_user.items():
             if _ai_worker_shutdown.is_set():
-                break
-
+                return
+                
+            user_id = job.get("user_id")
+            
             # Check user settings
             if not _is_user_schedule_enabled(user_id):
-                logger.debug(f"User {user_id}: schedule disabled, skipping {len(user_jobs)} jobs")
+                logger.debug(f"User {user_id}: schedule disabled, skipping job {job['id']}")
                 continue
 
             if not _is_within_user_active_hours(user_id):
-                logger.debug(f"User {user_id}: outside active hours, skipping")
+                logger.debug(f"User {user_id}: outside active hours, skipping job {job['id']}")
                 continue
 
             # Check if interval has elapsed for this user
             if not _can_process_job_for_user(user_id):
+                logger.debug(f"User {user_id}: interval not elapsed, skipping job {job['id']}")
                 continue
+            
+            # This job is eligible
+            job_to_process = job
+            job_user_id = user_id
+            break
+        
+        if not job_to_process:
+            logger.info("No eligible jobs ready for processing (intervals not elapsed)")
+            return
+        
+        job_id = job_to_process["id"]
+        document_id = job_to_process["document_id"]
+        
+        # Acquire global AI lock before processing
+        logger.info(f"Acquiring AI lock to process job #{job_id} for user {job_user_id}")
+        
+        if not acquire_ai_lock(timeout=5.0):
+            # Another process is using AI - skip this cycle
+            logger.warning("AI lock held by another process, will retry next cycle")
+            return
+        
+        try:
+            logger.info(f"Processing AI job #{job_id} for document {document_id} (user {job_user_id})")
 
-            # Get user's batch size
-            batch_size = _get_user_batch_size(user_id)
-            jobs_to_process = user_jobs[:batch_size]
+            # Get user-specific Paperless client
+            user_paperless_client = paperless_client
+            if job_user_id:
+                try:
+                    user = User.objects.get(id=job_user_id)
+                    profile = user.profile
+                    if profile.paperless_token:
+                        user_paperless_client = PaperlessClient(
+                            base_url=profile.paperless_url or config.paperless.base_url,
+                            token=profile.paperless_token,
+                        )
+                except Exception:
+                    pass
 
-            logger.info(
-                f"User {user_id}: processing batch of {len(jobs_to_process)} job(s) "
-                f"(batch_size={batch_size})"
+            success = queue_service.process_job(
+                job=job_to_process,
+                ai_service=ai_service,
+                paperless_client=user_paperless_client,
             )
 
-            # Process jobs sequentially (AI handles one at a time)
-            for job in jobs_to_process:
-                if _ai_worker_shutdown.is_set():
-                    break
+            if success:
+                logger.info(f"AI job #{job_id} completed successfully")
+            else:
+                logger.warning(f"AI job #{job_id} failed")
+                
+            # Record completion time for this user
+            _record_job_completion(job_user_id)
+            logger.info(f"User {job_user_id}: job complete, next job in {_get_user_interval_seconds(job_user_id)}s")
 
-                job_id = job["id"]
-                document_id = job["document_id"]
-
-                try:
-                    logger.info(f"Processing AI job #{job_id} for document {document_id}")
-
-                    # Get user-specific Paperless client
-                    user_paperless_client = paperless_client
-                    if user_id:
-                        try:
-                            user = User.objects.get(id=user_id)
-                            profile = user.profile
-                            if profile.paperless_token:
-                                user_paperless_client = PaperlessClient(
-                                    base_url=profile.paperless_url or config.paperless.base_url,
-                                    token=profile.paperless_token,
-                                )
-                        except Exception:
-                            pass
-
-                    success = queue_service.process_job(
-                        job=job,
-                        ai_service=ai_service,
-                        paperless_client=user_paperless_client,
-                    )
-
-                    if success:
-                        logger.info(f"AI job #{job_id} completed successfully")
-                    else:
-                        logger.warning(f"AI job #{job_id} failed")
-
-                except Exception as e:
-                    logger.error(f"Error processing AI job #{job_id}: {e}", exc_info=True)
-                    try:
-                        state_store.fail_ai_job(job_id, str(e), can_retry=True)
-                    except Exception:
-                        pass
-
-            # Record completion time after processing batch
-            _record_job_completion(user_id)
-            logger.info(f"User {user_id}: batch complete, next job in {_get_user_interval_seconds(user_id)}s")
+        except Exception as e:
+            logger.error(f"Error processing AI job #{job_id}: {e}", exc_info=True)
+            try:
+                state_store.fail_ai_job(job_id, str(e), can_retry=True)
+            except Exception:
+                pass
+        finally:
+            release_ai_lock()
+            logger.debug("Released AI lock")
 
     except Exception as e:
         logger.error(f"Error in AI queue processing: {e}", exc_info=True)
