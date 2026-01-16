@@ -136,6 +136,50 @@ def _get_firefly_client(request: HttpRequest | None = None) -> FireflyClient:
     return FireflyClient(base_url=base_url, token=token)
 
 
+# Simple cache for Firefly accounts (expires after 5 minutes)
+_firefly_accounts_cache: dict[int, tuple[list[dict], float]] = {}
+
+
+def _get_firefly_accounts_cached(request: HttpRequest) -> list[dict]:
+    """Get Firefly accounts with caching.
+
+    Caches accounts per-user for 5 minutes to avoid repeated API calls.
+
+    Args:
+        request: HTTP request with authenticated user.
+
+    Returns:
+        List of account dicts with 'id' and 'name' keys.
+    """
+    import time
+
+    if not request.user.is_authenticated:
+        return []
+
+    user_id = request.user.id
+    cache_ttl = 300  # 5 minutes
+
+    # Check cache
+    if user_id in _firefly_accounts_cache:
+        accounts, cached_at = _firefly_accounts_cache[user_id]
+        if time.time() - cached_at < cache_ttl:
+            return accounts
+
+    # Fetch from Firefly
+    try:
+        firefly = _get_firefly_client(request)
+        accounts_raw = firefly.list_accounts(account_type="asset")
+        accounts = [
+            {"id": acc.get("id"), "name": acc.get("name", f"Account #{acc.get('id')}")}
+            for acc in accounts_raw
+        ]
+        _firefly_accounts_cache[user_id] = (accounts, time.time())
+        return accounts
+    except Exception as e:
+        logger.warning(f"Failed to fetch Firefly accounts: {e}")
+        return []
+
+
 def _get_external_urls(user=None):
     """Get external URLs for browser links.
 
@@ -355,6 +399,9 @@ def user_settings(request: HttpRequest) -> HttpResponse:
     """User settings page for configuring API tokens."""
     from .models import UserProfile
 
+    # Get user_id for filtering stats
+    user_id = _get_user_id_for_filter(request)
+
     # Ensure profile exists
     profile, _ = UserProfile.objects.get_or_create(user=request.user)
 
@@ -471,11 +518,11 @@ def user_settings(request: HttpRequest) -> HttpResponse:
     else:
         available_models = []
 
-    # Get AI queue stats
+    # Get AI queue stats (filtered by user)
     ai_queue_stats = {"pending": 0, "processing": 0, "completed": 0, "failed": 0, "total": 0}
     try:
         store = _get_store()
-        ai_queue_stats = store.get_ai_queue_stats()
+        ai_queue_stats = store.get_ai_queue_stats(user_id=user_id)
     except Exception as e:
         logger.warning(f"Could not get AI queue stats: {e}")
 
@@ -624,15 +671,22 @@ def extraction_archive(request: HttpRequest) -> HttpResponse:
     return render(request, "review/archive.html", context)
 
 
-def _get_llm_suggestion_for_document(store: StateStore, document_id: int) -> dict | None:
+def _get_llm_suggestion_for_document(
+    store: StateStore, document_id: int, user_id: int | None = None
+) -> dict | None:
     """Get the most recent LLM suggestion for a document.
 
     Per SPARK_EVALUATION_REPORT.md 6.6: LLM suggestions shown as 'AI suggestion' badge.
 
+    Args:
+        store: StateStore instance.
+        document_id: Document ID to get suggestions for.
+        user_id: User ID for filtering. AI suggestions are strictly private.
+
     Returns:
         Dict with 'category', 'confidence', 'run_id' if LLM was used, else None.
     """
-    runs = store.get_interpretation_runs(document_id)
+    runs = store.get_interpretation_runs(document_id, user_id=user_id)
     for run in runs:
         # Find runs with LLM results (most recent first)
         if run.get("llm_result") and run.get("suggested_category"):
@@ -1308,8 +1362,8 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
                                 "category_name": cached_tx.get("category_name"),
                             }
 
-                    # Get previous interpretation decisions
-                    previous_decisions = store.get_interpretation_runs(document_id)[:3]
+                    # Get previous interpretation decisions (filtered by user for privacy)
+                    previous_decisions = store.get_interpretation_runs(document_id, user_id=user_id)[:3]
 
                     # Create SparkAI service and call comprehensive review
                     ai_service = SparkAIService(store, config, categories)
@@ -2874,6 +2928,7 @@ def run_auto_match(request: HttpRequest) -> HttpResponse:
     from ...services.reconciliation import ReconciliationService
 
     store = _get_store()
+    user_id = _get_user_id_for_filter(request)
 
     try:
         firefly_client = _get_firefly_client(request)
@@ -2883,6 +2938,7 @@ def run_auto_match(request: HttpRequest) -> HttpResponse:
             config=config,
             state_store=store,
             firefly_client=firefly_client,
+            user_id=user_id,
         )
 
         result = service.run_reconciliation(dry_run=False)
@@ -2910,7 +2966,8 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
     runs full extraction (OCR, e-invoice, etc.) on new ones.
     Uses user-specific API tokens from profile if available.
     """
-
+    from datetime import date, timedelta
+    
     from ...extractors.router import ExtractorRouter
     from ...paperless_client import PaperlessClient
     from ...schemas.dedupe import compute_file_hash
@@ -2919,8 +2976,16 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
     user_id = request.user.id if request.user.is_authenticated else None
 
     try:
-        # Get filter tags
-        tags = request.POST.get("tags", "finance/inbox")
+        # Get filter parameters from form
+        days = int(request.POST.get("days", 90))
+        tag_filter = request.POST.get("tag_filter", "").strip()
+        
+        # Calculate date range
+        start_date = date.today() - timedelta(days=days)
+        added_after = start_date.isoformat()
+
+        # Get filter tags (use form input or fall back to user profile or default)
+        tags = tag_filter if tag_filter else request.POST.get("tags", "")
 
         # Get user-specific tokens from profile
         paperless_url = settings.PAPERLESS_BASE_URL
@@ -2933,8 +2998,8 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
                     paperless_token = profile.paperless_token
                 if profile.paperless_url:
                     paperless_url = profile.paperless_url
-                if profile.paperless_filter_tags:
-                    # Use user's tag filter preference if available
+                # Use user's tag filter preference if available and not overridden by form
+                if not tags and profile.paperless_filter_tags:
                     tags = profile.paperless_filter_tags.split(",")[0].strip()
             except Exception:
                 pass  # Use defaults
@@ -2953,9 +3018,10 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
 
         config = load_config(_get_config_path())
 
-        # Fetch documents with matching tags
+        # Fetch documents with matching tags and date filter
         documents = paperless.list_documents(
             tags=tags.split(",") if tags else None,
+            added_after=added_after,
         )
 
         synced = 0
@@ -3223,8 +3289,8 @@ def reconciliation_detail(request: HttpRequest, proposal_id: int) -> HttpRespons
     prev_id = pending_ids[current_idx - 1] if current_idx > 0 else None
     next_id = pending_ids[current_idx + 1] if current_idx < len(pending_ids) - 1 else None
 
-    # Get interpretation run history for this document
-    audit_trail = store.get_interpretation_runs(proposal["document_id"])
+    # Get interpretation run history for this document (filtered by user for privacy)
+    audit_trail = store.get_interpretation_runs(proposal["document_id"], user_id=user_id)
 
     context = {
         "proposal": proposal,
@@ -3595,6 +3661,7 @@ def sync_firefly_transactions(request: HttpRequest) -> HttpResponse:
     # Get sync parameters from form
     days = int(request.POST.get("days", 90))
     type_filter = request.POST.get("type_filter", "")  # Empty = all types
+    account_filter = request.POST.get("account_filter", "")  # Empty = all accounts
 
     # Get user-specific tokens (capture before thread starts)
     sync_user_id = request.user.id if request.user.is_authenticated else None
@@ -3660,6 +3727,25 @@ def sync_firefly_transactions(request: HttpRequest) -> HttpResponse:
                 end_date=end_date.isoformat(),
                 type_filter=type_filter if type_filter else None,
             )
+
+            # Filter by account if specified
+            if account_filter:
+                try:
+                    account_id = int(account_filter)
+                    # Get account name to filter by
+                    account_info = firefly.get_account(account_id)
+                    if account_info:
+                        account_name = account_info.get("name", "")
+                        original_count = len(transactions)
+                        transactions = [
+                            tx for tx in transactions
+                            if tx.source_name == account_name or tx.destination_name == account_name
+                        ]
+                        _firefly_sync_status["progress"] = (
+                            f"Filtered to {len(transactions)} transactions for account '{account_name}' (from {original_count})"
+                        )
+                except (ValueError, TypeError):
+                    pass  # Invalid account_id, skip filtering
 
             _firefly_sync_status["progress"] = f"Caching {len(transactions)} transactions..."
 
@@ -4194,8 +4280,28 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
     This view combines the review queue and reconciliation dashboard,
     showing all records that need review and/or linking before import.
     """
+    from django.contrib.auth.models import User
+    
     store = _get_store()
     user_id = _get_user_id_for_filter(request)
+    current_user_id = request.user.id if request.user.is_authenticated else None
+    is_superuser = request.user.is_superuser if request.user.is_authenticated else False
+    
+    # Cache for user lookups to avoid repeated database queries
+    user_cache: dict[int, str] = {}
+    
+    def get_username(uid: int | None) -> str | None:
+        """Get username by user_id with caching."""
+        if uid is None:
+            return None
+        if uid in user_cache:
+            return user_cache[uid]
+        try:
+            user = User.objects.get(id=uid)
+            user_cache[uid] = user.username
+            return user.username
+        except User.DoesNotExist:
+            return None
 
     # Get all extractions with their linkage status
     paperless_records = []
@@ -4308,6 +4414,16 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
                             record["ai_has_suggestions"] = True
                 except Exception:
                     pass
+                
+                # Owner information for shared document badges
+                record_user_id = record.get("user_id")
+                record["owner_user_id"] = record_user_id
+                record["owner_username"] = get_username(record_user_id)
+                record["is_shared_from_other"] = (
+                    is_superuser and 
+                    record_user_id is not None and 
+                    record_user_id != current_user_id
+                )
             except (json.JSONDecodeError, TypeError):
                 record["title"] = f"Document #{record['document_id']}"
                 record["needs_linking"] = True
@@ -4373,6 +4489,16 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
             )
             record["is_orphan"] = record.get("match_status") == "ORPHAN_CONFIRMED"
             record["category"] = record.get("category_name")
+            
+            # Owner information for shared document badges
+            record_user_id = record.get("user_id")
+            record["owner_user_id"] = record_user_id
+            record["owner_username"] = get_username(record_user_id)
+            record["is_shared_from_other"] = (
+                is_superuser and 
+                record_user_id is not None and 
+                record_user_id != current_user_id
+            )
             firefly_records.append(record)
     except Exception as e:
         logger.error(f"Error loading firefly records: {e}")
@@ -4484,6 +4610,11 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
     finally:
         conn.close()
 
+    # Get all users for ownership transfer modal (only for superusers)
+    all_users = []
+    if is_superuser:
+        all_users = list(User.objects.all().values('id', 'username').order_by('username'))
+
     context = {
         "paperless_records": paperless_records,
         "firefly_records": firefly_records,
@@ -4494,6 +4625,8 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
         "recent_imports": recent_imports,
         "import_status": _import_status,
         "debug_mode": _is_debug_mode(),
+        "all_users": all_users,  # For ownership transfer modal
+        "firefly_accounts": _get_firefly_accounts_cached(request),  # For sync account filter
         **_get_external_urls(request.user if hasattr(request, "user") else None),
     }
 
@@ -4630,10 +4763,10 @@ def unified_review_detail(request: HttpRequest, record_type: str, record_id: int
     except Exception as e:
         logger.warning(f"Could not fetch Firefly data: {e}")
 
-    # LLM suggestion (for Paperless records)
+    # LLM suggestion (for Paperless records - filtered by user for privacy)
     llm_suggestion = None
     if record_type == "paperless":
-        llm_suggestion = _get_llm_suggestion_for_document(store, record_id)
+        llm_suggestion = _get_llm_suggestion_for_document(store, record_id, user_id=user_id)
 
     # Determine link status
     link_status = "pending"
@@ -5097,6 +5230,153 @@ def api_unlink(request: HttpRequest) -> JsonResponse:
         return JsonResponse({"success": False, "error": "Invalid JSON body"}, status=400)
     except Exception as e:
         logger.error(f"Error removing link: {e}")
+        return JsonResponse({"success": False, "error": str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["POST"])
+def api_transfer_ownership(request: HttpRequest) -> JsonResponse:
+    """API endpoint to transfer ownership of a record to a different user.
+    
+    This is used by superusers to reassign shared documents to other users.
+    When ownership is transferred:
+    - The extraction/firefly_cache user_id is updated
+    - Any existing linkages are removed (must be re-established)
+    - AI suggestions and interpretations are cleared (will need to re-run)
+    
+    Expects JSON body with:
+    - record_type: "paperless" or "firefly"
+    - record_id: The extraction ID (for paperless) or firefly_id (for firefly)
+    - new_owner_id: The user ID to transfer ownership to
+    """
+    from django.contrib.auth.models import User
+    
+    # Only superusers can transfer ownership
+    if not request.user.is_superuser:
+        return JsonResponse(
+            {"success": False, "error": "Only superusers can transfer ownership"}, status=403
+        )
+    
+    try:
+        body = json.loads(request.body) if request.body else {}
+    except json.JSONDecodeError:
+        return JsonResponse({"success": False, "error": "Invalid JSON"}, status=400)
+    
+    record_type = body.get("record_type")
+    record_id = body.get("record_id")
+    new_owner_id = body.get("new_owner_id")
+    
+    if not all([record_type, record_id, new_owner_id]):
+        return JsonResponse(
+            {"success": False, "error": "record_type, record_id, and new_owner_id are required"}, 
+            status=400
+        )
+    
+    # Validate the new owner exists
+    try:
+        new_owner = User.objects.get(id=new_owner_id)
+    except User.DoesNotExist:
+        return JsonResponse({"success": False, "error": "User not found"}, status=404)
+    
+    store = _get_store()
+    
+    try:
+        record_id = int(record_id)
+        
+        if record_type == "paperless":
+            # Get the extraction to find its actual ID
+            conn = store._get_connection()
+            try:
+                # record_id here is the extraction ID from the unified review list
+                row = conn.execute(
+                    "SELECT id, document_id FROM extractions WHERE id = ?", (record_id,)
+                ).fetchone()
+                
+                if not row:
+                    return JsonResponse({"success": False, "error": "Extraction not found"}, status=404)
+                
+                extraction_id = row["id"]
+                document_id = row["document_id"]
+                
+                # Update extraction owner
+                conn.execute(
+                    "UPDATE extractions SET user_id = ? WHERE id = ?",
+                    (new_owner_id, extraction_id)
+                )
+                
+                # Update paperless_documents owner if it exists
+                conn.execute(
+                    "UPDATE paperless_documents SET user_id = ? WHERE document_id = ?",
+                    (new_owner_id, document_id)
+                )
+                
+                # Remove any linkage (must be re-established by new owner)
+                conn.execute(
+                    "DELETE FROM linkage WHERE extraction_id = ?",
+                    (extraction_id,)
+                )
+                
+                # Clear AI jobs for this document (new owner may want to re-run)
+                conn.execute(
+                    "DELETE FROM ai_job_queue WHERE document_id = ?",
+                    (document_id,)
+                )
+                
+                # Clear interpretation runs (privacy - belongs to old owner)
+                conn.execute(
+                    "DELETE FROM interpretation_runs WHERE document_id = ?",
+                    (document_id,)
+                )
+                
+                conn.commit()
+                
+                return JsonResponse({
+                    "success": True,
+                    "message": f"Ownership transferred to {new_owner.username}",
+                    "new_owner": new_owner.username
+                })
+            finally:
+                conn.close()
+                
+        elif record_type == "firefly":
+            conn = store._get_connection()
+            try:
+                # Check if the firefly record exists
+                row = conn.execute(
+                    "SELECT firefly_id FROM firefly_cache WHERE firefly_id = ?", (record_id,)
+                ).fetchone()
+                
+                if not row:
+                    return JsonResponse({"success": False, "error": "Firefly record not found"}, status=404)
+                
+                # Update firefly_cache owner
+                conn.execute(
+                    "UPDATE firefly_cache SET user_id = ?, match_status = 'UNMATCHED', matched_document_id = NULL WHERE firefly_id = ?",
+                    (new_owner_id, record_id)
+                )
+                
+                # Remove any linkage referencing this firefly_id
+                conn.execute(
+                    "DELETE FROM linkage WHERE firefly_id = ?",
+                    (record_id,)
+                )
+                
+                conn.commit()
+                
+                return JsonResponse({
+                    "success": True,
+                    "message": f"Ownership transferred to {new_owner.username}",
+                    "new_owner": new_owner.username
+                })
+            finally:
+                conn.close()
+        else:
+            return JsonResponse(
+                {"success": False, "error": f"Invalid record_type: {record_type}"}, status=400
+            )
+            
+    except Exception as e:
+        logger.error(f"Error transferring ownership: {e}")
         return JsonResponse({"success": False, "error": str(e)}, status=500)
 
 
@@ -5639,10 +5919,10 @@ def _run_ai_job_now(request: HttpRequest, store: StateStore, job: dict) -> bool:
                     "destination_account": firefly_tx.get("destination_account"),
                 }
 
-        # Get previous AI decisions for context
+        # Get previous AI decisions for context (filtered by user for privacy)
         previous_decisions = []
         try:
-            runs = store.get_interpretation_runs(document_id, limit=3)
+            runs = store.get_interpretation_runs(document_id, limit=3, user_id=user_id)
             previous_decisions = [
                 {
                     "decision_source": r.get("decision_source"),
@@ -5744,6 +6024,7 @@ def _run_ai_job_now(request: HttpRequest, store: StateStore, job: dict) -> bool:
 def ai_queue_list(request: HttpRequest) -> HttpResponse:
     """View the AI job queue."""
     store = _get_store()
+    user_id = _get_user_id_for_filter(request)
 
     # Get filter from query params
     status_filter = request.GET.get("status", None)
@@ -5751,11 +6032,12 @@ def ai_queue_list(request: HttpRequest) -> HttpResponse:
     per_page = 50
     offset = (page - 1) * per_page
 
-    # Get jobs
+    # Get jobs filtered by user
     jobs = store.get_ai_jobs_list(
         status=status_filter,
         limit=per_page,
         offset=offset,
+        user_id=user_id,
     )
 
     # Parse datetime strings for Django template date filter
@@ -5782,8 +6064,8 @@ def ai_queue_list(request: HttpRequest) -> HttpResponse:
                 except Exception:
                     pass  # Keep original string if parsing fails
 
-    # Get stats
-    stats = store.get_ai_queue_stats()
+    # Get stats filtered by user
+    stats = store.get_ai_queue_stats(user_id=user_id)
 
     # Check if any job is processing (for Run Now button)
     is_processing = stats.get("processing", 0) > 0
@@ -5817,6 +6099,7 @@ def processing_history(request: HttpRequest) -> HttpResponse:
     - Audit Trail: Full interpretation run history
     """
     store = _get_store()
+    user_id = _get_user_id_for_filter(request)
 
     # Get active tab from query params
     active_tab = request.GET.get("tab", "archive")
@@ -5824,7 +6107,7 @@ def processing_history(request: HttpRequest) -> HttpResponse:
     # ---- Archive Data ----
     archive_items = []
     if active_tab == "archive":
-        processed = store.get_processed_extractions()
+        processed = store.get_processed_extractions(user_id=user_id)
         for row in processed:
             try:
                 data = json.loads(row["extraction_json"])
@@ -5949,6 +6232,7 @@ def processing_history(request: HttpRequest) -> HttpResponse:
             status=ai_status_filter,
             limit=per_page,
             offset=offset,
+            user_id=user_id,
         )
 
         # Parse datetime strings
@@ -5973,7 +6257,7 @@ def processing_history(request: HttpRequest) -> HttpResponse:
                     except Exception:
                         pass
 
-        ai_stats = store.get_ai_queue_stats()
+        ai_stats = store.get_ai_queue_stats(user_id=user_id)
         ai_is_processing = ai_stats.get("processing", 0) > 0
 
     # ---- Audit Trail Data ----
@@ -5996,7 +6280,13 @@ def processing_history(request: HttpRequest) -> HttpResponse:
         conn = store._get_connection()
         try:
             query = "SELECT * FROM interpretation_runs WHERE 1=1"
-            params = []
+            params: list = []
+
+            # User filtering: regular users only see their own audit records
+            # Superusers (user_id=None) see all
+            if user_id is not None:
+                query += " AND (user_id = ? OR user_id IS NULL)"
+                params.append(user_id)
 
             if audit_filter_document:
                 query += " AND document_id = ?"
@@ -6027,7 +6317,7 @@ def processing_history(request: HttpRequest) -> HttpResponse:
     archive_count = len(archive_items) if active_tab == "archive" else None
     if archive_count is None:
         try:
-            processed = store.get_processed_extractions()
+            processed = store.get_processed_extractions(user_id=user_id)
             archive_count = len(processed)
         except Exception:
             archive_count = 0

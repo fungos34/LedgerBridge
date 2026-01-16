@@ -146,6 +146,11 @@ urlpatterns = [
         name="api_unlink",
     ),
     path(
+        "api/transfer-ownership/",
+        views.api_transfer_ownership,
+        name="api_transfer_ownership",
+    ),
+    path(
         "review/paperless/<int:document_id>/quick-accept/",
         views.api_quick_accept,
         name="api_quick_accept",

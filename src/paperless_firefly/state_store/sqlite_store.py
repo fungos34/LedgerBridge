@@ -2125,16 +2125,32 @@ class StateStore:
             return row is not None and row["status"] == "CANCELLED"
             return cursor.rowcount > 0
 
-    def get_ai_queue_stats(self) -> dict[str, int]:
-        """Get AI job queue statistics."""
+    def get_ai_queue_stats(self, user_id: int | None = None) -> dict[str, int]:
+        """Get AI job queue statistics.
+        
+        Args:
+            user_id: If provided, only count jobs for this user.
+                     If None, count all jobs (superuser access).
+        """
         with self._transaction() as conn:
-            rows = conn.execute(
-                """
-                SELECT status, COUNT(*) as count
-                FROM ai_job_queue
-                GROUP BY status
-                """
-            ).fetchall()
+            if user_id is not None:
+                rows = conn.execute(
+                    """
+                    SELECT status, COUNT(*) as count
+                    FROM ai_job_queue
+                    WHERE (user_id IS NULL OR user_id = ?)
+                    GROUP BY status
+                    """,
+                    (user_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT status, COUNT(*) as count
+                    FROM ai_job_queue
+                    GROUP BY status
+                    """
+                ).fetchall()
 
             stats = {
                 "pending": 0,
@@ -2159,6 +2175,7 @@ class StateStore:
         status: str | None = None,
         limit: int = 100,
         offset: int = 0,
+        user_id: int | None = None,
     ) -> list[dict[str, Any]]:
         """Get list of AI jobs for display.
         
@@ -2166,9 +2183,28 @@ class StateStore:
         1. Status (PROCESSING first, then PENDING, then others)
         2. Priority (higher priority first)
         3. ID (older jobs first for same priority)
+        
+        Args:
+            status: Filter by status (optional).
+            limit: Maximum number of results.
+            offset: Offset for pagination.
+            user_id: If provided, only return jobs for this user.
+                     If None, return all jobs (superuser access).
         """
         with self._transaction() as conn:
-            if status:
+            if status and user_id is not None:
+                query = """
+                    SELECT aq.*, pd.title as doc_title
+                    FROM ai_job_queue aq
+                    LEFT JOIN paperless_documents pd ON aq.document_id = pd.document_id
+                    WHERE aq.status = ? AND (aq.user_id IS NULL OR aq.user_id = ?)
+                    ORDER BY 
+                        aq.priority DESC,
+                        aq.id ASC
+                    LIMIT ? OFFSET ?
+                """
+                rows = conn.execute(query, (status.upper(), user_id, limit, offset)).fetchall()
+            elif status:
                 query = """
                     SELECT aq.*, pd.title as doc_title
                     FROM ai_job_queue aq
@@ -2180,6 +2216,23 @@ class StateStore:
                     LIMIT ? OFFSET ?
                 """
                 rows = conn.execute(query, (status.upper(), limit, offset)).fetchall()
+            elif user_id is not None:
+                query = """
+                    SELECT aq.*, pd.title as doc_title
+                    FROM ai_job_queue aq
+                    LEFT JOIN paperless_documents pd ON aq.document_id = pd.document_id
+                    WHERE (aq.user_id IS NULL OR aq.user_id = ?)
+                    ORDER BY 
+                        CASE aq.status 
+                            WHEN 'PROCESSING' THEN 0 
+                            WHEN 'PENDING' THEN 1 
+                            ELSE 2 
+                        END,
+                        aq.priority DESC,
+                        aq.id ASC
+                    LIMIT ? OFFSET ?
+                """
+                rows = conn.execute(query, (user_id, limit, offset)).fetchall()
             else:
                 query = """
                     SELECT aq.*, pd.title as doc_title

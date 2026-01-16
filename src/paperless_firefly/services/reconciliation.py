@@ -95,6 +95,7 @@ class ReconciliationService:
         firefly_client: FireflyClient,
         state_store: StateStore,
         config: Config,
+        user_id: int | None = None,
     ) -> None:
         """Initialize the reconciliation service.
 
@@ -102,10 +103,13 @@ class ReconciliationService:
             firefly_client: Client for Firefly III API.
             state_store: State store for persistence.
             config: Application configuration.
+            user_id: User ID to filter transactions/documents by for multi-user isolation.
+                     If None, operates on all records (superuser mode).
         """
         self.firefly = firefly_client
         self.store = state_store
         self.config = config
+        self.user_id = user_id
 
         # Initialize sub-services
         self.sync_service = FireflySyncService(firefly_client, state_store, config)
@@ -226,10 +230,11 @@ class ReconciliationService:
                 result.proposals_existing += 1
                 continue
 
-            # Find matches using the matching engine
+            # Find matches using the matching engine (filtered by user_id)
             matches = self.matching_engine.find_matches(
                 document_id=document_id,
                 extraction=self._extraction_to_dict(extraction),
+                user_id=self.user_id,
             )
 
             if not matches:
@@ -1012,10 +1017,11 @@ class ReconciliationService:
                     (document_id,),
                 )
 
-            # Find new matches
+            # Find new matches (filtered by user_id)
             matches = self.matching_engine.find_matches(
                 document_id=document_id,
                 extraction=self._extraction_to_dict(extraction_dict),
+                user_id=self.user_id,
             )
 
             # Create new proposals

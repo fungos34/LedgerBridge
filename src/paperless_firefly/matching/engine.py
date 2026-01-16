@@ -110,6 +110,7 @@ class MatchingEngine:
         document_id: int,
         extraction: dict,
         max_results: int = 5,
+        user_id: int | None = None,
     ) -> list[MatchResult]:
         """Find matching Firefly transactions for a document extraction.
 
@@ -117,14 +118,16 @@ class MatchingEngine:
             document_id: Paperless document ID.
             extraction: Extraction data including amount, date, vendor, etc.
             max_results: Maximum number of match results to return.
+            user_id: User ID to filter transactions by. If None, matches against all
+                     transactions (superuser mode).
 
         Returns:
             List of MatchResult sorted by score descending.
         """
         results: list[MatchResult] = []
 
-        # Get unmatched cached transactions
-        cached_transactions = self.store.get_unmatched_firefly_transactions()
+        # Get unmatched cached transactions, filtered by user_id for privacy
+        cached_transactions = self.store.get_unmatched_firefly_transactions(user_id=user_id)
 
         if not cached_transactions:
             logger.debug("No unmatched transactions in cache for matching")

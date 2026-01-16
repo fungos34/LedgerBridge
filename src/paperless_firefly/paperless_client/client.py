@@ -222,6 +222,8 @@ class PaperlessClient:
         correspondent: str | None = None,
         correspondent_id: int | None = None,
         query: str | None = None,
+        added_after: str | None = None,
+        added_before: str | None = None,
         page_size: int = DEFAULT_PAGE_SIZE,
         ordering: str = "-added",
     ) -> Iterator[PaperlessDocument]:
@@ -236,6 +238,8 @@ class PaperlessClient:
             correspondent: Filter by correspondent name
             correspondent_id: Filter by correspondent ID
             query: Full-text search query
+            added_after: Filter by added date after (YYYY-MM-DD)
+            added_before: Filter by added date before (YYYY-MM-DD)
             page_size: Results per page
             ordering: Sort order (prefix with - for descending)
 
@@ -256,6 +260,10 @@ class PaperlessClient:
             params["correspondent__id"] = correspondent_id
         if query:
             params["query"] = query
+        if added_after:
+            params["added__date__gt"] = added_after
+        if added_before:
+            params["added__date__lt"] = added_before
 
         # Fetch tag/type/correspondent IDs if names provided
         if tags:

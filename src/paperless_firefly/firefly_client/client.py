@@ -541,6 +541,31 @@ class FireflyClient:
 
         return accounts
 
+    def get_account(self, account_id: int) -> dict | None:
+        """
+        Get a single account by ID.
+
+        Args:
+            account_id: The Firefly III account ID.
+
+        Returns:
+            Account dictionary with id, name, type, and currency_code, or None if not found.
+        """
+        try:
+            response = self._request("GET", f"/api/v1/accounts/{account_id}")
+            data = response.json()
+            account_data = data.get("data", {})
+            attrs = account_data.get("attributes", {})
+            return {
+                "id": account_data.get("id"),
+                "name": attrs.get("name"),
+                "type": attrs.get("type"),
+                "currency_code": attrs.get("currency_code"),
+            }
+        except Exception as e:
+            logger.warning(f"Failed to get account {account_id}: {e}")
+            return None
+
     def find_or_create_account(
         self,
         name: str,
