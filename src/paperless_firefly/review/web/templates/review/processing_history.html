@@ -1141,8 +1141,39 @@ function openDocTransferModal(docId, title, currentOwner, currentOwnerId) {
     
     document.getElementById('doc-transfer-title').textContent = title;
     document.getElementById('doc-transfer-current-owner').textContent = currentOwner || 'Unknown';
-    document.getElementById('doc-transfer-new-owner').value = '';
+    
+    // Clear and disable the select while loading
+    const selectEl = document.getElementById('doc-transfer-new-owner');
+    selectEl.innerHTML = '<option value="">Loading eligible users...</option>';
+    selectEl.disabled = true;
+    
     document.getElementById('doc-transfer-modal').style.display = 'flex';
+    
+    // Fetch eligible users from Paperless
+    fetch(`{% url 'api_get_eligible_owners' %}?document_id=${docId}`)
+        .then(response => response.json())
+        .then(data => {
+            selectEl.innerHTML = '<option value="">Select a user...</option>';
+            if (data.success && data.users && data.users.length > 0) {
+                data.users.forEach(user => {
+                    // Skip current owner
+                    if (user.id !== currentOwnerId) {
+                        const option = document.createElement('option');
+                        option.value = user.id;
+                        option.textContent = user.username;
+                        selectEl.appendChild(option);
+                    }
+                });
+            } else {
+                selectEl.innerHTML = '<option value="">No eligible users found</option>';
+            }
+            selectEl.disabled = false;
+        })
+        .catch(error => {
+            console.error('Error fetching eligible users:', error);
+            selectEl.innerHTML = '<option value="">Error loading users</option>';
+            selectEl.disabled = false;
+        });
 }
 
 function closeDocTransferModal() {
@@ -1199,10 +1230,8 @@ function transferDocOwnership() {
             <div class="form-group" style="margin-top: 1rem;">
                 <label for="doc-transfer-new-owner">Transfer to:</label>
                 <select id="doc-transfer-new-owner" class="form-control">
-                    <option value="">Select a user...</option>
-                    {% for user in all_users %}
-                    <option value="{{ user.id }}">{{ user.username }}</option>
-                    {% endfor %}
+                    <option value="">Loading eligible users...</option>
+                    <!-- Options populated dynamically based on Paperless document access -->
                 </select>
             </div>
             <p class="text-warning" style="margin-top: 1rem; font-size: 0.875rem; color: #d97706;">

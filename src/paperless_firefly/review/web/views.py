@@ -1811,7 +1811,9 @@ def run_import(request: HttpRequest) -> HttpResponse:
             logger.info(f"Loading config from {config_path}")
             config = load_config(config_path)
 
-            logger.info(f"Starting import with source_account_override={user_source_account}, firefly_token_override={'<set>' if user_firefly_token else '<not set>'}")
+            logger.info(
+                f"Starting import with source_account_override={user_source_account}, firefly_token_override={'<set>' if user_firefly_token else '<not set>'}"
+            )
             _import_status["progress"] = "Importing to Firefly III..."
             result = cmd_import(
                 config,
@@ -2929,7 +2931,7 @@ def run_auto_match(request: HttpRequest) -> HttpResponse:
 
     This creates match proposals for Paperless documents that match
     Firefly transactions based on amount, date, and other criteria.
-    
+
     IMPORTANT: This does NOT refetch data from Paperless or Firefly APIs.
     It only uses records that are already cached/listed in the UI.
     Use the separate sync buttons to refresh data from APIs first.
@@ -5244,6 +5246,80 @@ def api_unlink(request: HttpRequest) -> JsonResponse:
 
 
 @login_required
+@require_http_methods(["GET"])
+def api_get_eligible_owners(request: HttpRequest) -> JsonResponse:
+    """Get list of users who can become owners of a specific document.
+
+    This queries Paperless-ngx to find all users who have access to the document.
+    Only these users can be selected as new owners in the transfer dialog.
+
+    Query params:
+        document_id: The Paperless document ID to check
+
+    Returns:
+        JSON with list of eligible users (id, username)
+    """
+    from django.contrib.auth.models import User
+
+    document_id = request.GET.get("document_id")
+    if not document_id:
+        return JsonResponse({"success": False, "error": "document_id is required"}, status=400)
+
+    try:
+        document_id = int(document_id)
+    except ValueError:
+        return JsonResponse(
+            {"success": False, "error": "document_id must be an integer"}, status=400
+        )
+
+    eligible_users = []
+
+    # Get all Django users and check which ones can access the document in Paperless
+    all_users = User.objects.all().order_by("username")
+
+    for user in all_users:
+        try:
+            # Get user's Paperless credentials
+            profile = user.profile
+            paperless_url = profile.paperless_url or settings.PAPERLESS_BASE_URL
+            paperless_token = profile.paperless_token
+
+            if not paperless_token:
+                # User has no Paperless token - skip them
+                continue
+
+            import requests
+
+            # Try to fetch the document with this user's credentials
+            headers = {"Authorization": f"Token {paperless_token}"}
+            resp = requests.get(
+                f"{paperless_url.rstrip('/')}/api/documents/{document_id}/",
+                headers=headers,
+                timeout=5,
+            )
+
+            if resp.status_code == 200:
+                # User can access the document
+                eligible_users.append(
+                    {
+                        "id": user.id,
+                        "username": user.username,
+                    }
+                )
+        except Exception as e:
+            # Skip users where we can't check access
+            logger.debug(f"Could not check Paperless access for user {user.username}: {e}")
+            continue
+
+    return JsonResponse(
+        {
+            "success": True,
+            "users": eligible_users,
+        }
+    )
+
+
+@login_required
 @require_http_methods(["POST"])
 def api_transfer_ownership(request: HttpRequest) -> JsonResponse:
     """API endpoint to transfer ownership of a record to a different user.
@@ -5732,7 +5808,7 @@ def api_chat(request: HttpRequest) -> JsonResponse:
 
     Uses SparkAI service to answer questions about the software
     with documentation context. Respects user's LLM settings from profile.
-    
+
     IMPORTANT: The chatbot respects the global AI lock. If the AI is busy
     processing document jobs, the chatbot will wait up to 30 seconds
     and then timeout gracefully.

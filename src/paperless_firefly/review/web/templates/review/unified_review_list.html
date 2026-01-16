@@ -500,7 +500,7 @@
                             {% if record.is_shared_from_other %}
                             <span class="owner-badge" 
                                   title="Imported by {{ record.owner_username }}. Click to transfer ownership."
-                                  onclick="showTransferOwnershipModal('paperless', {{ record.id }}, '{{ record.owner_username }}', '{{ record.title|escapejs }}')">
+                                  onclick="showTransferOwnershipModal('paperless', {{ record.id }}, '{{ record.owner_username }}', '{{ record.title|escapejs }}', {{ record.document_id }})">
                                 <span class="owner-icon">👤</span>
                                 {{ record.owner_username }}
                             </span>
@@ -603,7 +603,7 @@
                             {% if record.is_shared_from_other %}
                             <span class="owner-badge" 
                                   title="Imported by {{ record.owner_username }}. Click to transfer ownership."
-                                  onclick="showTransferOwnershipModal('firefly', {{ record.firefly_id }}, '{{ record.owner_username }}', '{{ record.description|escapejs }}')">
+                                  onclick="showTransferOwnershipModal('firefly', {{ record.firefly_id }}, '{{ record.owner_username }}', '{{ record.description|escapejs }}', null)">
                                 <span class="owner-icon">👤</span>
                                 {{ record.owner_username }}
                             </span>
@@ -1285,11 +1285,49 @@ function quickAcceptDocument(documentId) {
 // Transfer ownership modal
 let transferModalData = null;
 
-function showTransferOwnershipModal(recordType, recordId, currentOwner, recordTitle) {
-    transferModalData = { recordType, recordId };
+function showTransferOwnershipModal(recordType, recordId, currentOwner, recordTitle, documentId) {
+    transferModalData = { recordType, recordId, documentId };
     document.getElementById('transfer-record-title').textContent = recordTitle;
     document.getElementById('transfer-current-owner').textContent = currentOwner;
+    
+    // Clear and disable the select while loading
+    const selectEl = document.getElementById('transfer-new-owner');
+    selectEl.innerHTML = '<option value="">Loading eligible users...</option>';
+    selectEl.disabled = true;
+    
     document.getElementById('transfer-modal').style.display = 'flex';
+    
+    // Only fetch eligible users for Paperless documents (we have document_id)
+    if (recordType === 'paperless' && documentId) {
+        fetch(`{% url 'api_get_eligible_owners' %}?document_id=${documentId}`)
+            .then(response => response.json())
+            .then(data => {
+                selectEl.innerHTML = '<option value="">Select a user...</option>';
+                if (data.success && data.users && data.users.length > 0) {
+                    data.users.forEach(user => {
+                        const option = document.createElement('option');
+                        option.value = user.id;
+                        option.textContent = user.username;
+                        selectEl.appendChild(option);
+                    });
+                } else {
+                    selectEl.innerHTML = '<option value="">No eligible users found</option>';
+                }
+                selectEl.disabled = false;
+            })
+            .catch(error => {
+                console.error('Error fetching eligible users:', error);
+                selectEl.innerHTML = '<option value="">Error loading users</option>';
+                selectEl.disabled = false;
+            });
+    } else {
+        // For Firefly records, show all users (no Paperless document to check)
+        selectEl.innerHTML = '<option value="">Select a user...</option>';
+        {% for user in all_users %}
+        selectEl.innerHTML += '<option value="{{ user.id }}">{{ user.username }}</option>';
+        {% endfor %}
+        selectEl.disabled = false;
+    }
 }
 
 function closeTransferModal() {
@@ -1346,10 +1384,8 @@ function transferOwnership() {
             <div class="form-group" style="margin-top: 1rem;">
                 <label for="transfer-new-owner">Transfer to:</label>
                 <select id="transfer-new-owner" class="form-control">
-                    <option value="">Select a user...</option>
-                    {% for user in all_users %}
-                    <option value="{{ user.id }}">{{ user.username }}</option>
-                    {% endfor %}
+                    <option value="">Loading eligible users...</option>
+                    <!-- Options populated dynamically based on Paperless document access -->
                 </select>
             </div>
             <p class="text-warning" style="margin-top: 1rem; font-size: 0.875rem; color: #d97706;">

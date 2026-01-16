@@ -146,6 +146,11 @@ urlpatterns = [
         name="api_unlink",
     ),
     path(
+        "api/eligible-owners/",
+        views.api_get_eligible_owners,
+        name="api_get_eligible_owners",
+    ),
+    path(
         "api/transfer-ownership/",
         views.api_transfer_ownership,
         name="api_transfer_ownership",

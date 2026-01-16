@@ -33,10 +33,10 @@ AI_CHATBOT_LOCK_TIMEOUT = 30.0
 
 def acquire_ai_lock(timeout: float | None = None) -> bool:
     """Acquire the global AI model lock.
-    
+
     Args:
         timeout: Maximum time to wait for the lock. None = wait indefinitely.
-        
+
     Returns:
         True if lock was acquired, False if timed out.
     """
@@ -57,7 +57,7 @@ def release_ai_lock() -> None:
 
 def is_ai_busy() -> bool:
     """Check if the AI model is currently busy (lock held).
-    
+
     Returns:
         True if AI is busy processing another request.
     """
@@ -137,7 +137,7 @@ def _ai_queue_worker_loop():
     - Each user has their own ai_schedule_enabled, interval, and active hours
     - Jobs are processed based on the owner's settings
     - If a job has no owner (legacy), default settings apply
-    
+
     Interval Logic:
     - If batch_size == 1: Wait for user's interval between each job
     - If batch_size > 1: Process batch_size jobs sequentially without interval delays,
@@ -250,7 +250,6 @@ def _is_user_schedule_enabled(user_id: int | None) -> bool:
     try:
         from django.contrib.auth.models import User
 
-
         user = User.objects.get(id=user_id)
         profile = user.profile
         return profile.ai_schedule_enabled
@@ -274,7 +273,6 @@ def _is_within_user_active_hours(user_id: int | None) -> bool:
 
     try:
         from django.contrib.auth.models import User
-
 
         user = User.objects.get(id=user_id)
         profile = user.profile
@@ -317,26 +315,24 @@ def _get_user_batch_size(user_id: int | None) -> int:
 
 def _can_process_job_for_user(user_id: int | None) -> bool:
     """Check if enough time has passed since last job for this user.
-    
+
     Returns True if:
     - No previous job for this user, or
     - The user's interval has elapsed since their last job
     """
     with _user_last_job_lock:
         last_time = _user_last_job_time.get(user_id)
-    
+
     if last_time is None:
         return True
-    
+
     interval = _get_user_interval_seconds(user_id)
     elapsed = time.time() - last_time
-    
+
     if elapsed >= interval:
         return True
-    
-    logger.debug(
-        f"User {user_id}: {elapsed:.0f}s elapsed, need {interval}s - waiting"
-    )
+
+    logger.debug(f"User {user_id}: {elapsed:.0f}s elapsed, need {interval}s - waiting")
     return False
 
 
@@ -348,16 +344,16 @@ def _record_job_completion(user_id: int | None):
 
 def _process_ai_queue_with_intervals():
     """Process AI jobs ONE AT A TIME globally, respecting per-user intervals.
-    
+
     CRITICAL: The AI model can only handle ONE job at a time across ALL users.
     This function uses the global _ai_model_lock to ensure sequential processing.
-    
+
     Logic:
     - Get all pending jobs from all users
     - Find the FIRST eligible job (user's interval elapsed + schedule enabled)
     - Process ONLY that one job with the global AI lock held
     - Return - the next job will be picked up in the next poll cycle
-    
+
     This ensures:
     - AI model never receives concurrent requests
     - Chatbot can wait for lock and timeout gracefully
@@ -406,9 +402,7 @@ def _process_ai_queue_with_intervals():
         except Exception as e:
             logger.warning(f"Could not fetch Firefly categories: {e}")
 
-        ai_service = SparkAIService(
-            state_store=state_store, config=config, categories=categories
-        )
+        ai_service = SparkAIService(state_store=state_store, config=config, categories=categories)
         queue_service = AIJobQueueService(state_store=state_store, config=config)
 
         # Get all pending jobs - we'll pick the first eligible one
@@ -420,13 +414,13 @@ def _process_ai_queue_with_intervals():
         # Find the first eligible job across all users
         job_to_process = None
         job_user_id = None
-        
+
         for job in all_jobs:
             if _ai_worker_shutdown.is_set():
                 return
-                
+
             user_id = job.get("user_id")
-            
+
             # Check user settings
             if not _is_user_schedule_enabled(user_id):
                 logger.debug(f"User {user_id}: schedule disabled, skipping job {job['id']}")
@@ -440,29 +434,31 @@ def _process_ai_queue_with_intervals():
             if not _can_process_job_for_user(user_id):
                 logger.debug(f"User {user_id}: interval not elapsed, skipping job {job['id']}")
                 continue
-            
+
             # This job is eligible
             job_to_process = job
             job_user_id = user_id
             break
-        
+
         if not job_to_process:
             logger.info("No eligible jobs ready for processing (intervals not elapsed)")
             return
-        
+
         job_id = job_to_process["id"]
         document_id = job_to_process["document_id"]
-        
+
         # Acquire global AI lock before processing
         logger.info(f"Acquiring AI lock to process job #{job_id} for user {job_user_id}")
-        
+
         if not acquire_ai_lock(timeout=5.0):
             # Another process is using AI - skip this cycle
             logger.warning("AI lock held by another process, will retry next cycle")
             return
-        
+
         try:
-            logger.info(f"Processing AI job #{job_id} for document {document_id} (user {job_user_id})")
+            logger.info(
+                f"Processing AI job #{job_id} for document {document_id} (user {job_user_id})"
+            )
 
             # Get user-specific Paperless client
             user_paperless_client = paperless_client
@@ -488,10 +484,12 @@ def _process_ai_queue_with_intervals():
                 logger.info(f"AI job #{job_id} completed successfully")
             else:
                 logger.warning(f"AI job #{job_id} failed")
-                
+
             # Record completion time for this user
             _record_job_completion(job_user_id)
-            logger.info(f"User {job_user_id}: job complete, next job in {_get_user_interval_seconds(job_user_id)}s")
+            logger.info(
+                f"User {job_user_id}: job complete, next job in {_get_user_interval_seconds(job_user_id)}s"
+            )
 
         except Exception as e:
             logger.error(f"Error processing AI job #{job_id}: {e}", exc_info=True)
