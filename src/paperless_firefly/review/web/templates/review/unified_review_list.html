@@ -650,11 +650,20 @@
         <h2>Quick Actions</h2>
     </div>
     <div class="card-body">
+        <!-- Active Filters Display -->
+        <div id="active-filters-display" class="active-filters-container" style="display: none;">
+            <div class="active-filters-header">
+                <span class="active-filters-icon">🔍</span>
+                <span class="active-filters-label">Active Filters:</span>
+            </div>
+            <div id="active-filters-badges" class="active-filters-badges"></div>
+        </div>
+
         <div class="quick-actions-grid">
             <!-- Paperless Sync with Filters -->
             <div class="action-group">
                 <h4 class="action-group-title">📄 Paperless Sync</h4>
-                <form method="post" action="{% url 'sync_paperless' %}" class="sync-form">
+                <form method="post" action="{% url 'sync_paperless' %}" class="sync-form" id="paperless-sync-form">
                     {% csrf_token %}
                     <div class="sync-filters">
                         <div class="filter-row">
@@ -668,9 +677,13 @@
                             </select>
                         </div>
                         <div class="filter-row">
-                            <label for="paperless_tag">Tag filter:</label>
-                            <input type="text" name="tag_filter" id="paperless_tag" class="form-control form-control-sm" placeholder="e.g., inbox (optional)">
+                            <label for="paperless_tag_input">Tag filter:</label>
+                            <div class="tag-input-container">
+                                <input type="text" id="paperless_tag_input" class="form-control form-control-sm" placeholder="Type tag and press Enter">
+                                <input type="hidden" name="tag_filter" id="paperless_tag_hidden">
+                            </div>
                         </div>
+                        <div id="paperless-tag-badges" class="tag-badges-container"></div>
                     </div>
                     <button type="submit" class="btn btn-outline">📄 Sync Paperless</button>
                 </form>
@@ -777,6 +790,148 @@
     color: var(--gray-600);
     margin: 0 0 0.5rem 0;
     line-height: 1.4;
+}
+
+/* Active Filters Display */
+.active-filters-container {
+    background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+    border: 1px solid #bae6fd;
+    border-radius: 0.5rem;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+}
+
+.active-filters-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #0369a1;
+}
+
+.active-filters-icon {
+    font-size: 1rem;
+}
+
+.active-filters-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+/* Tag Badges */
+.tag-input-container {
+    flex: 1;
+    display: flex;
+    align-items: center;
+}
+
+.tag-badges-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    margin-top: 0.375rem;
+}
+
+.tag-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 1rem;
+    font-size: 0.7rem;
+    font-weight: 500;
+    cursor: default;
+    animation: tagBadgeIn 0.2s ease-out;
+}
+
+@keyframes tagBadgeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.8);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.tag-badge-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.15);
+    cursor: pointer;
+    font-size: 0.6rem;
+    line-height: 1;
+    transition: background 0.15s;
+}
+
+.tag-badge-remove:hover {
+    background: rgba(0, 0, 0, 0.3);
+}
+
+/* Tag color variants */
+.tag-badge-blue {
+    background: #dbeafe;
+    color: #1e40af;
+    border: 1px solid #93c5fd;
+}
+
+.tag-badge-green {
+    background: #dcfce7;
+    color: #166534;
+    border: 1px solid #86efac;
+}
+
+.tag-badge-purple {
+    background: #f3e8ff;
+    color: #7c3aed;
+    border: 1px solid #c4b5fd;
+}
+
+.tag-badge-orange {
+    background: #ffedd5;
+    color: #c2410c;
+    border: 1px solid #fdba74;
+}
+
+.tag-badge-pink {
+    background: #fce7f3;
+    color: #be185d;
+    border: 1px solid #f9a8d4;
+}
+
+.tag-badge-cyan {
+    background: #cffafe;
+    color: #0e7490;
+    border: 1px solid #67e8f9;
+}
+
+.tag-badge-yellow {
+    background: #fef9c3;
+    color: #a16207;
+    border: 1px solid #fde047;
+}
+
+.tag-badge-red {
+    background: #fee2e2;
+    color: #991b1b;
+    border: 1px solid #fca5a5;
+}
+
+/* Filter type indicator for active filters */
+.filter-type-badge {
+    font-size: 0.65rem;
+    padding: 0.125rem 0.375rem;
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 0.25rem;
+    margin-right: 0.25rem;
 }
 </style>
 
@@ -1252,4 +1407,207 @@ function transferOwnership() {
     gap: 0.75rem;
 }
 </style>
+
+<script>
+// ==================== TAG BADGE SYSTEM ====================
+
+// Color palette for tag badges
+const tagColors = ['blue', 'green', 'purple', 'orange', 'pink', 'cyan', 'yellow', 'red'];
+
+// Track tags for Paperless sync
+let paperlessTags = [];
+
+// Get consistent color for a tag (based on string hash)
+function getTagColor(tag) {
+    let hash = 0;
+    for (let i = 0; i < tag.length; i++) {
+        hash = ((hash << 5) - hash) + tag.charCodeAt(i);
+        hash = hash & hash;
+    }
+    return tagColors[Math.abs(hash) % tagColors.length];
+}
+
+// Create a tag badge element
+function createTagBadge(tag, onRemove, showType = null) {
+    const color = getTagColor(tag);
+    const badge = document.createElement('span');
+    badge.className = `tag-badge tag-badge-${color}`;
+    
+    let content = '';
+    if (showType) {
+        content += `<span class="filter-type-badge">${showType}</span>`;
+    }
+    content += `<span class="tag-badge-text">${escapeHtml(tag)}</span>`;
+    content += `<span class="tag-badge-remove" title="Remove">×</span>`;
+    
+    badge.innerHTML = content;
+    
+    badge.querySelector('.tag-badge-remove').addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onRemove(tag);
+    });
+    
+    return badge;
+}
+
+// Escape HTML to prevent XSS
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Update the hidden input and badge display for Paperless tags
+function updatePaperlessTags() {
+    const hiddenInput = document.getElementById('paperless_tag_hidden');
+    const badgesContainer = document.getElementById('paperless-tag-badges');
+    
+    if (!hiddenInput || !badgesContainer) return;
+    
+    // Update hidden input with comma-separated tags
+    hiddenInput.value = paperlessTags.join(',');
+    
+    // Clear and rebuild badges
+    badgesContainer.innerHTML = '';
+    paperlessTags.forEach(tag => {
+        const badge = createTagBadge(tag, removePaperlessTag);
+        badgesContainer.appendChild(badge);
+    });
+    
+    // Update active filters display
+    updateActiveFiltersDisplay();
+}
+
+// Add a tag to Paperless filter
+function addPaperlessTag(tag) {
+    const trimmedTag = tag.trim().toLowerCase();
+    if (trimmedTag && !paperlessTags.includes(trimmedTag)) {
+        paperlessTags.push(trimmedTag);
+        updatePaperlessTags();
+    }
+}
+
+// Remove a tag from Paperless filter
+function removePaperlessTag(tag) {
+    paperlessTags = paperlessTags.filter(t => t !== tag);
+    updatePaperlessTags();
+}
+
+// Update the active filters display section
+function updateActiveFiltersDisplay() {
+    const container = document.getElementById('active-filters-display');
+    const badgesArea = document.getElementById('active-filters-badges');
+    
+    if (!container || !badgesArea) return;
+    
+    badgesArea.innerHTML = '';
+    let hasFilters = false;
+    
+    // Add Paperless time range if not default
+    const paperlessDays = document.getElementById('paperless_days');
+    if (paperlessDays && paperlessDays.value !== '90') {
+        hasFilters = true;
+        const badge = createFilterBadge('📄 ' + paperlessDays.options[paperlessDays.selectedIndex].text, () => {
+            paperlessDays.value = '90';
+            updateActiveFiltersDisplay();
+        });
+        badgesArea.appendChild(badge);
+    }
+    
+    // Add Paperless tags
+    paperlessTags.forEach(tag => {
+        hasFilters = true;
+        const badge = createTagBadge(tag, removePaperlessTag, '📄 Tag');
+        badgesArea.appendChild(badge);
+    });
+    
+    // Add Firefly time range if not default
+    const fireflyDays = document.getElementById('firefly_days');
+    if (fireflyDays && fireflyDays.value !== '90') {
+        hasFilters = true;
+        const badge = createFilterBadge('🏦 ' + fireflyDays.options[fireflyDays.selectedIndex].text, () => {
+            fireflyDays.value = '90';
+            updateActiveFiltersDisplay();
+        });
+        badgesArea.appendChild(badge);
+    }
+    
+    // Add Firefly account filter if set
+    const fireflyAccount = document.getElementById('firefly_account');
+    if (fireflyAccount && fireflyAccount.value) {
+        hasFilters = true;
+        const accountName = fireflyAccount.options[fireflyAccount.selectedIndex].text;
+        const badge = createFilterBadge('🏦 ' + accountName, () => {
+            fireflyAccount.value = '';
+            updateActiveFiltersDisplay();
+        });
+        badgesArea.appendChild(badge);
+    }
+    
+    container.style.display = hasFilters ? 'block' : 'none';
+}
+
+// Create a simple filter badge (for non-tag filters)
+function createFilterBadge(label, onRemove) {
+    const badge = document.createElement('span');
+    badge.className = 'tag-badge tag-badge-blue';
+    badge.innerHTML = `
+        <span class="tag-badge-text">${escapeHtml(label)}</span>
+        <span class="tag-badge-remove" title="Remove">×</span>
+    `;
+    badge.querySelector('.tag-badge-remove').addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onRemove();
+    });
+    return badge;
+}
+
+// Initialize tag input functionality
+document.addEventListener('DOMContentLoaded', function() {
+    const tagInput = document.getElementById('paperless_tag_input');
+    
+    if (tagInput) {
+        // Add tag on Enter key
+        tagInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const tag = this.value.trim();
+                if (tag) {
+                    addPaperlessTag(tag);
+                    this.value = '';
+                }
+            }
+        });
+        
+        // Add tag on comma (for quick multi-tag entry)
+        tagInput.addEventListener('input', function(e) {
+            if (this.value.includes(',')) {
+                const tags = this.value.split(',').map(t => t.trim()).filter(t => t);
+                tags.forEach(addPaperlessTag);
+                this.value = '';
+            }
+        });
+    }
+    
+    // Listen for changes to filter dropdowns
+    const paperlessDays = document.getElementById('paperless_days');
+    const fireflyDays = document.getElementById('firefly_days');
+    const fireflyAccount = document.getElementById('firefly_account');
+    
+    if (paperlessDays) {
+        paperlessDays.addEventListener('change', updateActiveFiltersDisplay);
+    }
+    if (fireflyDays) {
+        fireflyDays.addEventListener('change', updateActiveFiltersDisplay);
+    }
+    if (fireflyAccount) {
+        fireflyAccount.addEventListener('change', updateActiveFiltersDisplay);
+    }
+    
+    // Initial update
+    updateActiveFiltersDisplay();
+});
+</script>
 {% endblock %}

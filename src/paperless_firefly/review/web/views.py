@@ -6282,9 +6282,14 @@ def processing_history(request: HttpRequest) -> HttpResponse:
             query = "SELECT * FROM interpretation_runs WHERE 1=1"
             params: list = []
 
+            # Check if user_id column exists (backwards compat for pre-migration DBs)
+            cursor = conn.execute("PRAGMA table_info(interpretation_runs)")
+            columns = [row[1] for row in cursor.fetchall()]
+            has_user_col = "user_id" in columns
+
             # User filtering: regular users only see their own audit records
             # Superusers (user_id=None) see all
-            if user_id is not None:
+            if user_id is not None and has_user_col:
                 query += " AND (user_id = ? OR user_id IS NULL)"
                 params.append(user_id)
 

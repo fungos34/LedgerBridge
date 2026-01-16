@@ -297,6 +297,24 @@ class StateStore:
         finally:
             conn.close()
 
+    def _has_column(self, table_name: str, column_name: str) -> bool:
+        """Check if a column exists in a table.
+
+        Useful for backwards compatibility when new columns may not exist
+        in databases that haven't run the latest migrations.
+
+        Args:
+            table_name: The table to check.
+            column_name: The column to look for.
+
+        Returns:
+            True if the column exists, False otherwise.
+        """
+        with self._transaction() as conn:
+            cursor = conn.execute(f"PRAGMA table_info({table_name})")
+            columns = [row[1] for row in cursor.fetchall()]
+            return column_name in columns
+
     # Document methods
 
     def upsert_document(
@@ -1416,58 +1434,99 @@ class StateStore:
         """
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
+        # Check if user_id column exists (backwards compat for pre-migration DBs)
+        has_user_col = self._has_column("interpretation_runs", "user_id")
+
         with self._transaction() as conn:
-            cursor = conn.execute(
-                """
-                INSERT INTO interpretation_runs
-                (document_id, firefly_id, external_id, run_timestamp, duration_ms,
-                 pipeline_version, algorithm_version, inputs_summary, rules_applied,
-                 llm_result, final_state, suggested_category, suggested_splits,
-                 auto_applied, decision_source, firefly_write_action, firefly_target_id,
-                 linkage_marker_written, taxonomy_version, user_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-                (
-                    document_id,
-                    firefly_id,
-                    external_id,
-                    now,
-                    duration_ms,
-                    pipeline_version,
-                    algorithm_version,
-                    json.dumps(inputs_summary),
-                    json.dumps(rules_applied) if rules_applied else None,
-                    json.dumps(llm_result) if llm_result else None,
-                    final_state,
-                    suggested_category,
-                    json.dumps(suggested_splits) if suggested_splits else None,
-                    auto_applied,
-                    decision_source,
-                    firefly_write_action,
-                    firefly_target_id,
-                    json.dumps(linkage_marker_written) if linkage_marker_written else None,
-                    taxonomy_version,
-                    user_id,
-                ),
-            )
+            if has_user_col:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO interpretation_runs
+                    (document_id, firefly_id, external_id, run_timestamp, duration_ms,
+                     pipeline_version, algorithm_version, inputs_summary, rules_applied,
+                     llm_result, final_state, suggested_category, suggested_splits,
+                     auto_applied, decision_source, firefly_write_action, firefly_target_id,
+                     linkage_marker_written, taxonomy_version, user_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                    (
+                        document_id,
+                        firefly_id,
+                        external_id,
+                        now,
+                        duration_ms,
+                        pipeline_version,
+                        algorithm_version,
+                        json.dumps(inputs_summary),
+                        json.dumps(rules_applied) if rules_applied else None,
+                        json.dumps(llm_result) if llm_result else None,
+                        final_state,
+                        suggested_category,
+                        json.dumps(suggested_splits) if suggested_splits else None,
+                        auto_applied,
+                        decision_source,
+                        firefly_write_action,
+                        firefly_target_id,
+                        json.dumps(linkage_marker_written) if linkage_marker_written else None,
+                        taxonomy_version,
+                        user_id,
+                    ),
+                )
+            else:
+                # Pre-migration database without user_id column
+                cursor = conn.execute(
+                    """
+                    INSERT INTO interpretation_runs
+                    (document_id, firefly_id, external_id, run_timestamp, duration_ms,
+                     pipeline_version, algorithm_version, inputs_summary, rules_applied,
+                     llm_result, final_state, suggested_category, suggested_splits,
+                     auto_applied, decision_source, firefly_write_action, firefly_target_id,
+                     linkage_marker_written, taxonomy_version)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                    (
+                        document_id,
+                        firefly_id,
+                        external_id,
+                        now,
+                        duration_ms,
+                        pipeline_version,
+                        algorithm_version,
+                        json.dumps(inputs_summary),
+                        json.dumps(rules_applied) if rules_applied else None,
+                        json.dumps(llm_result) if llm_result else None,
+                        final_state,
+                        suggested_category,
+                        json.dumps(suggested_splits) if suggested_splits else None,
+                        auto_applied,
+                        decision_source,
+                        firefly_write_action,
+                        firefly_target_id,
+                        json.dumps(linkage_marker_written) if linkage_marker_written else None,
+                        taxonomy_version,
+                    ),
+                )
             return cursor.lastrowid or 0
 
     def get_interpretation_runs(
         self, document_id: int, user_id: int | None = None
     ) -> list[dict[str, Any]]:
         """Get all interpretation runs for a document.
-        
+
         Note: AI interpretation runs are strictly private. Unlike other tables,
         user_id filtering is always enforced - even superusers should only see
         their own AI data to prevent context leakage across users.
-        
+
         Args:
             document_id: The document ID to get runs for.
             user_id: Filter by user ID. For AI privacy, this should always be
                      the current user's ID (no superuser override).
         """
+        # Check if user_id column exists (backwards compat for pre-migration DBs)
+        has_user_col = self._has_column("interpretation_runs", "user_id")
+
         with self._transaction() as conn:
-            if user_id is not None:
+            if user_id is not None and has_user_col:
                 rows = conn.execute(
                     """
                     SELECT * FROM interpretation_runs
@@ -1498,8 +1557,11 @@ class StateStore:
             document_id: The document ID to get the latest run for.
             user_id: Filter by user ID for privacy.
         """
+        # Check if user_id column exists (backwards compat for pre-migration DBs)
+        has_user_col = self._has_column("interpretation_runs", "user_id")
+
         with self._transaction() as conn:
-            if user_id is not None:
+            if user_id is not None and has_user_col:
                 row = conn.execute(
                     """
                     SELECT * FROM interpretation_runs
