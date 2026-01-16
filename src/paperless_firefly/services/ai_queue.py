@@ -243,9 +243,14 @@ class AIJobQueueService:
                 suggestions_json = None
             self.store.complete_ai_job(job_id, suggestions_json)
 
+            # Count suggestions for logging
+            suggestion_count = 0
+            if suggestions:
+                suggestion_count = len(suggestions.suggestions) if hasattr(suggestions, 'suggestions') else 0
+
             logger.info(
                 f"AI job #{job_id} completed successfully "
-                f"with {len(suggestions) if suggestions else 0} suggestions"
+                f"with {suggestion_count} field suggestion(s)"
             )
             return True
 
