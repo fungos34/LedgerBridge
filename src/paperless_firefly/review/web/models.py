@@ -172,6 +172,7 @@ class PaperlessDocument(StateStoreModel):
     tags = models.TextField(blank=True, null=True, help_text="JSON array of tags")
     first_seen = models.TextField()
     last_seen = models.TextField()
+    user_id = models.IntegerField(blank=True, null=True, help_text="Owner user ID (null = shared/legacy)")
 
     class Meta(StateStoreModel.Meta):
         db_table = "paperless_documents"
@@ -198,6 +199,7 @@ class Extraction(StateStoreModel):
     reviewed_at = models.TextField(blank=True, null=True)
     review_decision = models.TextField(blank=True, null=True)
     llm_opt_out = models.BooleanField(default=False)
+    user_id = models.IntegerField(blank=True, null=True, help_text="Owner user ID (null = shared/legacy)")
 
     class Meta(StateStoreModel.Meta):
         db_table = "extractions"
@@ -223,6 +225,7 @@ class Import(StateStoreModel):
     payload_json = models.TextField()
     created_at = models.TextField()
     imported_at = models.TextField(blank=True, null=True)
+    user_id = models.IntegerField(blank=True, null=True, help_text="Owner user ID (null = shared/legacy)")
 
     class Meta(StateStoreModel.Meta):
         db_table = "imports"

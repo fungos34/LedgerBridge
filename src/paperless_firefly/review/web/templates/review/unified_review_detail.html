@@ -1181,10 +1181,10 @@
                         ✓ Confirm
                     </button>
                     <button type="submit" formaction="{% url 'skip' record.extraction_id %}" formnovalidate class="btn btn-secondary" title="Skip for now - review later">Skip →</button>
-                    <a href="{% url 'reject' record.extraction_id %}" class="btn btn-danger" 
-                       onclick="return confirm('Reject this extraction?')" title="Reject this document">❌ Reject</a>
+                    <button type="submit" formaction="{% url 'reject' record.extraction_id %}" formnovalidate class="btn btn-danger"
+                            onclick="return confirm('Reject this extraction?')" title="Reject this document">❌ Reject</button>
                     {% if record.review_decision %}
-                    <a href="{% url 'reset_extraction' record.extraction_id %}" class="btn btn-outline">🔄 Reset</a>
+                    <button type="submit" formaction="{% url 'reset_extraction' record.extraction_id %}" formnovalidate class="btn btn-outline">🔄 Reset</button>
                     {% endif %}
                 </div>
                 {% endif %}

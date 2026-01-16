@@ -187,6 +187,25 @@ def _get_document_id_for_extraction(store: StateStore, extraction_id: int) -> in
         conn.close()
 
 
+def _get_user_id_for_filter(request: HttpRequest) -> int | None:
+    """Get user_id for filtering data, or None for superuser access.
+    
+    Superusers can see all documents/extractions (return None).
+    Regular users can only see their own documents (return user.id).
+    
+    Args:
+        request: The HTTP request with authenticated user.
+        
+    Returns:
+        User ID for filtering, or None for superuser/all access.
+    """
+    if not request.user.is_authenticated:
+        return None
+    if request.user.is_superuser:
+        return None  # Superuser sees all
+    return request.user.id
+
+
 # ============================================================================
 # Landing Page & Authentication
 # ============================================================================
@@ -198,14 +217,15 @@ def landing_page(request: HttpRequest) -> HttpResponse:
         return redirect("login")
 
     store = _get_store()
-    stats = store.get_stats()
+    user_id = _get_user_id_for_filter(request)
+    stats = store.get_stats(user_id=user_id)
 
     # Get pending extractions count
-    pending = store.get_extractions_for_review()
+    pending = store.get_extractions_for_review(user_id=user_id)
     pending_count = len(pending)
 
     # Get ready-to-import count
-    ready_to_import = _get_ready_to_import_count(store)
+    ready_to_import = _get_ready_to_import_count(store, user_id=user_id)
 
     context = {
         **_get_external_urls(request.user if hasattr(request, "user") else None),
@@ -491,10 +511,11 @@ def review_list(request: HttpRequest) -> HttpResponse:
 def review_list_legacy(request: HttpRequest) -> HttpResponse:
     """Legacy review list - kept for direct access if needed."""
     store = _get_store()
-    pending = store.get_extractions_for_review()
+    user_id = _get_user_id_for_filter(request)
+    pending = store.get_extractions_for_review(user_id=user_id)
 
     # Also get stats
-    stats = store.get_stats()
+    stats = store.get_stats(user_id=user_id)
 
     # Parse extractions for display
     extractions = []
@@ -538,7 +559,8 @@ def extraction_archive(request: HttpRequest) -> HttpResponse:
     Allows resetting extractions for re-review or reimport.
     """
     store = _get_store()
-    processed = store.get_processed_extractions()
+    user_id = _get_user_id_for_filter(request)
+    processed = store.get_processed_extractions(user_id=user_id)
 
     # Parse extractions for display
     items = []
@@ -1489,20 +1511,40 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
 # ============================================================================
 
 
-def _get_ready_to_import_count(store: StateStore) -> int:
-    """Get count of extractions ready to import (linked or orphan only)."""
+def _get_ready_to_import_count(store: StateStore, user_id: int | None = None) -> int:
+    """Get count of extractions ready to import (linked or orphan only).
+    
+    Args:
+        store: StateStore instance.
+        user_id: If provided, only count extractions owned by this user or shared.
+                 If None, count all extractions (superuser access).
+    """
     conn = store._get_connection()
     try:
-        row = conn.execute(
+        if user_id is not None:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) as cnt FROM extractions e
+                JOIN linkage l ON e.id = l.extraction_id
+                LEFT JOIN imports i ON e.external_id = i.external_id
+                WHERE i.id IS NULL
+                AND (e.review_state = 'AUTO' OR e.review_decision IN ('ACCEPTED', 'EDITED', 'ORPHAN_CONFIRMED'))
+                AND l.link_type IN ('LINKED', 'ORPHAN')
+                AND (e.user_id IS NULL OR e.user_id = ?)
+            """,
+                (user_id,),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) as cnt FROM extractions e
+                JOIN linkage l ON e.id = l.extraction_id
+                LEFT JOIN imports i ON e.external_id = i.external_id
+                WHERE i.id IS NULL
+                AND (e.review_state = 'AUTO' OR e.review_decision IN ('ACCEPTED', 'EDITED', 'ORPHAN_CONFIRMED'))
+                AND l.link_type IN ('LINKED', 'ORPHAN')
             """
-            SELECT COUNT(*) as cnt FROM extractions e
-            JOIN linkage l ON e.id = l.extraction_id
-            LEFT JOIN imports i ON e.external_id = i.external_id
-            WHERE i.id IS NULL
-            AND (e.review_state = 'AUTO' OR e.review_decision IN ('ACCEPTED', 'EDITED', 'ORPHAN_CONFIRMED'))
-            AND l.link_type IN ('LINKED', 'ORPHAN')
-        """
-        ).fetchone()
+            ).fetchone()
         return row["cnt"] if row else 0
     except Exception:
         # Table may not exist yet, return 0
@@ -1515,6 +1557,7 @@ def _get_ready_to_import_count(store: StateStore) -> int:
 def import_queue(request: HttpRequest) -> HttpResponse:
     """Show transactions ready to import to Firefly."""
     store = _get_store()
+    user_id = _get_user_id_for_filter(request)
     ready_items = []
     failed_items = []
     recent_imports = []
@@ -1523,21 +1566,41 @@ def import_queue(request: HttpRequest) -> HttpResponse:
     conn = store._get_connection()
     try:
         # Get extractions ready for import: must be linked to Firefly or marked as orphan
-        extraction_rows = conn.execute(
+        # Filter by user_id for non-superusers
+        if user_id is not None:
+            extraction_rows = conn.execute(
+                """
+                SELECT e.*, i.status as import_status, i.error_message as import_error, l.firefly_id, l.link_type
+                FROM extractions e
+                LEFT JOIN imports i ON e.external_id = i.external_id
+                LEFT JOIN linkage l ON e.id = l.extraction_id
+                WHERE (i.id IS NULL OR i.status = 'FAILED')
+                AND (e.review_state = 'AUTO' OR e.review_decision IN ('ACCEPTED', 'EDITED', 'ORPHAN_CONFIRMED'))
+                AND (
+                    (l.firefly_id IS NOT NULL AND l.link_type = 'LINKED')
+                    OR (l.link_type = 'ORPHAN')
+                )
+                AND (e.user_id IS NULL OR e.user_id = ?)
+                ORDER BY e.created_at DESC
+            """,
+                (user_id,),
+            ).fetchall()
+        else:
+            extraction_rows = conn.execute(
+                """
+                SELECT e.*, i.status as import_status, i.error_message as import_error, l.firefly_id, l.link_type
+                FROM extractions e
+                LEFT JOIN imports i ON e.external_id = i.external_id
+                LEFT JOIN linkage l ON e.id = l.extraction_id
+                WHERE (i.id IS NULL OR i.status = 'FAILED')
+                AND (e.review_state = 'AUTO' OR e.review_decision IN ('ACCEPTED', 'EDITED', 'ORPHAN_CONFIRMED'))
+                AND (
+                    (l.firefly_id IS NOT NULL AND l.link_type = 'LINKED')
+                    OR (l.link_type = 'ORPHAN')
+                )
+                ORDER BY e.created_at DESC
             """
-            SELECT e.*, i.status as import_status, i.error_message as import_error, l.firefly_id, l.link_type
-            FROM extractions e
-            LEFT JOIN imports i ON e.external_id = i.external_id
-            LEFT JOIN linkage l ON e.id = l.extraction_id
-            WHERE (i.id IS NULL OR i.status = 'FAILED')
-            AND (e.review_state = 'AUTO' OR e.review_decision IN ('ACCEPTED', 'EDITED', 'ORPHAN_CONFIRMED'))
-            AND (
-                (l.firefly_id IS NOT NULL AND l.link_type = 'LINKED')
-                OR (l.link_type = 'ORPHAN')
-            )
-            ORDER BY e.created_at DESC
-        """
-        ).fetchall()
+            ).fetchall()
 
         # Parse extractions while connection is still open
         for row in extraction_rows:
@@ -1575,15 +1638,29 @@ def import_queue(request: HttpRequest) -> HttpResponse:
                 logger.error(f"Error parsing extraction {row['id']}: {e}")
 
         # Get recent SUCCESSFUL imports only (for history display)
-        import_rows = conn.execute(
+        # Filter by user_id for non-superusers
+        if user_id is not None:
+            import_rows = conn.execute(
+                """
+                SELECT i.*, e.extraction_json
+                FROM imports i
+                LEFT JOIN extractions e ON i.external_id = e.external_id
+                WHERE i.status = 'IMPORTED'
+                AND (i.user_id IS NULL OR i.user_id = ?)
+                ORDER BY i.created_at DESC LIMIT 20
+            """,
+                (user_id,),
+            ).fetchall()
+        else:
+            import_rows = conn.execute(
+                """
+                SELECT i.*, e.extraction_json
+                FROM imports i
+                LEFT JOIN extractions e ON i.external_id = e.external_id
+                WHERE i.status = 'IMPORTED'
+                ORDER BY i.created_at DESC LIMIT 20
             """
-            SELECT i.*, e.extraction_json
-            FROM imports i
-            LEFT JOIN extractions e ON i.external_id = e.external_id
-            WHERE i.status = 'IMPORTED'
-            ORDER BY i.created_at DESC LIMIT 20
-        """
-        ).fetchall()
+            ).fetchall()
 
         for irow in import_rows:
             # Try to get title from extraction
@@ -1743,6 +1820,9 @@ def run_extract(request: HttpRequest) -> HttpResponse:
     tag = request.POST.get("tag", "finance/inbox")
     limit = int(request.POST.get("limit", 10))
     sync_firefly = request.POST.get("sync_firefly", "true").lower() in ("true", "1", "yes", "on")
+    
+    # Get user_id for ownership of extracted documents
+    extract_user_id = request.user.id if request.user.is_authenticated else None
 
     def do_extract():
         global _extraction_status
@@ -1768,7 +1848,7 @@ def run_extract(request: HttpRequest) -> HttpResponse:
             config = load_config(config_path)
 
             _extraction_status["progress"] = f"Extracting documents with tag '{tag}'..."
-            result = cmd_extract(config, doc_id=None, tag=tag, limit=limit)
+            result = cmd_extract(config, doc_id=None, tag=tag, limit=limit, user_id=extract_user_id)
 
             # Also sync Firefly transactions if requested
             if sync_firefly:
@@ -3896,31 +3976,57 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
     showing all records that need review and/or linking before import.
     """
     store = _get_store()
+    user_id = _get_user_id_for_filter(request)
 
     # Get all extractions with their linkage status
     paperless_records = []
     conn = store._get_connection()
     try:
-        rows = conn.execute(
-            """
-            SELECT e.*, l.link_type, l.firefly_id as linked_firefly_id,
-                   l.confidence as link_confidence,
-                   pd.title as doc_title,
-                   fc.description as linked_tx_description
-            FROM extractions e
-            LEFT JOIN linkage l ON e.id = l.extraction_id
-            LEFT JOIN paperless_documents pd ON e.document_id = pd.document_id
-            LEFT JOIN firefly_cache fc ON l.firefly_id = fc.firefly_id
-            WHERE e.review_state NOT IN ('IMPORTED')
-            ORDER BY
-                CASE
-                    WHEN l.link_type IS NULL OR l.link_type = 'PENDING' THEN 0
-                    ELSE 1
-                END,
-                e.created_at DESC
-            LIMIT 100
-            """
-        ).fetchall()
+        # Filter by user_id for non-superusers
+        if user_id is not None:
+            rows = conn.execute(
+                """
+                SELECT e.*, l.link_type, l.firefly_id as linked_firefly_id,
+                       l.confidence as link_confidence,
+                       pd.title as doc_title,
+                       fc.description as linked_tx_description
+                FROM extractions e
+                LEFT JOIN linkage l ON e.id = l.extraction_id
+                LEFT JOIN paperless_documents pd ON e.document_id = pd.document_id
+                LEFT JOIN firefly_cache fc ON l.firefly_id = fc.firefly_id
+                WHERE e.review_state NOT IN ('IMPORTED')
+                AND (e.user_id IS NULL OR e.user_id = ?)
+                ORDER BY
+                    CASE
+                        WHEN l.link_type IS NULL OR l.link_type = 'PENDING' THEN 0
+                        ELSE 1
+                    END,
+                    e.created_at DESC
+                LIMIT 100
+                """,
+                (user_id,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT e.*, l.link_type, l.firefly_id as linked_firefly_id,
+                       l.confidence as link_confidence,
+                       pd.title as doc_title,
+                       fc.description as linked_tx_description
+                FROM extractions e
+                LEFT JOIN linkage l ON e.id = l.extraction_id
+                LEFT JOIN paperless_documents pd ON e.document_id = pd.document_id
+                LEFT JOIN firefly_cache fc ON l.firefly_id = fc.firefly_id
+                WHERE e.review_state NOT IN ('IMPORTED')
+                ORDER BY
+                    CASE
+                        WHEN l.link_type IS NULL OR l.link_type = 'PENDING' THEN 0
+                        ELSE 1
+                    END,
+                    e.created_at DESC
+                LIMIT 100
+                """
+            ).fetchall()
 
         for row in rows:
             record = dict(row)

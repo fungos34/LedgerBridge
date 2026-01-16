@@ -213,8 +213,16 @@ def cmd_scan(config: Config, tag: str, limit: int) -> int:
     return 0
 
 
-def cmd_extract(config: Config, doc_id: int | None, tag: str, limit: int) -> int:
-    """Extract finance data from documents."""
+def cmd_extract(config: Config, doc_id: int | None, tag: str, limit: int, user_id: int | None = None) -> int:
+    """Extract finance data from documents.
+    
+    Args:
+        config: Configuration object.
+        doc_id: Specific document ID to extract (optional).
+        tag: Tag to filter documents by.
+        limit: Maximum number of documents to process.
+        user_id: Owner user ID for the extractions (None = shared/legacy).
+    """
     print("📊 Extracting finance data...")
 
     paperless = PaperlessClient(
@@ -262,7 +270,7 @@ def cmd_extract(config: Config, doc_id: int | None, tag: str, limit: int) -> int
                 default_source_account=config.firefly.default_source_account,
             )
 
-            # Save to store
+            # Save to store (with user_id for ownership)
             store.upsert_document(
                 document_id=doc.id,
                 source_hash=source_hash,
@@ -270,6 +278,7 @@ def cmd_extract(config: Config, doc_id: int | None, tag: str, limit: int) -> int
                 document_type=doc.document_type,
                 correspondent=doc.correspondent,
                 tags=doc.tags,
+                user_id=user_id,
             )
 
             store.save_extraction(
@@ -278,6 +287,7 @@ def cmd_extract(config: Config, doc_id: int | None, tag: str, limit: int) -> int
                 extraction_json=json.dumps(extraction.to_dict()),
                 overall_confidence=extraction.confidence.overall,
                 review_state=extraction.confidence.review_state.value,
+                user_id=user_id,
             )
 
             conf = extraction.confidence

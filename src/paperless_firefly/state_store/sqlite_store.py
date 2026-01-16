@@ -41,6 +41,7 @@ class DocumentRecord:
     tags: list[str]
     first_seen: str  # ISO timestamp
     last_seen: str  # ISO timestamp
+    user_id: int | None = None  # Owner user ID (None = legacy/shared)
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "DocumentRecord":
@@ -54,6 +55,7 @@ class DocumentRecord:
             tags=json.loads(row["tags"]) if row["tags"] else [],
             first_seen=row["first_seen"],
             last_seen=row["last_seen"],
+            user_id=row["user_id"] if "user_id" in row.keys() else None,
         )
 
 
@@ -71,6 +73,7 @@ class ExtractionRecord:
     reviewed_at: str | None
     review_decision: str | None  # ACCEPTED, REJECTED, EDITED
     llm_opt_out: bool = False  # Per-document LLM opt-out (Spark v1.0)
+    user_id: int | None = None  # Owner user ID (None = legacy/shared)
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "ExtractionRecord":
@@ -86,6 +89,7 @@ class ExtractionRecord:
             reviewed_at=row["reviewed_at"],
             review_decision=row["review_decision"],
             llm_opt_out=bool(row["llm_opt_out"]) if "llm_opt_out" in row.keys() else False,
+            user_id=row["user_id"] if "user_id" in row.keys() else None,
         )
 
 
@@ -102,6 +106,7 @@ class ImportRecord:
     payload_json: str
     created_at: str
     imported_at: str | None
+    user_id: int | None = None  # Owner user ID (None = legacy/shared)
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "ImportRecord":
@@ -116,6 +121,7 @@ class ImportRecord:
             payload_json=row["payload_json"],
             created_at=row["created_at"],
             imported_at=row["imported_at"],
+            user_id=row["user_id"] if "user_id" in row.keys() else None,
         )
 
 
@@ -301,8 +307,19 @@ class StateStore:
         document_type: str | None = None,
         correspondent: str | None = None,
         tags: list[str] | None = None,
+        user_id: int | None = None,
     ) -> None:
-        """Insert or update a document record."""
+        """Insert or update a document record.
+        
+        Args:
+            document_id: The Paperless document ID.
+            source_hash: Hash of the document source for change detection.
+            title: Document title.
+            document_type: Document type from Paperless.
+            correspondent: Correspondent from Paperless.
+            tags: List of tags.
+            user_id: Owner user ID (None = legacy/shared).
+        """
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         tags_json = json.dumps(tags or [])
 
@@ -313,21 +330,33 @@ class StateStore:
             ).fetchone()
 
             if existing:
-                conn.execute(
-                    """
-                    UPDATE paperless_documents
-                    SET source_hash = ?, title = ?, document_type = ?, correspondent = ?,
-                        tags = ?, last_seen = ?
-                    WHERE document_id = ?
-                """,
-                    (source_hash, title, document_type, correspondent, tags_json, now, document_id),
-                )
+                # Update existing record (preserve user_id if already set)
+                if user_id is not None:
+                    conn.execute(
+                        """
+                        UPDATE paperless_documents
+                        SET source_hash = ?, title = ?, document_type = ?, correspondent = ?,
+                            tags = ?, last_seen = ?, user_id = COALESCE(user_id, ?)
+                        WHERE document_id = ?
+                    """,
+                        (source_hash, title, document_type, correspondent, tags_json, now, user_id, document_id),
+                    )
+                else:
+                    conn.execute(
+                        """
+                        UPDATE paperless_documents
+                        SET source_hash = ?, title = ?, document_type = ?, correspondent = ?,
+                            tags = ?, last_seen = ?
+                        WHERE document_id = ?
+                    """,
+                        (source_hash, title, document_type, correspondent, tags_json, now, document_id),
+                    )
             else:
                 conn.execute(
                     """
                     INSERT INTO paperless_documents
-                    (document_id, source_hash, title, document_type, correspondent, tags, first_seen, last_seen)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (document_id, source_hash, title, document_type, correspondent, tags, first_seen, last_seen, user_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                     (
                         document_id,
@@ -338,15 +367,28 @@ class StateStore:
                         tags_json,
                         now,
                         now,
+                        user_id,
                     ),
                 )
 
-    def get_document(self, document_id: int) -> DocumentRecord | None:
-        """Get a document record by ID."""
+    def get_document(self, document_id: int, user_id: int | None = None) -> DocumentRecord | None:
+        """Get a document record by ID.
+        
+        Args:
+            document_id: The document ID to retrieve.
+            user_id: If provided, only return if owned by this user or shared (None owner).
+                     If user_id is None, return regardless of ownership (superuser access).
+        """
         with self._transaction() as conn:
-            row = conn.execute(
-                "SELECT * FROM paperless_documents WHERE document_id = ?", (document_id,)
-            ).fetchone()
+            if user_id is not None:
+                row = conn.execute(
+                    "SELECT * FROM paperless_documents WHERE document_id = ? AND (user_id IS NULL OR user_id = ?)",
+                    (document_id, user_id),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT * FROM paperless_documents WHERE document_id = ?", (document_id,)
+                ).fetchone()
             return DocumentRecord.from_row(row) if row else None
 
     def document_exists(self, document_id: int) -> bool:
@@ -366,36 +408,72 @@ class StateStore:
         extraction_json: str,
         overall_confidence: float,
         review_state: str,
+        user_id: int | None = None,
     ) -> int:
-        """Save an extraction record. Returns the extraction ID."""
+        """Save an extraction record. Returns the extraction ID.
+        
+        Args:
+            document_id: The Paperless document ID.
+            external_id: Unique external ID for deduplication.
+            extraction_json: JSON-serialized extraction data.
+            overall_confidence: Confidence score (0.0 to 1.0).
+            review_state: Review state (AUTO, REVIEW, MANUAL).
+            user_id: Owner user ID (None = legacy/shared).
+        """
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
         with self._transaction() as conn:
             cursor = conn.execute(
                 """
                 INSERT INTO extractions
-                (document_id, external_id, extraction_json, overall_confidence, review_state, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                (document_id, external_id, extraction_json, overall_confidence, review_state, created_at, user_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-                (document_id, external_id, extraction_json, overall_confidence, review_state, now),
+                (document_id, external_id, extraction_json, overall_confidence, review_state, now, user_id),
             )
             return cursor.lastrowid or 0
 
-    def get_extraction_by_document(self, document_id: int) -> ExtractionRecord | None:
-        """Get the latest extraction for a document."""
+    def get_extraction_by_document(self, document_id: int, user_id: int | None = None) -> ExtractionRecord | None:
+        """Get the latest extraction for a document.
+        
+        Args:
+            document_id: The document ID.
+            user_id: If provided, only return if owned by this user or shared.
+                     If None, return regardless of ownership (superuser access).
+        """
         with self._transaction() as conn:
-            row = conn.execute(
-                "SELECT * FROM extractions WHERE document_id = ? ORDER BY created_at DESC LIMIT 1",
-                (document_id,),
-            ).fetchone()
+            if user_id is not None:
+                row = conn.execute(
+                    """SELECT * FROM extractions 
+                       WHERE document_id = ? AND (user_id IS NULL OR user_id = ?)
+                       ORDER BY created_at DESC LIMIT 1""",
+                    (document_id, user_id),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT * FROM extractions WHERE document_id = ? ORDER BY created_at DESC LIMIT 1",
+                    (document_id,),
+                ).fetchone()
             return ExtractionRecord.from_row(row) if row else None
 
-    def get_extraction_by_external_id(self, external_id: str) -> ExtractionRecord | None:
-        """Get extraction by external_id."""
+    def get_extraction_by_external_id(self, external_id: str, user_id: int | None = None) -> ExtractionRecord | None:
+        """Get extraction by external_id.
+        
+        Args:
+            external_id: The external ID.
+            user_id: If provided, only return if owned by this user or shared.
+                     If None, return regardless of ownership (superuser access).
+        """
         with self._transaction() as conn:
-            row = conn.execute(
-                "SELECT * FROM extractions WHERE external_id = ?", (external_id,)
-            ).fetchone()
+            if user_id is not None:
+                row = conn.execute(
+                    "SELECT * FROM extractions WHERE external_id = ? AND (user_id IS NULL OR user_id = ?)",
+                    (external_id, user_id),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT * FROM extractions WHERE external_id = ?", (external_id,)
+                ).fetchone()
             return ExtractionRecord.from_row(row) if row else None
 
     def update_extraction_review(
@@ -574,17 +652,34 @@ class StateStore:
             )
             return cursor.rowcount > 0
 
-    def get_extractions_for_review(self) -> list[ExtractionRecord]:
-        """Get all extractions pending review."""
+    def get_extractions_for_review(self, user_id: int | None = None) -> list[ExtractionRecord]:
+        """Get all extractions pending review.
+        
+        Args:
+            user_id: If provided, only return extractions owned by this user or shared.
+                     If None, return all extractions (superuser access).
+        """
         with self._transaction() as conn:
-            rows = conn.execute(
+            if user_id is not None:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM extractions
+                    WHERE review_state IN ('REVIEW', 'MANUAL')
+                    AND review_decision IS NULL
+                    AND (user_id IS NULL OR user_id = ?)
+                    ORDER BY created_at ASC
+                """,
+                    (user_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM extractions
+                    WHERE review_state IN ('REVIEW', 'MANUAL')
+                    AND review_decision IS NULL
+                    ORDER BY created_at ASC
                 """
-                SELECT * FROM extractions
-                WHERE review_state IN ('REVIEW', 'MANUAL')
-                AND review_decision IS NULL
-                ORDER BY created_at ASC
-            """
-            ).fetchall()
+                ).fetchall()
             return [ExtractionRecord.from_row(row) for row in rows]
 
     # Import methods
@@ -595,18 +690,27 @@ class StateStore:
         document_id: int,
         payload_json: str,
         status: ImportStatus = ImportStatus.PENDING,
+        user_id: int | None = None,
     ) -> int:
-        """Create an import record. Returns the import ID."""
+        """Create an import record. Returns the import ID.
+        
+        Args:
+            external_id: Unique external ID for deduplication.
+            document_id: The Paperless document ID.
+            payload_json: JSON-serialized import payload.
+            status: Initial import status.
+            user_id: Owner user ID (None = legacy/shared).
+        """
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
         with self._transaction() as conn:
             cursor = conn.execute(
                 """
                 INSERT INTO imports
-                (external_id, document_id, payload_json, status, created_at)
-                VALUES (?, ?, ?, ?, ?)
+                (external_id, document_id, payload_json, status, created_at, user_id)
+                VALUES (?, ?, ?, ?, ?, ?)
             """,
-                (external_id, document_id, payload_json, status.value, now),
+                (external_id, document_id, payload_json, status.value, now, user_id),
             )
             return cursor.lastrowid or 0
 
@@ -748,13 +852,24 @@ class StateStore:
             ).fetchone()
             return ImportRecord.from_row(row) if row else None
 
-    def get_pending_imports(self) -> list[ImportRecord]:
-        """Get all pending imports."""
+    def get_pending_imports(self, user_id: int | None = None) -> list[ImportRecord]:
+        """Get all pending imports.
+        
+        Args:
+            user_id: If provided, only return imports owned by this user or shared.
+                     If None, return all pending imports (superuser access).
+        """
         with self._transaction() as conn:
-            rows = conn.execute(
-                "SELECT * FROM imports WHERE status = ? ORDER BY created_at ASC",
-                (ImportStatus.PENDING.value,),
-            ).fetchall()
+            if user_id is not None:
+                rows = conn.execute(
+                    "SELECT * FROM imports WHERE status = ? AND (user_id IS NULL OR user_id = ?) ORDER BY created_at ASC",
+                    (ImportStatus.PENDING.value, user_id),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM imports WHERE status = ? ORDER BY created_at ASC",
+                    (ImportStatus.PENDING.value,),
+                ).fetchall()
             return [ImportRecord.from_row(row) for row in rows]
 
     # Vendor mapping methods
@@ -811,23 +926,40 @@ class StateStore:
                 }
             return None
 
-    def get_processed_extractions(self) -> list[dict[str, Any]]:
+    def get_processed_extractions(self, user_id: int | None = None) -> list[dict[str, Any]]:
         """
         Get all extractions that have been processed (imported, rejected, or pending import).
 
         Used to show archive/history of processed documents that can be reset.
+        
+        Args:
+            user_id: If provided, only return extractions owned by this user or shared.
+                     If None, return all extractions (superuser access).
         """
         with self._transaction() as conn:
-            rows = conn.execute(
+            if user_id is not None:
+                rows = conn.execute(
+                    """
+                    SELECT e.*, i.status as import_status, i.firefly_id, i.error_message as import_error
+                    FROM extractions e
+                    LEFT JOIN imports i ON e.external_id = i.external_id
+                    WHERE (e.review_decision IS NOT NULL OR i.status IS NOT NULL)
+                       AND (e.user_id IS NULL OR e.user_id = ?)
+                    ORDER BY COALESCE(e.reviewed_at, e.created_at) DESC
+                """,
+                    (user_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT e.*, i.status as import_status, i.firefly_id, i.error_message as import_error
+                    FROM extractions e
+                    LEFT JOIN imports i ON e.external_id = i.external_id
+                    WHERE e.review_decision IS NOT NULL
+                       OR i.status IS NOT NULL
+                    ORDER BY COALESCE(e.reviewed_at, e.created_at) DESC
                 """
-                SELECT e.*, i.status as import_status, i.firefly_id, i.error_message as import_error
-                FROM extractions e
-                LEFT JOIN imports i ON e.external_id = i.external_id
-                WHERE e.review_decision IS NOT NULL
-                   OR i.status IS NOT NULL
-                ORDER BY COALESCE(e.reviewed_at, e.created_at) DESC
-            """
-            ).fetchall()
+                ).fetchall()
 
             results = []
             for row in rows:
@@ -845,29 +977,61 @@ class StateStore:
                         "import_status": row["import_status"],
                         "firefly_id": row["firefly_id"],
                         "import_error": row["import_error"],
+                        "user_id": row["user_id"] if "user_id" in row.keys() else None,
                     }
                 )
             return results
 
     # Statistics
 
-    def get_stats(self) -> dict[str, Any]:
-        """Get pipeline statistics."""
+    def get_stats(self, user_id: int | None = None) -> dict[str, Any]:
+        """Get pipeline statistics.
+        
+        Args:
+            user_id: If provided, only count records owned by this user or shared.
+                     If None, return all stats (superuser access).
+        """
         with self._transaction() as conn:
-            docs = conn.execute("SELECT COUNT(*) as count FROM paperless_documents").fetchone()
-            extractions = conn.execute("SELECT COUNT(*) as count FROM extractions").fetchone()
-            pending_review = conn.execute(
-                "SELECT COUNT(*) as count FROM extractions WHERE review_state IN ('REVIEW', 'MANUAL') AND review_decision IS NULL"
-            ).fetchone()
-            imports = conn.execute("SELECT COUNT(*) as count FROM imports").fetchone()
-            imported = conn.execute(
-                "SELECT COUNT(*) as count FROM imports WHERE status = ?",
-                (ImportStatus.IMPORTED.value,),
-            ).fetchone()
-            failed = conn.execute(
-                "SELECT COUNT(*) as count FROM imports WHERE status = ?",
-                (ImportStatus.FAILED.value,),
-            ).fetchone()
+            if user_id is not None:
+                docs = conn.execute(
+                    "SELECT COUNT(*) as count FROM paperless_documents WHERE user_id IS NULL OR user_id = ?",
+                    (user_id,),
+                ).fetchone()
+                extractions = conn.execute(
+                    "SELECT COUNT(*) as count FROM extractions WHERE user_id IS NULL OR user_id = ?",
+                    (user_id,),
+                ).fetchone()
+                pending_review = conn.execute(
+                    "SELECT COUNT(*) as count FROM extractions WHERE review_state IN ('REVIEW', 'MANUAL') AND review_decision IS NULL AND (user_id IS NULL OR user_id = ?)",
+                    (user_id,),
+                ).fetchone()
+                imports = conn.execute(
+                    "SELECT COUNT(*) as count FROM imports WHERE user_id IS NULL OR user_id = ?",
+                    (user_id,),
+                ).fetchone()
+                imported = conn.execute(
+                    "SELECT COUNT(*) as count FROM imports WHERE status = ? AND (user_id IS NULL OR user_id = ?)",
+                    (ImportStatus.IMPORTED.value, user_id),
+                ).fetchone()
+                failed = conn.execute(
+                    "SELECT COUNT(*) as count FROM imports WHERE status = ? AND (user_id IS NULL OR user_id = ?)",
+                    (ImportStatus.FAILED.value, user_id),
+                ).fetchone()
+            else:
+                docs = conn.execute("SELECT COUNT(*) as count FROM paperless_documents").fetchone()
+                extractions = conn.execute("SELECT COUNT(*) as count FROM extractions").fetchone()
+                pending_review = conn.execute(
+                    "SELECT COUNT(*) as count FROM extractions WHERE review_state IN ('REVIEW', 'MANUAL') AND review_decision IS NULL"
+                ).fetchone()
+                imports = conn.execute("SELECT COUNT(*) as count FROM imports").fetchone()
+                imported = conn.execute(
+                    "SELECT COUNT(*) as count FROM imports WHERE status = ?",
+                    (ImportStatus.IMPORTED.value,),
+                ).fetchone()
+                failed = conn.execute(
+                    "SELECT COUNT(*) as count FROM imports WHERE status = ?",
+                    (ImportStatus.FAILED.value,),
+                ).fetchone()
 
             return {
                 "documents_processed": docs["count"] if docs else 0,
