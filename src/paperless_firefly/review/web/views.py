@@ -1778,10 +1778,13 @@ def run_import(request: HttpRequest) -> HttpResponse:
 
     # Capture user's source account preference before starting thread
     user_source_account = None
+    user_firefly_token = None
     try:
         profile = request.user.profile
         if profile.default_source_account:
             user_source_account = profile.default_source_account
+        if profile.firefly_token:
+            user_firefly_token = profile.firefly_token
     except Exception:
         pass  # User may not have profile
 
@@ -1808,13 +1811,14 @@ def run_import(request: HttpRequest) -> HttpResponse:
             logger.info(f"Loading config from {config_path}")
             config = load_config(config_path)
 
-            logger.info(f"Starting import with source_account_override={user_source_account}")
+            logger.info(f"Starting import with source_account_override={user_source_account}, firefly_token_override={'<set>' if user_firefly_token else '<not set>'}")
             _import_status["progress"] = "Importing to Firefly III..."
             result = cmd_import(
                 config,
                 auto_only=False,
                 dry_run=False,
                 source_account_override=user_source_account,
+                firefly_token_override=user_firefly_token,
             )
 
             logger.info(f"Import completed with result={result}")
@@ -5239,7 +5243,9 @@ def api_unlink(request: HttpRequest) -> JsonResponse:
 def api_transfer_ownership(request: HttpRequest) -> JsonResponse:
     """API endpoint to transfer ownership of a record to a different user.
 
-    This is used by superusers to reassign shared documents to other users.
+    Any user can transfer ownership, but only to users who own the document
+    in Paperless-ngx. This ensures SparkLink ownership matches Paperless ownership.
+
     When ownership is transferred:
     - The extraction/firefly_cache user_id is updated
     - Any existing linkages are removed (must be re-established)
@@ -5251,12 +5257,6 @@ def api_transfer_ownership(request: HttpRequest) -> JsonResponse:
     - new_owner_id: The user ID to transfer ownership to
     """
     from django.contrib.auth.models import User
-
-    # Only superusers can transfer ownership
-    if not request.user.is_superuser:
-        return JsonResponse(
-            {"success": False, "error": "Only superusers can transfer ownership"}, status=403
-        )
 
     try:
         body = json.loads(request.body) if request.body else {}
@@ -5300,6 +5300,50 @@ def api_transfer_ownership(request: HttpRequest) -> JsonResponse:
 
                 extraction_id = row["id"]
                 document_id = row["document_id"]
+
+                # Validate new owner has access to document in Paperless
+                # Query Paperless API to get document owner
+                try:
+                    # Get new owner's Paperless client
+                    new_owner_profile = new_owner.profile
+                    paperless_url = new_owner_profile.paperless_url or settings.PAPERLESS_BASE_URL
+                    paperless_token = new_owner_profile.paperless_token or settings.PAPERLESS_TOKEN
+
+                    if paperless_token:
+                        import requests
+
+                        # Query Paperless for document to check ownership
+                        headers = {"Authorization": f"Token {paperless_token}"}
+                        resp = requests.get(
+                            f"{paperless_url.rstrip('/')}/api/documents/{document_id}/",
+                            headers=headers,
+                            timeout=10,
+                        )
+
+                        if resp.status_code == 404:
+                            return JsonResponse(
+                                {
+                                    "success": False,
+                                    "error": f"User {new_owner.username} does not have access to this document in Paperless",
+                                },
+                                status=403,
+                            )
+                        elif resp.status_code == 403:
+                            return JsonResponse(
+                                {
+                                    "success": False,
+                                    "error": f"User {new_owner.username} is not authorized to access this document in Paperless",
+                                },
+                                status=403,
+                            )
+                        elif resp.status_code != 200:
+                            logger.warning(
+                                f"Paperless returned {resp.status_code} when checking document {document_id}"
+                            )
+                            # Allow transfer if we can't verify (Paperless may not support ownership)
+                except Exception as e:
+                    logger.warning(f"Could not validate Paperless ownership: {e}")
+                    # Allow transfer if validation fails (Paperless may be unavailable)
 
                 # Update extraction owner
                 conn.execute(

@@ -707,8 +707,9 @@
     </style>
     
     <script>
-    // Chat history management
-    const CHAT_HISTORY_KEY = 'sparklink_chat_history';
+    // Chat history management - user-specific storage key
+    const CURRENT_USER_ID = {{ current_user_id|default:'null' }};
+    const CHAT_HISTORY_KEY = CURRENT_USER_ID ? `sparklink_chat_history_${CURRENT_USER_ID}` : 'sparklink_chat_history';
     const MAX_HISTORY_MESSAGES = 50;  // Keep last 50 messages
     const CONTEXT_HISTORY_SIZE = 6;   // Send last 6 messages as context to LLM
     

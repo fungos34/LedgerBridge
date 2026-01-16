@@ -332,6 +332,7 @@ def cmd_import(
     auto_only: bool,
     dry_run: bool,
     source_account_override: str | None = None,
+    firefly_token_override: str | None = None,
 ) -> int:
     """Import transactions to Firefly III.
 
@@ -340,13 +341,14 @@ def cmd_import(
         auto_only: Only import AUTO-confidence transactions
         dry_run: Don't actually import, just show what would be done
         source_account_override: Override the default source account from config
+        firefly_token_override: Override the Firefly API token from config (per-user token)
     """
     print("📤 Importing transactions to Firefly III...")
 
     store = StateStore(config.state_db_path)
     firefly = FireflyClient(
         base_url=config.firefly.base_url,
-        token=config.firefly.token,
+        token=firefly_token_override or config.firefly.token,
     )
 
     # Use override if provided, otherwise use config

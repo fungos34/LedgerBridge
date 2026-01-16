@@ -59,8 +59,14 @@ def page_context(request):
         "description": _get_page_description(request.path),
     }
 
+    # Include user ID for user-specific storage
+    user_id = None
+    if hasattr(request, "user") and request.user.is_authenticated:
+        user_id = request.user.id
+
     return {
         "page_context_json": _safe_json(page_info),
+        "current_user_id": user_id,
     }
 
 

@@ -79,6 +79,11 @@ class WebConfig(AppConfig):
         logger.info("Started background AI queue worker thread")
 
 
+# Track per-user last job completion times for interval enforcement
+_user_last_job_time: dict[int | None, float] = {}
+_user_last_job_lock = threading.Lock()
+
+
 def _ai_queue_worker_loop():
     """Background worker loop that processes AI jobs at intervals.
 
@@ -86,23 +91,28 @@ def _ai_queue_worker_loop():
     - Each user has their own ai_schedule_enabled, interval, and active hours
     - Jobs are processed based on the owner's settings
     - If a job has no owner (legacy), default settings apply
+    
+    Interval Logic:
+    - If batch_size == 1: Wait for user's interval between each job
+    - If batch_size > 1: Process batch_size jobs sequentially without interval delays,
+      then wait for interval before next batch
+    - AI can only handle one job at a time (sequential processing)
     """
     # Wait a bit for Django to fully initialize
     time.sleep(5)
 
     logger.info("AI queue worker loop starting - will check for pending jobs")
 
-    # Use a short base interval to check frequently, but respect per-user intervals
-    BASE_CHECK_INTERVAL = 60  # Check every 60 seconds for new jobs
+    # Check every 30 seconds for new jobs (responsive polling)
+    BASE_CHECK_INTERVAL = 30
 
     while not _ai_worker_shutdown.is_set():
         try:
-            _process_ai_queue_batch()
+            _process_ai_queue_with_intervals()
         except Exception as e:
             logger.error(f"Error in AI queue worker: {e}", exc_info=True)
 
-        # Sleep for base interval (short) to stay responsive to new jobs
-        # Per-user intervals are enforced by scheduled_for in the job queue
+        # Sleep for base interval
         logger.debug(f"AI worker sleeping for {BASE_CHECK_INTERVAL} seconds before next check")
 
         # Sleep in small increments so we can respond to shutdown quickly
@@ -229,8 +239,220 @@ def _is_within_user_active_hours(user_id: int | None) -> bool:
         return True
 
 
+def _get_user_interval_seconds(user_id: int | None) -> int:
+    """Get the AI processing interval in seconds for a user."""
+    if user_id is None:
+        return 60 * 60  # Default: 1 hour for legacy jobs
+
+    try:
+        from django.contrib.auth.models import User
+
+        user = User.objects.get(id=user_id)
+        profile = user.profile
+        return profile.ai_schedule_interval_minutes * 60
+    except Exception:
+        return 60 * 60  # Default: 1 hour
+
+
+def _get_user_batch_size(user_id: int | None) -> int:
+    """Get the AI batch size for a user."""
+    if user_id is None:
+        return 1  # Default: 1 job at a time
+
+    try:
+        from django.contrib.auth.models import User
+
+        user = User.objects.get(id=user_id)
+        profile = user.profile
+        return max(1, profile.ai_schedule_batch_size)
+    except Exception:
+        return 1
+
+
+def _can_process_job_for_user(user_id: int | None) -> bool:
+    """Check if enough time has passed since last job for this user.
+    
+    Returns True if:
+    - No previous job for this user, or
+    - The user's interval has elapsed since their last job
+    """
+    with _user_last_job_lock:
+        last_time = _user_last_job_time.get(user_id)
+    
+    if last_time is None:
+        return True
+    
+    interval = _get_user_interval_seconds(user_id)
+    elapsed = time.time() - last_time
+    
+    if elapsed >= interval:
+        return True
+    
+    logger.debug(
+        f"User {user_id}: {elapsed:.0f}s elapsed, need {interval}s - waiting"
+    )
+    return False
+
+
+def _record_job_completion(user_id: int | None):
+    """Record that a job was completed for this user."""
+    with _user_last_job_lock:
+        _user_last_job_time[user_id] = time.time()
+
+
+def _process_ai_queue_with_intervals():
+    """Process AI jobs respecting per-user intervals.
+    
+    Logic:
+    - For each user with pending jobs, check if their interval has elapsed
+    - If batch_size > 1, process that many jobs sequentially without interval delays
+    - Only one job at a time (AI handles one job at a time)
+    - After processing batch, record completion time for interval tracking
+    """
+    logger.info("AI worker checking for pending jobs...")
+
+    try:
+        # Get dependencies
+        from django.contrib.auth.models import User
+
+        from paperless_firefly.paperless_client.client import PaperlessClient
+        from paperless_firefly.services.ai_queue import AIJobQueueService
+        from paperless_firefly.spark_ai.service import SparkAIService
+        from paperless_firefly.state_store.sqlite_store import StateStore
+
+        # Load config
+        config = _load_config()
+        if not config:
+            logger.warning("No config available for AI queue processing")
+            return
+
+        if not hasattr(config, "llm") or not config.llm or not config.llm.enabled:
+            logger.info("LLM not enabled in config")
+            return
+
+        # Initialize services
+        state_store = StateStore(config.state_db_path)
+        paperless_client = PaperlessClient(
+            base_url=config.paperless.base_url,
+            token=config.paperless.token,
+        )
+
+        # Fetch categories from Firefly
+        from paperless_firefly.firefly_client.client import FireflyClient
+
+        categories = []
+        try:
+            firefly_client = FireflyClient(
+                base_url=config.firefly.base_url,
+                token=config.firefly.token,
+            )
+            firefly_categories = firefly_client.list_categories()
+            categories = [cat.name for cat in firefly_categories]
+            logger.info(f"Loaded {len(categories)} categories from Firefly")
+        except Exception as e:
+            logger.warning(f"Could not fetch Firefly categories: {e}")
+
+        ai_service = SparkAIService(
+            state_store=state_store, config=config, categories=categories
+        )
+        queue_service = AIJobQueueService(state_store=state_store, config=config)
+
+        # Get all pending jobs
+        all_jobs = state_store.get_next_ai_jobs(limit=50, check_schedule=True)
+        if not all_jobs:
+            logger.info("No pending AI jobs in queue")
+            return
+
+        # Group jobs by user_id
+        jobs_by_user: dict[int | None, list] = {}
+        for job in all_jobs:
+            user_id = job.get("user_id")
+            if user_id not in jobs_by_user:
+                jobs_by_user[user_id] = []
+            jobs_by_user[user_id].append(job)
+
+        logger.info(f"Found jobs for {len(jobs_by_user)} user(s)")
+
+        # Process jobs for each user that's ready
+        for user_id, user_jobs in jobs_by_user.items():
+            if _ai_worker_shutdown.is_set():
+                break
+
+            # Check user settings
+            if not _is_user_schedule_enabled(user_id):
+                logger.debug(f"User {user_id}: schedule disabled, skipping {len(user_jobs)} jobs")
+                continue
+
+            if not _is_within_user_active_hours(user_id):
+                logger.debug(f"User {user_id}: outside active hours, skipping")
+                continue
+
+            # Check if interval has elapsed for this user
+            if not _can_process_job_for_user(user_id):
+                continue
+
+            # Get user's batch size
+            batch_size = _get_user_batch_size(user_id)
+            jobs_to_process = user_jobs[:batch_size]
+
+            logger.info(
+                f"User {user_id}: processing batch of {len(jobs_to_process)} job(s) "
+                f"(batch_size={batch_size})"
+            )
+
+            # Process jobs sequentially (AI handles one at a time)
+            for job in jobs_to_process:
+                if _ai_worker_shutdown.is_set():
+                    break
+
+                job_id = job["id"]
+                document_id = job["document_id"]
+
+                try:
+                    logger.info(f"Processing AI job #{job_id} for document {document_id}")
+
+                    # Get user-specific Paperless client
+                    user_paperless_client = paperless_client
+                    if user_id:
+                        try:
+                            user = User.objects.get(id=user_id)
+                            profile = user.profile
+                            if profile.paperless_token:
+                                user_paperless_client = PaperlessClient(
+                                    base_url=profile.paperless_url or config.paperless.base_url,
+                                    token=profile.paperless_token,
+                                )
+                        except Exception:
+                            pass
+
+                    success = queue_service.process_job(
+                        job=job,
+                        ai_service=ai_service,
+                        paperless_client=user_paperless_client,
+                    )
+
+                    if success:
+                        logger.info(f"AI job #{job_id} completed successfully")
+                    else:
+                        logger.warning(f"AI job #{job_id} failed")
+
+                except Exception as e:
+                    logger.error(f"Error processing AI job #{job_id}: {e}", exc_info=True)
+                    try:
+                        state_store.fail_ai_job(job_id, str(e), can_retry=True)
+                    except Exception:
+                        pass
+
+            # Record completion time after processing batch
+            _record_job_completion(user_id)
+            logger.info(f"User {user_id}: batch complete, next job in {_get_user_interval_seconds(user_id)}s")
+
+    except Exception as e:
+        logger.error(f"Error in AI queue processing: {e}", exc_info=True)
+
+
 def _process_ai_queue_batch():
-    """Process a batch of pending AI jobs.
+    """Process a batch of pending AI jobs (legacy wrapper).
 
     This function respects per-user settings:
     - Checks if each job's owner has AI scheduling enabled
