@@ -3,6 +3,9 @@ Django application configuration with background AI queue processing.
 
 This module configures the Django app and starts a background thread
 for automatic AI job queue processing when the app is ready.
+
+With Gunicorn running multiple workers, we use a file-based lock to ensure
+only ONE worker starts the AI queue thread, preventing duplicate processing.
 """
 
 import logging
@@ -12,14 +15,28 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+# fcntl is only available on Unix/Linux (used in Docker with Gunicorn)
+# On Windows (local dev with single process), we skip the cross-process lock
+try:
+    import fcntl
+
+    HAS_FCNTL = True
+except ImportError:
+    HAS_FCNTL = False
+
 from django.apps import AppConfig
 
 logger = logging.getLogger(__name__)
 
-# Global flag to track if the background worker is running
+# Global flag to track if the background worker is running (process-local)
 _ai_worker_started = False
 _ai_worker_thread = None
 _ai_worker_shutdown = threading.Event()
+
+# File lock for cross-process coordination in multi-worker environments (Gunicorn)
+# Only ONE worker across all Gunicorn workers will successfully acquire this lock
+_AI_QUEUE_LOCK_FILE = Path("/tmp/spark_ai_queue_worker.lock")
+_ai_queue_lock_fd = None  # File descriptor for the lock file
 
 # Global lock for AI model access - ensures only ONE AI call at a time across
 # all users and all request types (queue jobs + chatbot)
@@ -92,8 +109,16 @@ class WebConfig(AppConfig):
             self._start_ai_queue_worker()
 
     def _start_ai_queue_worker(self):
-        """Start the background AI queue worker thread."""
-        global _ai_worker_started, _ai_worker_thread
+        """Start the background AI queue worker thread.
+
+        Uses a file-based lock to ensure only ONE worker across all Gunicorn
+        workers starts the AI queue thread. This prevents duplicate processing
+        when running with multiple workers.
+
+        On Windows (local dev), fcntl is not available, so we skip the
+        cross-process lock and just use the process-local flag.
+        """
+        global _ai_worker_started, _ai_worker_thread, _ai_queue_lock_fd
 
         if _ai_worker_started:
             return
@@ -115,6 +140,31 @@ class WebConfig(AppConfig):
             logger.info("Skipping AI worker start for management command: %s", sys.argv[1])
             return
 
+        # Try to acquire cross-process lock (non-blocking)
+        # Only ONE Gunicorn worker will successfully acquire this lock
+        # On Windows, fcntl is not available - skip cross-process locking
+        if HAS_FCNTL:
+            try:
+                _ai_queue_lock_fd = open(_AI_QUEUE_LOCK_FILE, "w")
+                fcntl.flock(_ai_queue_lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                # Write our PID to the lock file for debugging
+                _ai_queue_lock_fd.write(f"{os.getpid()}\n")
+                _ai_queue_lock_fd.flush()
+                logger.info(f"Acquired AI queue lock (PID {os.getpid()})")
+            except (BlockingIOError, OSError):
+                # Another worker already has the lock - that's fine, skip starting
+                logger.info(
+                    f"AI queue worker already running in another process, "
+                    f"skipping (PID {os.getpid()})"
+                )
+                if _ai_queue_lock_fd:
+                    _ai_queue_lock_fd.close()
+                    _ai_queue_lock_fd = None
+                return
+        else:
+            # Windows: no cross-process lock, rely on process-local flag only
+            logger.debug("fcntl not available (Windows), skipping cross-process lock")
+
         _ai_worker_started = True
         _ai_worker_thread = threading.Thread(
             target=_ai_queue_worker_loop,
@@ -122,7 +172,7 @@ class WebConfig(AppConfig):
             daemon=True,  # Thread will be killed when main process exits
         )
         _ai_worker_thread.start()
-        logger.info("Started background AI queue worker thread")
+        logger.info(f"Started background AI queue worker thread (PID {os.getpid()})")
 
 
 # Track per-user last job completion times for interval enforcement
