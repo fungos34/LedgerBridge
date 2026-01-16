@@ -5823,7 +5823,7 @@ def api_chat(request: HttpRequest) -> JsonResponse:
 
     from ...config import load_config
     from ...spark_ai import SparkAIService
-    from .apps import AI_CHATBOT_LOCK_TIMEOUT, acquire_ai_lock, release_ai_lock
+    from .apps import acquire_ai_lock, release_ai_lock
     from .models import UserProfile
 
     store = _get_store()
@@ -5865,6 +5865,8 @@ def api_chat(request: HttpRequest) -> JsonResponse:
         config = load_config(config_path)
 
         # Override with user profile settings if available
+        # Default lock timeout if no user profile
+        lock_timeout = 30.0
         try:
             profile = UserProfile.objects.get(user=request.user)
             if profile.llm_enabled:
@@ -5878,6 +5880,8 @@ def api_chat(request: HttpRequest) -> JsonResponse:
                     config.llm.model_fallback = profile.ollama_model_fallback
                 if profile.ollama_timeout:
                     config.llm.timeout_seconds = profile.ollama_timeout
+                    # Use user's configured timeout for lock wait as well
+                    lock_timeout = float(profile.ollama_timeout)
         except UserProfile.DoesNotExist:
             pass
 
@@ -5890,8 +5894,8 @@ def api_chat(request: HttpRequest) -> JsonResponse:
                 status=400,
             )
 
-        # Acquire AI lock - chatbot waits up to timeout, then gives up
-        lock_acquired = acquire_ai_lock(timeout=AI_CHATBOT_LOCK_TIMEOUT)
+        # Acquire AI lock - chatbot waits up to user's configured timeout, then gives up
+        lock_acquired = acquire_ai_lock(timeout=lock_timeout)
         if not lock_acquired:
             return JsonResponse(
                 {
