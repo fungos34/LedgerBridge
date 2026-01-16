@@ -284,10 +284,41 @@
         box-shadow: none;
     }
     
+    /* AI Confirm Button */
+    .btn-ai-confirm {
+        background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+        color: white;
+        padding: 0.375rem 0.75rem;
+        border-radius: 0.375rem;
+        font-size: 0.75rem;
+        font-weight: 600;
+        border: none;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        box-shadow: 0 1px 3px rgba(139, 92, 246, 0.3);
+        transition: all 0.15s;
+    }
+    
+    .btn-ai-confirm:hover {
+        background: linear-gradient(135deg, #7c3aed, #6d28d9);
+        transform: translateY(-1px);
+        box-shadow: 0 2px 6px rgba(139, 92, 246, 0.4);
+    }
+    
+    .btn-ai-confirm:disabled {
+        background: #9ca3af;
+        cursor: not-allowed;
+        transform: none;
+        box-shadow: none;
+    }
+    
     .record-actions {
         display: flex;
         gap: 0.75rem;
         flex-shrink: 0;
+        margin-left: auto;
     }
     
     .btn-review {
@@ -584,9 +615,12 @@
                         <div class="record-meta">
                             <span class="record-amount">{{ record.currency|default:"EUR" }} {{ record.amount|floatformat:2|default:"—" }}</span>
                             <span>{{ record.date|default:"No date" }}</span>
-                            {% if record.vendor %}
+                            {% if record.source_account or record.destination_account %}
+                            <span title="{{ record.source_account|default:'?' }} → {{ record.destination_account|default:'?' }}">{{ record.source_account|default:"?"|truncatechars:10 }} → {{ record.destination_account|default:"?"|truncatechars:10 }}</span>
+                            {% elif record.vendor %}
                             <span>→ {{ record.vendor|truncatechars:20 }}</span>
                             {% endif %}
+                        </div>
                     </div>
                     <div class="record-status">
                         {% if record.review_decision == 'ACCEPTED' or record.review_decision == 'EDITED' %}
@@ -610,6 +644,15 @@
                         {% endif %}
                     </div>
                     <div class="record-actions">
+                        <!-- AI Confirm Button (visible when AI has suggestions and not yet reviewed) -->
+                        {% if record.ai_has_suggestions and record.review_decision != 'ACCEPTED' and record.review_decision != 'EDITED' %}
+                        <button type="button" 
+                                class="btn-ai-confirm" 
+                                onclick="aiConfirmDocument({{ record.document_id }})"
+                                title="Accept all AI suggestions and confirm this document">
+                            🤖 AI Confirm
+                        </button>
+                        {% endif %}
                         <!-- Quick Accept Button (visible when ready, but NOT if already reviewed manually) -->
                         {% if record.ready_for_import and record.review_decision != 'ACCEPTED' and record.review_decision != 'EDITED' %}
                         <button type="button" 
@@ -1768,6 +1811,39 @@ function quickAcceptDocument(documentId) {
     })
     .catch(error => {
         alert('Error accepting document: ' + error);
+    });
+}
+
+// AI Confirm - Accept all AI suggestions and confirm the document immediately
+function aiConfirmDocument(documentId) {
+    if (!confirm('Accept ALL AI suggestions and confirm this document?\n\n⚠️ This will trust the AI completely and apply all its suggestions without detailed review.\n\nThis action will be recorded in the audit trail.')) {
+        return;
+    }
+    
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    
+    fetch(`/review/paperless/${documentId}/ai-confirm/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            let msg = '🤖 AI suggestions accepted and document confirmed!';
+            if (data.suggestions_applied) {
+                msg += `\n\nApplied: ${data.suggestions_applied} suggestion(s)`;
+            }
+            alert(msg);
+            location.reload();
+        } else {
+            alert('Error: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        alert('Error confirming with AI: ' + error);
     });
 }
 

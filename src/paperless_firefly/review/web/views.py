@@ -4380,6 +4380,8 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
                 record["amount"] = proposal.get("amount")
                 record["currency"] = proposal.get("currency", "EUR")
                 record["date"] = proposal.get("date")
+                record["source_account"] = proposal.get("source_account")
+                record["destination_account"] = proposal.get("destination_account")
                 record["vendor"] = proposal.get("destination_account")
                 record["category"] = proposal.get("category")
                 record["confidence"] = record.get("overall_confidence", 0) * 100
@@ -5235,7 +5237,7 @@ def api_unlink(request: HttpRequest) -> JsonResponse:
 
         # Reset the linkage to PENDING
         store.update_linkage_type(
-            linkage_id=linkage["id"],
+            extraction_id=linkage["extraction_id"],
             link_type="PENDING",
             linked_by="USER_UNLINKED",
         )
@@ -5647,6 +5649,150 @@ def api_quick_accept(request: HttpRequest, document_id: int) -> JsonResponse:
 
     except Exception as e:
         logger.error(f"Error in quick accept: {e}")
+        return JsonResponse({"success": False, "error": str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["POST"])
+def api_ai_confirm(request: HttpRequest, document_id: int) -> JsonResponse:
+    """API endpoint to confirm a document using all AI suggestions.
+
+    This applies ALL AI suggestions without detailed review and marks
+    the document as confirmed, ready for import.
+
+    Args:
+        request: HTTP request
+        document_id: Paperless document ID
+
+    Returns:
+        JSON response with success status and number of suggestions applied
+    """
+    store = _get_store()
+
+    try:
+        # Get extraction for document
+        extraction = store.get_extraction_by_document(document_id)
+        if not extraction:
+            return JsonResponse({"success": False, "error": "Extraction not found"}, status=404)
+
+        # Check if AI suggestions are available
+        ai_job = store.get_ai_job_by_document(document_id, active_only=False)
+        if not ai_job or ai_job["status"] != "COMPLETED" or not ai_job.get("suggestions_json"):
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": "No AI suggestions available for this document. Run AI interpretation first.",
+                },
+                status=400,
+            )
+
+        extraction_data = (
+            json.loads(extraction.extraction_json) if extraction.extraction_json else {}
+        )
+        proposal = extraction_data.get("proposal", {})
+
+        # Track which AI suggestions were applied
+        ai_suggestions_applied = {}
+        original_values = {}
+
+        try:
+            suggestions = json.loads(ai_job["suggestions_json"])
+
+            # Apply ALL available suggestions including splits
+            field_mappings = {
+                "category": "category",
+                "description": "description",
+                "destination_account": "destination_account",
+                "source_account": "source_account",
+                "date": "date",
+                "amount": "amount",
+                "transaction_type": "transaction_type",
+            }
+
+            for suggestion_key, proposal_key in field_mappings.items():
+                suggestion_value = suggestions.get(suggestion_key, {})
+                if isinstance(suggestion_value, dict) and suggestion_value.get("value"):
+                    original_values[proposal_key] = proposal.get(proposal_key)
+                    proposal[proposal_key] = suggestion_value["value"]
+                    ai_suggestions_applied[suggestion_key] = {
+                        "value": suggestion_value["value"],
+                        "confidence": suggestion_value.get("confidence"),
+                        "original": original_values[proposal_key],
+                    }
+
+            # Handle split transactions if suggested
+            if suggestions.get("splits") and isinstance(suggestions["splits"], list):
+                original_values["splits"] = proposal.get("splits")
+                proposal["splits"] = suggestions["splits"]
+                ai_suggestions_applied["splits"] = {
+                    "value": suggestions["splits"],
+                    "count": len(suggestions["splits"]),
+                    "original": original_values.get("splits"),
+                }
+
+            extraction_data["proposal"] = proposal
+
+            # Store which AI suggestions were applied for audit
+            extraction_data["ai_applied"] = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "job_id": ai_job["id"],
+                "decision_source": "AI_CONFIRM",
+                "suggestions": ai_suggestions_applied,
+            }
+
+        except json.JSONDecodeError:
+            return JsonResponse(
+                {"success": False, "error": "Could not parse AI suggestions"},
+                status=500,
+            )
+
+        # Update extraction with AI suggestions applied
+        conn = store._get_connection()
+        try:
+            conn.execute(
+                "UPDATE extractions SET extraction_json = ? WHERE id = ?",
+                (json.dumps(extraction_data), extraction.id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        # Update extraction status to accepted
+        store.update_extraction_status(
+            extraction.id,
+            review_decision="ACCEPTED",
+            review_state="AUTO",
+        )
+
+        # Create audit trail entry
+        store.create_interpretation_run(
+            document_id=document_id,
+            firefly_id=None,
+            external_id=extraction.external_id,
+            pipeline_version="1.0.0",
+            inputs_summary={
+                "action": "ai_confirm",
+                "document_id": document_id,
+                "ai_job_id": ai_job["id"],
+                "ai_suggestions_applied": ai_suggestions_applied,
+                "original_values": original_values,
+            },
+            final_state="ACCEPTED",
+            duration_ms=0,
+            decision_source="USER_AI_CONFIRM",
+            llm_result=ai_suggestions_applied,
+        )
+
+        return JsonResponse(
+            {
+                "success": True,
+                "message": f"Document {document_id} confirmed with AI suggestions",
+                "suggestions_applied": len(ai_suggestions_applied),
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Error in AI confirm: {e}")
         return JsonResponse({"success": False, "error": str(e)}, status=500)
 
 

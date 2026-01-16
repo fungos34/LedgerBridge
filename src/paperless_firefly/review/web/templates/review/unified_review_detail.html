@@ -516,6 +516,24 @@
         margin-left: 0.5rem;
     }
     
+    /* No AI suggestion indicator */
+    .ai-no-suggestion {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        margin-top: 0.25rem;
+        padding: 0.25rem 0.375rem;
+        background: #f3f4f6;
+        border: 1px dashed #9ca3af;
+        border-radius: 0.25rem;
+        font-size: 0.65rem;
+        color: #6b7280;
+    }
+    
+    .ai-no-suggestion .ai-icon {
+        opacity: 0.5;
+    }
+    
     /* Unsaved changes indicator */
     .unsaved-indicator {
         display: none;
@@ -907,6 +925,11 @@
                                         ✓ Accept
                                     </button>
                                 </div>
+                                {% elif ai_suggestions and not ai_suggestions.date.value %}
+                                <div class="ai-no-suggestion" id="ai-suggestion-date">
+                                    <span class="ai-icon">🤖</span>
+                                    <span>No AI suggestion</span>
+                                </div>
                                 {% endif %}
                             </div>
                             <div class="form-group" style="flex: 2;">
@@ -937,6 +960,11 @@
                                     <button type="button" class="btn-accept-ai" onclick="acceptAiField('description', '{{ ai_suggestions.description.value|escapejs }}')">
                                         ✓ Accept
                                     </button>
+                                </div>
+                                {% elif ai_suggestions and not ai_suggestions.description.value %}
+                                <div class="ai-no-suggestion" id="ai-suggestion-description">
+                                    <span class="ai-icon">🤖</span>
+                                    <span>No AI suggestion</span>
                                 </div>
                                 {% endif %}
                             </div>
@@ -990,6 +1018,11 @@
                                         ✓ Accept
                                     </button>
                                 </div>
+                                {% elif ai_suggestions and not ai_suggestions.destination_account.value %}
+                                <div class="ai-no-suggestion" id="ai-suggestion-destination_account">
+                                    <span class="ai-icon">🤖</span>
+                                    <span>No AI suggestion</span>
+                                </div>
                                 {% endif %}
                             </div>
                         </div>
@@ -1038,6 +1071,12 @@
                                 <button type="button" class="btn-accept-ai" onclick="acceptAiField('category', '{{ llm_suggestion.category|escapejs }}')">
                                     ✓ Accept
                                 </button>
+                            </div>
+                            {% elif ai_suggestions and not ai_suggestions.category.value %}
+                            <!-- No AI suggestion for category -->
+                            <div class="ai-no-suggestion" id="ai-suggestion-category">
+                                <span class="ai-icon">🤖</span>
+                                <span>No AI suggestion</span>
                             </div>
                             {% endif %}
                             {% else %}
