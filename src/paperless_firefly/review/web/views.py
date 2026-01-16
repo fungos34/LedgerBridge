@@ -7040,7 +7040,7 @@ def api_sync_fetch(request, entity_type: str):
         )
 
     # Get Firefly URL and token
-    firefly_url = profile.firefly_url or settings.FIREFLY_URL
+    firefly_url = profile.firefly_url or getattr(settings, "FIREFLY_BASE_URL", None)
     firefly_token = profile.firefly_token
 
     if not firefly_url:
@@ -7346,7 +7346,7 @@ def api_sync_import(request):
     records = SyncPoolRecord.objects.filter(id__in=record_ids).select_related("owner")
 
     # Connect to user's Firefly
-    firefly_url = profile.firefly_url or settings.FIREFLY_URL
+    firefly_url = profile.firefly_url or getattr(settings, "FIREFLY_BASE_URL", None)
     firefly_token = profile.firefly_token
 
     try:
@@ -7551,7 +7551,7 @@ def api_sync_preview(request, entity_type: str):
         return JsonResponse({"success": True, "previews": []})
 
     # Connect to Firefly and get existing entities
-    firefly_url = profile.firefly_url or settings.FIREFLY_URL
+    firefly_url = profile.firefly_url or getattr(settings, "FIREFLY_BASE_URL", None)
     firefly_token = profile.firefly_token
 
     try:
