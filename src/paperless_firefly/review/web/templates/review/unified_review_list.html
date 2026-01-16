@@ -173,6 +173,44 @@
     .status-orphan { background: #fee2e2; color: #991b1b; }
     .status-ready { background: #d1fae5; color: #065f46; }
     .status-confirmed { background: #ddd6fe; color: #5b21b6; }
+    .status-auto-matched { background: #fef3c7; color: #92400e; border: 1px dashed #f59e0b; }
+    
+    /* Panel Toolbar for Sorting/Filtering */
+    .panel-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        padding: 0.5rem 0.75rem;
+        background: #f9fafb;
+        border-bottom: 1px solid var(--gray-200);
+        font-size: 0.75rem;
+    }
+    
+    .toolbar-group {
+        display: flex;
+        align-items: center;
+        gap: 0.375rem;
+    }
+    
+    .toolbar-group label {
+        color: var(--gray-600);
+        font-weight: 500;
+    }
+    
+    .toolbar-select {
+        padding: 0.25rem 0.5rem;
+        font-size: 0.75rem;
+        border-radius: 0.25rem;
+        border: 1px solid var(--gray-300);
+        background: white;
+        cursor: pointer;
+    }
+    
+    .toolbar-select:focus {
+        outline: none;
+        border-color: var(--primary);
+        box-shadow: 0 0 0 1px var(--primary);
+    }
     
     /* AI Status Badges */
     .ai-status-badge {
@@ -483,13 +521,40 @@
     <!-- Paperless Documents Panel -->
     <div class="panel">
         <div class="panel-header">
-            <h2>📄 Paperless Documents <span class="count">{{ paperless_records|length }}</span></h2>
+            <h2>📄 Paperless Documents <span class="count" id="paperless-count">{{ paperless_records|length }}</span></h2>
+        </div>
+        <!-- Panel Toolbar for Sorting/Filtering -->
+        <div class="panel-toolbar">
+            <div class="toolbar-group">
+                <label for="paperless-filter-status">Status:</label>
+                <select id="paperless-filter-status" class="toolbar-select" onchange="filterPaperlessRecords()">
+                    <option value="all">All</option>
+                    <option value="needs-action">Needs Action</option>
+                    <option value="linked">Linked</option>
+                    <option value="auto-matched">Auto-Matched</option>
+                    <option value="orphan">Orphan</option>
+                </select>
+            </div>
+            <div class="toolbar-group">
+                <label for="paperless-sort">Sort:</label>
+                <select id="paperless-sort" class="toolbar-select" onchange="sortPaperlessRecords()">
+                    <option value="date-desc">Date ↓</option>
+                    <option value="date-asc">Date ↑</option>
+                    <option value="amount-desc">Amount ↓</option>
+                    <option value="amount-asc">Amount ↑</option>
+                    <option value="title-asc">Title A-Z</option>
+                </select>
+            </div>
         </div>
         <div class="panel-body">
             {% if paperless_records %}
-            <ul class="record-list">
+            <ul class="record-list" id="paperless-record-list">
                 {% for record in paperless_records %}
-                <li class="record-item {% if record.needs_linking or record.needs_review %}needs-action{% elif record.is_linked %}linked{% elif record.is_orphan %}orphan{% endif %}">
+                <li class="record-item {% if record.needs_linking or record.needs_review %}needs-action{% elif record.is_linked %}linked{% elif record.is_orphan %}orphan{% endif %}{% if record.is_auto_matched %} auto-matched{% endif %}"
+                    data-date="{{ record.date|default:'' }}"
+                    data-amount="{{ record.amount|default:'0' }}"
+                    data-title="{{ record.title|default:'' }}"
+                    data-status="{% if record.is_auto_matched %}auto-matched{% elif record.is_linked %}linked{% elif record.is_orphan %}orphan{% elif record.needs_linking or record.needs_review %}needs-action{% else %}other{% endif %}">
                     <div class="record-info">
                         <div class="record-title" title="{{ record.title }}">
                             {{ record.title|truncatechars:30 }}
@@ -522,7 +587,6 @@
                             {% if record.vendor %}
                             <span>→ {{ record.vendor|truncatechars:20 }}</span>
                             {% endif %}
-                        </div>
                     </div>
                     <div class="record-status">
                         {% if record.review_decision == 'ACCEPTED' or record.review_decision == 'EDITED' %}
@@ -532,6 +596,9 @@
                         <span class="status-orphan">📍 Orphan</span>
                         {% elif record.is_linked %}
                         <span class="status-linked">🔗 Linked</span>
+                        {% if record.is_auto_matched %}
+                        <span class="status-auto-matched" title="Auto-matched by the system - please verify">🤖 Auto</span>
+                        {% endif %}
                         {% elif record.needs_linking %}
                         <span class="status-needs-link">⚠️ Needs Link</span>
                         {% endif %}
@@ -589,13 +656,40 @@
     <!-- Firefly Transactions Panel -->
     <div class="panel">
         <div class="panel-header">
-            <h2>🏦 Firefly Transactions <span class="count">{{ firefly_records|length }}</span></h2>
+            <h2>🏦 Firefly Transactions <span class="count" id="firefly-count">{{ firefly_records|length }}</span></h2>
+        </div>
+        <!-- Panel Toolbar for Sorting/Filtering -->
+        <div class="panel-toolbar">
+            <div class="toolbar-group">
+                <label for="firefly-filter-status">Status:</label>
+                <select id="firefly-filter-status" class="toolbar-select" onchange="filterFireflyRecords()">
+                    <option value="all">All</option>
+                    <option value="needs-action">Unmatched</option>
+                    <option value="linked">Linked</option>
+                    <option value="auto-matched">Auto-Matched</option>
+                    <option value="orphan">No Receipt</option>
+                </select>
+            </div>
+            <div class="toolbar-group">
+                <label for="firefly-sort">Sort:</label>
+                <select id="firefly-sort" class="toolbar-select" onchange="sortFireflyRecords()">
+                    <option value="date-desc">Date ↓</option>
+                    <option value="date-asc">Date ↑</option>
+                    <option value="amount-desc">Amount ↓</option>
+                    <option value="amount-asc">Amount ↑</option>
+                    <option value="description-asc">Description A-Z</option>
+                </select>
+            </div>
         </div>
         <div class="panel-body">
             {% if firefly_records %}
-            <ul class="record-list">
+            <ul class="record-list" id="firefly-record-list">
                 {% for record in firefly_records %}
-                <li class="record-item {% if record.needs_linking %}needs-action{% elif record.is_linked %}linked{% elif record.is_orphan %}orphan{% endif %}">
+                <li class="record-item {% if record.needs_linking %}needs-action{% elif record.is_linked %}linked{% elif record.is_orphan %}orphan{% endif %}{% if record.is_auto_matched %} auto-matched{% endif %}"
+                    data-date="{{ record.date|default:'' }}"
+                    data-amount="{{ record.amount|default:'0' }}"
+                    data-description="{{ record.description|default:'' }}"
+                    data-status="{% if record.is_auto_matched %}auto-matched{% elif record.is_linked %}linked{% elif record.is_orphan %}orphan{% elif record.needs_linking %}needs-action{% else %}other{% endif %}">
                     <div class="record-info">
                         <div class="record-title" title="{{ record.description }}">
                             {{ record.description|truncatechars:30 }}
@@ -624,6 +718,9 @@
                         <span class="status-orphan">📍 No Receipt</span>
                         {% elif record.is_linked %}
                         <span class="status-linked">🔗 Linked</span>
+                        {% if record.is_auto_matched %}
+                        <span class="status-auto-matched" title="Auto-matched by the system - please verify">🤖 Auto</span>
+                        {% endif %}
                         {% endif %}
                     </div>
                     <div class="record-actions">
@@ -663,24 +760,30 @@
             <!-- Paperless Sync with Filters -->
             <div class="action-group">
                 <h4 class="action-group-title">📄 Paperless Sync</h4>
+                <!-- Per-card Active Filters Summary -->
+                <div class="card-filter-summary" id="paperless-filter-summary">
+                    <!-- Will be populated by JavaScript -->
+                </div>
                 <form method="post" action="{% url 'sync_paperless' %}" class="sync-form" id="paperless-sync-form">
                     {% csrf_token %}
                     <div class="sync-filters">
                         <div class="filter-row">
                             <label for="paperless_days">Time range:</label>
-                            <select name="days" id="paperless_days" class="form-control form-control-sm">
-                                <option value="30">Last 30 days</option>
-                                <option value="60">Last 60 days</option>
-                                <option value="90" selected>Last 90 days</option>
-                                <option value="180">Last 180 days</option>
-                                <option value="365">Last year</option>
+                            <select name="days" id="paperless_days" class="form-control form-control-sm" onchange="updatePaperlessFilterSummary()">
+                                <option value="30"{% if user_defaults.sync_days == 30 %} selected{% endif %}>Last 30 days</option>
+                                <option value="60"{% if user_defaults.sync_days == 60 %} selected{% endif %}>Last 60 days</option>
+                                <option value="90"{% if user_defaults.sync_days == 90 or not user_defaults.sync_days %} selected{% endif %}>Last 90 days</option>
+                                <option value="180"{% if user_defaults.sync_days == 180 %} selected{% endif %}>Last 180 days</option>
+                                <option value="365"{% if user_defaults.sync_days == 365 %} selected{% endif %}>Last year</option>
                             </select>
                         </div>
                         <div class="filter-row">
                             <label for="paperless_tag_input">Tag filter:</label>
                             <div class="tag-input-container">
-                                <input type="text" id="paperless_tag_input" class="form-control form-control-sm" placeholder="Type tag and press Enter">
-                                <input type="hidden" name="tag_filter" id="paperless_tag_hidden">
+                                <input type="text" id="paperless_tag_input" class="form-control form-control-sm" 
+                                       placeholder="Type tag and press Enter"
+                                       data-default-tags="{{ user_defaults.paperless_filter_tags }}">
+                                <input type="hidden" name="tag_filter" id="paperless_tag_hidden" value="{{ user_defaults.paperless_filter_tags }}">
                             </div>
                         </div>
                         <div id="paperless-tag-badges" class="tag-badges-container"></div>
@@ -692,25 +795,31 @@
             <!-- Firefly Sync with Filters -->
             <div class="action-group">
                 <h4 class="action-group-title">🏦 Firefly Sync</h4>
-                <form method="post" action="{% url 'sync_firefly_transactions' %}" class="sync-form">
+                <!-- Per-card Active Filters Summary -->
+                <div class="card-filter-summary" id="firefly-filter-summary">
+                    <!-- Will be populated by JavaScript -->
+                </div>
+                <form method="post" action="{% url 'sync_firefly_transactions' %}" class="sync-form" id="firefly-sync-form">
                     {% csrf_token %}
                     <div class="sync-filters">
                         <div class="filter-row">
                             <label for="firefly_days">Time range:</label>
-                            <select name="days" id="firefly_days" class="form-control form-control-sm">
-                                <option value="30">Last 30 days</option>
-                                <option value="60">Last 60 days</option>
-                                <option value="90" selected>Last 90 days</option>
-                                <option value="180">Last 180 days</option>
-                                <option value="365">Last year</option>
+                            <select name="days" id="firefly_days" class="form-control form-control-sm" onchange="updateFireflyFilterSummary()">
+                                <option value="30"{% if user_defaults.sync_days == 30 %} selected{% endif %}>Last 30 days</option>
+                                <option value="60"{% if user_defaults.sync_days == 60 %} selected{% endif %}>Last 60 days</option>
+                                <option value="90"{% if user_defaults.sync_days == 90 or not user_defaults.sync_days %} selected{% endif %}>Last 90 days</option>
+                                <option value="180"{% if user_defaults.sync_days == 180 %} selected{% endif %}>Last 180 days</option>
+                                <option value="365"{% if user_defaults.sync_days == 365 %} selected{% endif %}>Last year</option>
                             </select>
                         </div>
                         <div class="filter-row">
                             <label for="firefly_account">Account:</label>
-                            <select name="account_filter" id="firefly_account" class="form-control form-control-sm">
+                            <select name="account_filter" id="firefly_account" class="form-control form-control-sm" 
+                                    onchange="updateFireflyFilterSummary()"
+                                    data-default-account="{{ user_defaults.default_source_account }}">
                                 <option value="">All accounts</option>
                                 {% for account in firefly_accounts %}
-                                <option value="{{ account.id }}">{{ account.name }}</option>
+                                <option value="{{ account.id }}"{% if account.name == user_defaults.default_source_account %} selected{% endif %}>{{ account.name }}</option>
                                 {% endfor %}
                             </select>
                         </div>
@@ -821,6 +930,64 @@
     gap: 0.5rem;
 }
 
+/* Per-Card Filter Summary */
+.card-filter-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    margin-bottom: 0.5rem;
+    min-height: 1.5rem;
+}
+
+.filter-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.125rem 0.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.65rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: opacity 0.15s;
+}
+
+.filter-badge:hover {
+    opacity: 0.8;
+}
+
+.filter-badge-time {
+    background: #dbeafe;
+    color: #1d4ed8;
+    border: 1px solid #93c5fd;
+}
+
+.filter-badge-tag {
+    background: #dcfce7;
+    color: #166534;
+    border: 1px solid #86efac;
+}
+
+.filter-badge-account {
+    background: #fef3c7;
+    color: #92400e;
+    border: 1px solid #fcd34d;
+}
+
+.filter-badge-default {
+    border-style: dashed;
+    opacity: 0.85;
+}
+
+.filter-badge-remove {
+    font-size: 0.6rem;
+    opacity: 0.7;
+    margin-left: 0.125rem;
+}
+
+.filter-badge-remove:hover {
+    opacity: 1;
+}
+
 /* Tag Badges */
 .tag-input-container {
     flex: 1;
@@ -844,7 +1011,14 @@
     font-size: 0.7rem;
     font-weight: 500;
     cursor: default;
+    background: #dcfce7;
+    color: #166534;
+    border: 1px solid #86efac;
     animation: tagBadgeIn 0.2s ease-out;
+}
+
+.tag-badge[data-is-default="true"] {
+    border-style: dashed;
 }
 
 @keyframes tagBadgeIn {
@@ -1137,6 +1311,310 @@ setTimeout(function() {
 <!-- ==================== END IMPORT QUEUE SECTION ==================== -->
 
 <script>
+// ==================== PANEL SORTING AND FILTERING ====================
+
+function filterPaperlessRecords() {
+    const filter = document.getElementById('paperless-filter-status').value;
+    const list = document.getElementById('paperless-record-list');
+    if (!list) return;
+    
+    const items = list.querySelectorAll('.record-item');
+    let visibleCount = 0;
+    
+    items.forEach(item => {
+        const status = item.dataset.status;
+        if (filter === 'all' || status === filter) {
+            item.style.display = '';
+            visibleCount++;
+        } else {
+            item.style.display = 'none';
+        }
+    });
+    
+    document.getElementById('paperless-count').textContent = visibleCount;
+}
+
+function sortPaperlessRecords() {
+    const sortValue = document.getElementById('paperless-sort').value;
+    const list = document.getElementById('paperless-record-list');
+    if (!list) return;
+    
+    const items = Array.from(list.querySelectorAll('.record-item'));
+    
+    items.sort((a, b) => {
+        switch(sortValue) {
+            case 'date-desc':
+                return (b.dataset.date || '').localeCompare(a.dataset.date || '');
+            case 'date-asc':
+                return (a.dataset.date || '').localeCompare(b.dataset.date || '');
+            case 'amount-desc':
+                return parseFloat(b.dataset.amount || 0) - parseFloat(a.dataset.amount || 0);
+            case 'amount-asc':
+                return parseFloat(a.dataset.amount || 0) - parseFloat(b.dataset.amount || 0);
+            case 'title-asc':
+                return (a.dataset.title || '').localeCompare(b.dataset.title || '');
+            default:
+                return 0;
+        }
+    });
+    
+    items.forEach(item => list.appendChild(item));
+}
+
+function filterFireflyRecords() {
+    const filter = document.getElementById('firefly-filter-status').value;
+    const list = document.getElementById('firefly-record-list');
+    if (!list) return;
+    
+    const items = list.querySelectorAll('.record-item');
+    let visibleCount = 0;
+    
+    items.forEach(item => {
+        const status = item.dataset.status;
+        if (filter === 'all' || status === filter) {
+            item.style.display = '';
+            visibleCount++;
+        } else {
+            item.style.display = 'none';
+        }
+    });
+    
+    document.getElementById('firefly-count').textContent = visibleCount;
+}
+
+function sortFireflyRecords() {
+    const sortValue = document.getElementById('firefly-sort').value;
+    const list = document.getElementById('firefly-record-list');
+    if (!list) return;
+    
+    const items = Array.from(list.querySelectorAll('.record-item'));
+    
+    items.sort((a, b) => {
+        switch(sortValue) {
+            case 'date-desc':
+                return (b.dataset.date || '').localeCompare(a.dataset.date || '');
+            case 'date-asc':
+                return (a.dataset.date || '').localeCompare(b.dataset.date || '');
+            case 'amount-desc':
+                return parseFloat(b.dataset.amount || 0) - parseFloat(a.dataset.amount || 0);
+            case 'amount-asc':
+                return parseFloat(a.dataset.amount || 0) - parseFloat(b.dataset.amount || 0);
+            case 'description-asc':
+                return (a.dataset.description || '').localeCompare(b.dataset.description || '');
+            default:
+                return 0;
+        }
+    });
+    
+    items.forEach(item => list.appendChild(item));
+}
+
+// ==================== FILTER SUMMARY FUNCTIONS ====================
+
+function updatePaperlessFilterSummary() {
+    const container = document.getElementById('paperless-filter-summary');
+    if (!container) return;
+    
+    const badges = [];
+    
+    // Get time range from select
+    const daysSelect = document.getElementById('paperless_days');
+    if (daysSelect && daysSelect.value) {
+        const selectedText = daysSelect.options[daysSelect.selectedIndex]?.text || daysSelect.value + ' days';
+        const isDefault = daysSelect.dataset.isDefault === 'true';
+        const cls = isDefault ? 'filter-badge filter-badge-time filter-badge-default' : 'filter-badge filter-badge-time';
+        badges.push(`<span class="${cls}" title="${isDefault ? 'Default from settings' : 'Custom selection'}">
+            📅 ${selectedText}
+        </span>`);
+    }
+    
+    // Get tags
+    const tagsContainer = document.getElementById('paperless-tag-badges');
+    if (tagsContainer) {
+        const tagBadges = tagsContainer.querySelectorAll('.tag-badge');
+        tagBadges.forEach(badge => {
+            const tagName = badge.querySelector('.tag-badge-text')?.textContent || badge.textContent.replace('×', '').trim();
+            const isDefault = badge.dataset.isDefault === 'true';
+            const cls = isDefault ? 'filter-badge filter-badge-tag filter-badge-default' : 'filter-badge filter-badge-tag';
+            badges.push(`<span class="${cls}" onclick="removePaperlessTag('${tagName}')" title="${isDefault ? 'Default from settings - Click to remove' : 'Click to remove'}">
+                🏷️ ${tagName}
+                <span class="filter-badge-remove">×</span>
+            </span>`);
+        });
+    }
+    
+    container.innerHTML = badges.length > 0 ? badges.join('') : '<span style="color: var(--gray-400); font-size: 0.7rem;">No filters active</span>';
+}
+
+function updateFireflyFilterSummary() {
+    const container = document.getElementById('firefly-filter-summary');
+    if (!container) return;
+    
+    const badges = [];
+    
+    // Get time range from select
+    const daysSelect = document.getElementById('firefly_days');
+    if (daysSelect && daysSelect.value) {
+        const selectedText = daysSelect.options[daysSelect.selectedIndex]?.text || daysSelect.value + ' days';
+        const isDefault = daysSelect.dataset.isDefault === 'true';
+        const cls = isDefault ? 'filter-badge filter-badge-time filter-badge-default' : 'filter-badge filter-badge-time';
+        badges.push(`<span class="${cls}" title="${isDefault ? 'Default from settings' : 'Custom selection'}">
+            📅 ${selectedText}
+        </span>`);
+    }
+    
+    // Get account from select
+    const accountSelect = document.getElementById('firefly_account');
+    if (accountSelect && accountSelect.value) {
+        const accountName = accountSelect.options[accountSelect.selectedIndex]?.text || accountSelect.value;
+        const isDefault = accountSelect.dataset.isDefault === 'true';
+        const cls = isDefault ? 'filter-badge filter-badge-account filter-badge-default' : 'filter-badge filter-badge-account';
+        badges.push(`<span class="${cls}" onclick="clearFireflyFilter('account')" title="${isDefault ? 'Default from settings - Click to clear' : 'Click to clear'}">
+            🏦 ${accountName}
+            <span class="filter-badge-remove">×</span>
+        </span>`);
+    }
+    
+    container.innerHTML = badges.length > 0 ? badges.join('') : '<span style="color: var(--gray-400); font-size: 0.7rem;">No filters active</span>';
+}
+
+function clearPaperlessFilter(type) {
+    if (type === 'time') {
+        const select = document.getElementById('paperless_days');
+        if (select) {
+            select.selectedIndex = 0;  // Reset to first option
+            select.dataset.isDefault = 'false';
+        }
+    }
+    updatePaperlessFilterSummary();
+}
+
+function removePaperlessTag(tagName) {
+    const container = document.getElementById('paperless-tag-badges');
+    if (container) {
+        const badges = container.querySelectorAll('.tag-badge');
+        badges.forEach(badge => {
+            const text = badge.querySelector('.tag-badge-text')?.textContent || badge.textContent.replace('×', '').trim();
+            if (text === tagName) {
+                badge.remove();
+            }
+        });
+        // Update hidden input
+        updatePaperlessTagHidden();
+    }
+    updatePaperlessFilterSummary();
+}
+
+function updatePaperlessTagHidden() {
+    const container = document.getElementById('paperless-tag-badges');
+    const hidden = document.getElementById('paperless_tag_hidden');
+    if (container && hidden) {
+        const tags = Array.from(container.querySelectorAll('.tag-badge')).map(badge => {
+            return badge.querySelector('.tag-badge-text')?.textContent || badge.textContent.replace('×', '').trim();
+        });
+        hidden.value = tags.join(',');
+    }
+}
+
+function clearFireflyFilter(type) {
+    if (type === 'time') {
+        const select = document.getElementById('firefly_days');
+        if (select) {
+            select.selectedIndex = 0;  // Reset to first option
+            select.dataset.isDefault = 'false';
+        }
+    } else if (type === 'account') {
+        const select = document.getElementById('firefly_account');
+        if (select) {
+            select.value = '';
+            select.dataset.isDefault = 'false';
+        }
+    }
+    updateFireflyFilterSummary();
+}
+
+// Initialize filter summaries on page load
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize default tags from data attribute
+    const tagInput = document.getElementById('paperless_tag_input');
+    if (tagInput) {
+        const defaultTags = tagInput.dataset.defaultTags;
+        if (defaultTags) {
+            const tagsContainer = document.getElementById('paperless-tag-badges');
+            if (tagsContainer) {
+                defaultTags.split(',').forEach(tag => {
+                    tag = tag.trim();
+                    if (tag) {
+                        const badge = document.createElement('span');
+                        badge.className = 'tag-badge';
+                        badge.dataset.isDefault = 'true';
+                        badge.innerHTML = `<span class="tag-badge-text">${tag}</span><button type="button" class="tag-badge-remove" onclick="this.parentElement.remove(); updatePaperlessTagHidden(); updatePaperlessFilterSummary();">×</button>`;
+                        tagsContainer.appendChild(badge);
+                    }
+                });
+            }
+        }
+        
+        // Mark days select as having default value
+        const daysSelect = document.getElementById('paperless_days');
+        if (daysSelect) {
+            daysSelect.dataset.isDefault = 'true';
+        }
+    }
+    
+    // Initialize Firefly defaults
+    const fireflyAccount = document.getElementById('firefly_account');
+    if (fireflyAccount && fireflyAccount.value) {
+        fireflyAccount.dataset.isDefault = 'true';
+    }
+    
+    const fireflyDays = document.getElementById('firefly_days');
+    if (fireflyDays) {
+        fireflyDays.dataset.isDefault = 'true';
+    }
+    
+    // Set up tag input handler
+    if (tagInput) {
+        tagInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const tag = this.value.trim();
+                if (tag) {
+                    addPaperlessTag(tag, false);
+                    this.value = '';
+                }
+            }
+        });
+    }
+    
+    // Update summaries
+    updatePaperlessFilterSummary();
+    updateFireflyFilterSummary();
+});
+
+function addPaperlessTag(tag, isDefault) {
+    const container = document.getElementById('paperless-tag-badges');
+    if (!container) return;
+    
+    // Check if tag already exists
+    const existingTags = Array.from(container.querySelectorAll('.tag-badge')).map(badge => {
+        return badge.querySelector('.tag-badge-text')?.textContent || badge.textContent.replace('×', '').trim();
+    });
+    
+    if (existingTags.includes(tag)) return;
+    
+    const badge = document.createElement('span');
+    badge.className = 'tag-badge';
+    badge.dataset.isDefault = isDefault ? 'true' : 'false';
+    badge.innerHTML = `<span class="tag-badge-text">${tag}</span><button type="button" class="tag-badge-remove" onclick="this.parentElement.remove(); updatePaperlessTagHidden(); updatePaperlessFilterSummary();">×</button>`;
+    container.appendChild(badge);
+    
+    updatePaperlessTagHidden();
+    updatePaperlessFilterSummary();
+}
+
+// ==================== DROPDOWN AND LINK FUNCTIONS ====================
+
 // Close dropdowns when clicking outside
 document.addEventListener('click', function(e) {
     if (!e.target.closest('.link-dropdown')) {
@@ -1165,11 +1643,22 @@ function loadSuggestions(dropdown) {
         .then(response => response.json())
         .then(data => {
             if (data.suggestions && data.suggestions.length > 0) {
-                contentEl.innerHTML = data.suggestions.map(s => `
+                contentEl.innerHTML = data.suggestions.map(s => {
+                    // Build compact account display: source → destination
+                    let accountInfo = '';
+                    if (s.source_account && s.destination_account) {
+                        accountInfo = `${s.source_account} → ${s.destination_account}`;
+                    } else if (s.source_account) {
+                        accountInfo = `From: ${s.source_account}`;
+                    } else if (s.destination_account) {
+                        accountInfo = `To: ${s.destination_account}`;
+                    }
+                    
+                    return `
                     <div class="link-suggestion">
                         <div class="link-suggestion-info">
-                            <div class="link-suggestion-title">${s.description || 'Transaction'}</div>
-                            <div class="link-suggestion-meta">${s.amount || '?'} • ${s.date || '?'}</div>
+                            <div class="link-suggestion-title">${s.amount || '?'} • ${s.date || '?'}</div>
+                            <div class="link-suggestion-meta">${accountInfo || 'Unknown account'}</div>
                         </div>
                         <span class="link-suggestion-score">${s.score}%</span>
                         <div class="link-suggestion-actions">
@@ -1178,7 +1667,7 @@ function loadSuggestions(dropdown) {
                             </button>
                         </div>
                     </div>
-                `).join('');
+                `}).join('');
             } else {
                 contentEl.innerHTML = '<div class="no-suggestions">No matching transactions found</div>';
             }

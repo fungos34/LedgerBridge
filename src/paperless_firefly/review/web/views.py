@@ -4326,7 +4326,7 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
             rows = conn.execute(
                 """
                 SELECT e.*, l.link_type, l.firefly_id as linked_firefly_id,
-                       l.confidence as link_confidence,
+                       l.confidence as link_confidence, l.linked_by,
                        pd.title as doc_title,
                        fc.description as linked_tx_description
                 FROM extractions e
@@ -4349,7 +4349,7 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
             rows = conn.execute(
                 """
                 SELECT e.*, l.link_type, l.firefly_id as linked_firefly_id,
-                       l.confidence as link_confidence,
+                       l.confidence as link_confidence, l.linked_by,
                        pd.title as doc_title,
                        fc.description as linked_tx_description
                 FROM extractions e
@@ -4386,9 +4386,14 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
 
                 # Link status
                 link_type = record.get("link_type")
+                linked_by = record.get("linked_by")
                 record["needs_linking"] = link_type is None or link_type == "PENDING"
                 record["is_linked"] = link_type == "LINKED" or link_type == "AUTO_LINKED"
                 record["is_orphan"] = link_type == "ORPHAN"
+                # Track if this was auto-matched so users can easily review
+                record["is_auto_matched"] = (
+                    linked_by == "AUTO" or link_type == "AUTO_LINKED"
+                )
 
                 # Review status
                 record["needs_review"] = (
@@ -4458,7 +4463,8 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
                 """
                 SELECT fc.*, l.extraction_id as linked_extraction_id,
                        e.document_id as linked_document_id,
-                       pd.title as linked_document_title
+                       pd.title as linked_document_title,
+                       l.linked_by
                 FROM firefly_cache fc
                 LEFT JOIN linkage l ON fc.firefly_id = l.firefly_id
                 LEFT JOIN extractions e ON l.extraction_id = e.id
@@ -4476,7 +4482,8 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
                 """
                 SELECT fc.*, l.extraction_id as linked_extraction_id,
                        e.document_id as linked_document_id,
-                       pd.title as linked_document_title
+                       pd.title as linked_document_title,
+                       l.linked_by
                 FROM firefly_cache fc
                 LEFT JOIN linkage l ON fc.firefly_id = l.firefly_id
                 LEFT JOIN extractions e ON l.extraction_id = e.id
@@ -4503,6 +4510,9 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
             )
             record["is_orphan"] = record.get("match_status") == "ORPHAN_CONFIRMED"
             record["category"] = record.get("category_name")
+            # Track if this was auto-matched so users can easily review
+            linked_by = record.get("linked_by")
+            record["is_auto_matched"] = linked_by == "AUTO"
 
             # Owner information for shared document badges
             record_user_id = record.get("user_id")
@@ -4627,10 +4637,25 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
     if is_superuser:
         all_users = list(User.objects.all().values("id", "username").order_by("username"))
 
+    # Get user profile defaults for sync filters
+    user_defaults = {
+        "paperless_filter_tags": "",
+        "default_source_account": "",
+        "sync_days": 90,
+    }
+    try:
+        if request.user.is_authenticated:
+            profile = request.user.profile
+            user_defaults["paperless_filter_tags"] = profile.paperless_filter_tags or ""
+            user_defaults["default_source_account"] = profile.default_source_account or ""
+    except Exception:
+        pass
+
     context = {
         "paperless_records": paperless_records,
         "firefly_records": firefly_records,
         "stats": stats,
+        "user_defaults": user_defaults,  # For pre-populating filter forms
         # Import queue data
         "ready_items": ready_items,
         "failed_items": failed_items,

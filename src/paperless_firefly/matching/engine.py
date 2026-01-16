@@ -44,6 +44,7 @@ class MatchResult:
     total_score: float
     signals: list[MatchScore] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
+    is_exact_match: bool = False  # True if amount, date, and account all match exactly
 
     @property
     def is_confident(self) -> bool:
@@ -57,6 +58,7 @@ class MatchResult:
             "firefly_id": self.firefly_id,
             "document_id": self.document_id,
             "total_score": self.total_score,
+            "is_exact_match": self.is_exact_match,
             "signals": [
                 {
                     "signal": s.signal,
@@ -137,6 +139,8 @@ class MatchingEngine:
         extracted_date = self._parse_date(extraction.get("date"))
         extracted_vendor = extraction.get("vendor") or extraction.get("correspondent")
         extracted_description = extraction.get("description", "")
+        # Get source account from extraction for exact matching
+        extracted_source = extraction.get("source_account")
 
         for tx in cached_transactions:
             signals: list[MatchScore] = []
@@ -173,6 +177,24 @@ class MatchingEngine:
             # Calculate total weighted score
             total_score = sum(s.weighted_score for s in signals)
 
+            # Check for exact match: amount exact + date same day + account match
+            # Account match = either source OR destination matches
+            is_exact = self._is_exact_match(
+                extracted_amount=extracted_amount,
+                extracted_date=extracted_date,
+                extracted_vendor=extracted_vendor,
+                extracted_source=extracted_source,
+                tx_amount=tx_amount,
+                tx_date=tx_date,
+                tx_source=tx.get("source_account"),
+                tx_destination=tx.get("destination_account"),
+            )
+            
+            if is_exact:
+                reasons.append("EXACT_MATCH (amount+date+account)")
+                # Boost score for exact matches to ensure they're at the top
+                total_score = max(total_score, 0.99)
+
             # Only include if score is above minimum threshold
             # Lower threshold (0.20) to show more suggestions for user review
             if total_score >= 0.20:  # Minimum viable match - show in suggestions
@@ -183,6 +205,7 @@ class MatchingEngine:
                         total_score=total_score,
                         signals=signals,
                         reasons=reasons,
+                        is_exact_match=is_exact,
                     )
                 )
 
@@ -225,14 +248,20 @@ class MatchingEngine:
                 match.total_score,
             )
 
-            # If auto-match threshold exceeded, update status
-            if match.total_score >= self.recon_config.auto_match_threshold:
-                logger.info(
-                    "Match proposal %d exceeds auto-match threshold (%.2f >= %.2f)",
-                    proposal_id,
-                    match.total_score,
-                    self.recon_config.auto_match_threshold,
-                )
+            # If auto-match threshold exceeded OR exact match, update status
+            if match.total_score >= self.recon_config.auto_match_threshold or match.is_exact_match:
+                if match.is_exact_match:
+                    logger.info(
+                        "Match proposal %d is EXACT MATCH (amount+date+account) - auto-matching",
+                        proposal_id,
+                    )
+                else:
+                    logger.info(
+                        "Match proposal %d exceeds auto-match threshold (%.2f >= %.2f)",
+                        proposal_id,
+                        match.total_score,
+                        self.recon_config.auto_match_threshold,
+                    )
                 self.store.update_proposal_status(proposal_id, "AUTO_MATCHED")
                 self.store.update_firefly_match_status(
                     match.firefly_id,
@@ -509,6 +538,76 @@ class MatchingEngine:
             weight=self.WEIGHT_VENDOR,
             detail="no match",
         )
+
+    def _is_exact_match(
+        self,
+        extracted_amount: Decimal | None,
+        extracted_date: datetime | None,
+        extracted_vendor: str | None,
+        extracted_source: str | None,
+        tx_amount: Decimal | None,
+        tx_date: datetime | None,
+        tx_source: str | None,
+        tx_destination: str | None,
+    ) -> bool:
+        """Check if there's an exact match on amount, date, and at least one account.
+        
+        Exact match criteria (all must be true):
+        1. Amount is exactly the same
+        2. Date is the same day (time ignored)
+        3. EITHER source OR destination account matches (one is enough)
+        
+        Args:
+            extracted_amount: Amount from document extraction.
+            extracted_date: Date from document extraction.
+            extracted_vendor: Destination account/vendor from extraction.
+            extracted_source: Source account from extraction.
+            tx_amount: Amount from Firefly transaction.
+            tx_date: Date from Firefly transaction.
+            tx_source: Source account from Firefly transaction.
+            tx_destination: Destination account from Firefly transaction.
+            
+        Returns:
+            True if all exact match criteria are satisfied.
+        """
+        # Check amount (exact match required)
+        if extracted_amount is None or tx_amount is None:
+            return False
+        if extracted_amount != tx_amount:
+            return False
+            
+        # Check date (same day, ignore time)
+        if extracted_date is None or tx_date is None:
+            return False
+        if extracted_date.date() != tx_date.date():
+            return False
+            
+        # Check account (either source OR destination must match)
+        account_match = False
+        
+        # Normalize for comparison
+        def normalize(s: str | None) -> str:
+            return s.lower().strip() if s else ""
+        
+        ext_vendor_norm = normalize(extracted_vendor)
+        ext_source_norm = normalize(extracted_source)
+        tx_source_norm = normalize(tx_source)
+        tx_dest_norm = normalize(tx_destination)
+        
+        # Check if extracted vendor matches either source or destination
+        if ext_vendor_norm and (ext_vendor_norm == tx_source_norm or ext_vendor_norm == tx_dest_norm):
+            account_match = True
+        # Check if extracted source matches transaction source
+        if ext_source_norm and ext_source_norm == tx_source_norm:
+            account_match = True
+        # Also check contains for partial matches (e.g., "Amazon" in "Amazon.com")
+        if ext_vendor_norm and (
+            (tx_source_norm and (ext_vendor_norm in tx_source_norm or tx_source_norm in ext_vendor_norm)) or
+            (tx_dest_norm and (ext_vendor_norm in tx_dest_norm or tx_dest_norm in ext_vendor_norm))
+        ):
+            account_match = True
+            
+        return account_match
 
     def _parse_amount(self, value: str | float | None) -> Decimal | None:
         """Parse amount to Decimal.
