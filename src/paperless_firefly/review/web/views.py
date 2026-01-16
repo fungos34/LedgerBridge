@@ -7050,7 +7050,7 @@ def api_sync_fetch(request, entity_type: str):
         )
 
     try:
-        from ..firefly_client.client import FireflyClient
+        from ...firefly_client.client import FireflyClient
 
         client = FireflyClient(firefly_url, firefly_token)
 
@@ -7293,7 +7293,7 @@ def api_sync_import(request):
     POST /api/sync/import/
     Body: {"record_ids": [...]}
     """
-    from ..firefly_client.client import FireflyClient
+    from ...firefly_client.client import FireflyClient
     from ...services.sync_fingerprints import compute_fingerprint, normalize_entity_data
     from .models import SyncImportLog, SyncPoolRecord, SyncPoolShare, UserProfile
 
@@ -7512,7 +7512,7 @@ def api_sync_preview(request, entity_type: str):
 
     Returns which records would be created vs skipped.
     """
-    from ..firefly_client.client import FireflyClient
+    from ...firefly_client.client import FireflyClient
     from .models import SyncPoolRecord, SyncPoolShare, UserProfile
 
     # Validate entity type
