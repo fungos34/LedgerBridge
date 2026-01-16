@@ -774,6 +774,191 @@ class FireflyClient:
 
         return categories
 
+    def list_tags(self) -> list[dict]:
+        """
+        List all tags from Firefly.
+
+        Returns:
+            List of tag dictionaries with id, tag (name), and description
+        """
+        tags = []
+        page = 1
+
+        while True:
+            response = self._request("GET", "/api/v1/tags", params={"page": page})
+            data = response.json()
+
+            for item in data.get("data", []):
+                attrs = item.get("attributes", {})
+                tags.append(
+                    {
+                        "id": int(item.get("id", 0)),
+                        "tag": attrs.get("tag", ""),
+                        "description": attrs.get("description"),
+                    }
+                )
+
+            # Check for more pages
+            meta = data.get("meta", {}).get("pagination", {})
+            if page >= meta.get("total_pages", 1):
+                break
+            page += 1
+
+        return tags
+
+    def create_tag(self, tag: str, description: str | None = None) -> int:
+        """
+        Create a new tag in Firefly.
+
+        Args:
+            tag: Tag name
+            description: Optional description
+
+        Returns:
+            Tag ID
+        """
+        payload = {"tag": tag}
+        if description:
+            payload["description"] = description
+
+        response = self._request("POST", "/api/v1/tags", json_data=payload)
+        data = response.json()
+        return int(data.get("data", {}).get("id", 0))
+
+    def find_tag_by_name(self, name: str) -> dict | None:
+        """
+        Find a tag by exact name match.
+
+        Args:
+            name: Tag name to search for
+
+        Returns:
+            Tag dict or None if not found
+        """
+        tags = self.list_tags()
+        name_lower = name.lower().strip()
+        for tag in tags:
+            if tag["tag"].lower().strip() == name_lower:
+                return tag
+        return None
+
+    def list_piggy_banks(self) -> list[dict]:
+        """
+        List all piggy banks from Firefly.
+
+        Returns:
+            List of piggy bank dictionaries
+        """
+        piggy_banks = []
+        page = 1
+
+        while True:
+            response = self._request("GET", "/api/v1/piggy-banks", params={"page": page})
+            data = response.json()
+
+            for item in data.get("data", []):
+                attrs = item.get("attributes", {})
+                piggy_banks.append(
+                    {
+                        "id": int(item.get("id", 0)),
+                        "name": attrs.get("name", ""),
+                        "target_amount": attrs.get("target_amount"),
+                        "current_amount": attrs.get("current_amount"),
+                        "account_id": attrs.get("account_id"),
+                        "notes": attrs.get("notes"),
+                    }
+                )
+
+            # Check for more pages
+            meta = data.get("meta", {}).get("pagination", {})
+            if page >= meta.get("total_pages", 1):
+                break
+            page += 1
+
+        return piggy_banks
+
+    def create_piggy_bank(
+        self,
+        name: str,
+        account_id: int,
+        target_amount: str | None = None,
+        notes: str | None = None,
+    ) -> int:
+        """
+        Create a new piggy bank in Firefly.
+
+        Args:
+            name: Piggy bank name
+            account_id: Linked asset account ID
+            target_amount: Target savings amount (optional)
+            notes: Optional notes
+
+        Returns:
+            Piggy bank ID
+        """
+        payload = {"name": name, "account_id": account_id}
+        if target_amount:
+            payload["target_amount"] = target_amount
+        if notes:
+            payload["notes"] = notes
+
+        response = self._request("POST", "/api/v1/piggy-banks", json_data=payload)
+        data = response.json()
+        return int(data.get("data", {}).get("id", 0))
+
+    def find_piggy_bank_by_name(self, name: str) -> dict | None:
+        """
+        Find a piggy bank by exact name match.
+
+        Args:
+            name: Piggy bank name to search for
+
+        Returns:
+            Piggy bank dict or None if not found
+        """
+        piggy_banks = self.list_piggy_banks()
+        name_lower = name.lower().strip()
+        for pb in piggy_banks:
+            if pb["name"].lower().strip() == name_lower:
+                return pb
+        return None
+
+    def create_category(self, name: str, notes: str | None = None) -> int:
+        """
+        Create a new category in Firefly.
+
+        Args:
+            name: Category name
+            notes: Optional notes
+
+        Returns:
+            Category ID
+        """
+        payload = {"name": name}
+        if notes:
+            payload["notes"] = notes
+
+        response = self._request("POST", "/api/v1/categories", json_data=payload)
+        data = response.json()
+        return int(data.get("data", {}).get("id", 0))
+
+    def find_category_by_name(self, name: str) -> FireflyCategory | None:
+        """
+        Find a category by exact name match.
+
+        Args:
+            name: Category name to search for
+
+        Returns:
+            FireflyCategory or None if not found
+        """
+        categories = self.list_categories()
+        name_lower = name.lower().strip()
+        for cat in categories:
+            if cat.name.lower().strip() == name_lower:
+                return cat
+        return None
+
     def get_unlinked_transactions(
         self,
         start_date: str,

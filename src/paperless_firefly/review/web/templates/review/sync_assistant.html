@@ -1,0 +1,938 @@
+{% extends "review/base.html" %}
+{% block title %}Firefly Sync Assistant{% endblock %}
+
+{% block extra_head %}
+<style>
+    .sync-container {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 1.5rem;
+    }
+
+    .sync-header {
+        margin-bottom: 1.5rem;
+    }
+
+    .sync-header h1 {
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: var(--gray-900);
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .sync-header p {
+        color: var(--gray-600);
+        margin-top: 0.25rem;
+    }
+
+    .no-token-warning {
+        background: #fef3c7;
+        border: 1px solid #fbbf24;
+        border-radius: 0.5rem;
+        padding: 1rem;
+        margin-bottom: 1.5rem;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }
+
+    .no-token-warning .icon {
+        font-size: 1.5rem;
+    }
+
+    .no-token-warning a {
+        color: #b45309;
+        font-weight: 600;
+    }
+
+    .entity-cards {
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+    }
+
+    .entity-card {
+        background: white;
+        border: 1px solid var(--gray-200);
+        border-radius: 0.5rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    }
+
+    .entity-card-header {
+        padding: 1rem;
+        border-bottom: 1px solid var(--gray-200);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: var(--gray-50);
+        border-radius: 0.5rem 0.5rem 0 0;
+    }
+
+    .entity-card-title {
+        font-size: 1.125rem;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .entity-card-body {
+        padding: 0;
+    }
+
+    /* Section styles */
+    .sync-section {
+        border-bottom: 1px solid var(--gray-100);
+    }
+
+    .sync-section:last-child {
+        border-bottom: none;
+    }
+
+    .sync-section-header {
+        padding: 0.75rem 1rem;
+        background: var(--gray-50);
+        cursor: pointer;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        user-select: none;
+    }
+
+    .sync-section-header:hover {
+        background: var(--gray-100);
+    }
+
+    .sync-section-title {
+        font-weight: 500;
+        font-size: 0.875rem;
+        color: var(--gray-700);
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .sync-section-toggle {
+        color: var(--gray-500);
+        font-size: 0.75rem;
+    }
+
+    .sync-section-content {
+        padding: 1rem;
+        display: none;
+    }
+
+    .sync-section.open .sync-section-content {
+        display: block;
+    }
+
+    .sync-section.open .sync-section-toggle::before {
+        content: '▼';
+    }
+
+    .sync-section-toggle::before {
+        content: '▶';
+    }
+
+    /* Fetch section */
+    .fetch-controls {
+        display: flex;
+        gap: 0.75rem;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+
+    .fetch-filter {
+        flex: 1;
+        min-width: 200px;
+        max-width: 400px;
+        padding: 0.5rem 0.75rem;
+        border: 1px solid var(--gray-300);
+        border-radius: 0.375rem;
+        font-size: 0.875rem;
+    }
+
+    .btn-fetch {
+        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+        color: white;
+        padding: 0.5rem 1rem;
+        border-radius: 0.375rem;
+        border: none;
+        font-weight: 600;
+        font-size: 0.875rem;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        transition: all 0.15s;
+    }
+
+    .btn-fetch:hover {
+        background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+    }
+
+    .btn-fetch:disabled {
+        background: var(--gray-300);
+        cursor: not-allowed;
+    }
+
+    /* Records table */
+    .records-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+    }
+
+    .records-table th,
+    .records-table td {
+        padding: 0.625rem 0.75rem;
+        text-align: left;
+        border-bottom: 1px solid var(--gray-100);
+    }
+
+    .records-table th {
+        background: var(--gray-50);
+        font-weight: 600;
+        color: var(--gray-700);
+    }
+
+    .records-table tbody tr:hover {
+        background: var(--gray-50);
+    }
+
+    .records-table .checkbox-cell {
+        width: 40px;
+        text-align: center;
+    }
+
+    .records-table .name-cell {
+        font-weight: 500;
+    }
+
+    .records-table .owner-cell {
+        color: var(--gray-600);
+    }
+
+    .records-table .badge {
+        display: inline-block;
+        padding: 0.125rem 0.5rem;
+        border-radius: 9999px;
+        font-size: 0.75rem;
+        font-weight: 500;
+    }
+
+    .badge-shared {
+        background: #dbeafe;
+        color: #1e40af;
+    }
+
+    .badge-create {
+        background: #dcfce7;
+        color: #166534;
+    }
+
+    .badge-skip {
+        background: #f3f4f6;
+        color: #6b7280;
+    }
+
+    .empty-state {
+        text-align: center;
+        padding: 2rem;
+        color: var(--gray-500);
+    }
+
+    .empty-state .icon {
+        font-size: 2rem;
+        margin-bottom: 0.5rem;
+    }
+
+    /* Action bar */
+    .action-bar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.75rem 0;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+    }
+
+    .action-bar-left {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+    }
+
+    .btn-share {
+        background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+        color: white;
+        padding: 0.375rem 0.75rem;
+        border-radius: 0.375rem;
+        border: none;
+        font-weight: 600;
+        font-size: 0.75rem;
+        cursor: pointer;
+        transition: all 0.15s;
+    }
+
+    .btn-share:hover {
+        background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
+    }
+
+    .btn-import {
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        color: white;
+        padding: 0.375rem 0.75rem;
+        border-radius: 0.375rem;
+        border: none;
+        font-weight: 600;
+        font-size: 0.75rem;
+        cursor: pointer;
+        transition: all 0.15s;
+    }
+
+    .btn-import:hover {
+        background: linear-gradient(135deg, #059669 0%, #047857 100%);
+    }
+
+    .btn-import:disabled,
+    .btn-share:disabled {
+        background: var(--gray-300);
+        cursor: not-allowed;
+    }
+
+    /* Share modal */
+    .modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+    }
+
+    .modal-content {
+        background: white;
+        border-radius: 0.5rem;
+        max-width: 400px;
+        width: 90%;
+        max-height: 80vh;
+        overflow-y: auto;
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+    }
+
+    .modal-header {
+        padding: 1rem;
+        border-bottom: 1px solid var(--gray-200);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .modal-title {
+        font-size: 1rem;
+        font-weight: 600;
+    }
+
+    .modal-close {
+        background: none;
+        border: none;
+        font-size: 1.25rem;
+        cursor: pointer;
+        color: var(--gray-500);
+    }
+
+    .modal-body {
+        padding: 1rem;
+    }
+
+    .user-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .user-list-item {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem;
+        border: 1px solid var(--gray-200);
+        border-radius: 0.375rem;
+        cursor: pointer;
+    }
+
+    .user-list-item:hover {
+        background: var(--gray-50);
+    }
+
+    .user-list-item.selected {
+        background: #dbeafe;
+        border-color: #3b82f6;
+    }
+
+    .modal-footer {
+        padding: 1rem;
+        border-top: 1px solid var(--gray-200);
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.5rem;
+    }
+
+    /* Loading spinner */
+    .loading-spinner {
+        display: inline-block;
+        width: 1rem;
+        height: 1rem;
+        border: 2px solid currentColor;
+        border-radius: 50%;
+        border-top-color: transparent;
+        animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+        to { transform: rotate(360deg); }
+    }
+
+    /* Toast notifications */
+    .toast {
+        position: fixed;
+        bottom: 1rem;
+        right: 1rem;
+        padding: 0.75rem 1rem;
+        border-radius: 0.5rem;
+        color: white;
+        font-weight: 500;
+        z-index: 2000;
+        animation: slideIn 0.3s ease-out;
+    }
+
+    .toast-success {
+        background: #059669;
+    }
+
+    .toast-error {
+        background: #dc2626;
+    }
+
+    @keyframes slideIn {
+        from {
+            transform: translateX(100%);
+            opacity: 0;
+        }
+        to {
+            transform: translateX(0);
+            opacity: 1;
+        }
+    }
+
+    /* Account type filter */
+    .type-filter {
+        padding: 0.375rem 0.75rem;
+        border: 1px solid var(--gray-300);
+        border-radius: 0.375rem;
+        font-size: 0.875rem;
+        background: white;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="sync-container">
+    <div class="sync-header">
+        <h1>🔄 Firefly Sync Assistant</h1>
+        <p>Fetch entities from your Firefly, share them with other users, and import shared entities into your Firefly.</p>
+    </div>
+
+    {% if not has_firefly_token %}
+    <div class="no-token-warning">
+        <span class="icon">⚠️</span>
+        <div>
+            <strong>Firefly token not configured.</strong>
+            <p>Please add your Firefly III API token in <a href="{% url 'settings' %}">Settings</a> to use the Sync Assistant.</p>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="entity-cards">
+        {% for entity in entity_types %}
+        <div class="entity-card" data-entity-type="{{ entity.key }}">
+            <div class="entity-card-header">
+                <div class="entity-card-title">
+                    <span>{{ entity.icon }}</span>
+                    <span>{{ entity.name }}</span>
+                </div>
+                <div class="entity-stats">
+                    <span class="owned-count">0</span> owned,
+                    <span class="shared-count">0</span> shared
+                </div>
+            </div>
+            <div class="entity-card-body">
+                <!-- Fetch Section -->
+                <div class="sync-section open">
+                    <div class="sync-section-header" onclick="toggleSection(this)">
+                        <span class="sync-section-title">
+                            <span>📥</span> My Firefly → My Pool
+                        </span>
+                        <span class="sync-section-toggle"></span>
+                    </div>
+                    <div class="sync-section-content">
+                        <div class="fetch-controls">
+                            {% if entity.key == 'account' %}
+                            <select class="type-filter" id="account-type-filter-{{ entity.key }}">
+                                <option value="">All Types</option>
+                                <option value="asset">Asset</option>
+                                <option value="expense">Expense</option>
+                                <option value="revenue">Revenue</option>
+                                <option value="liability">Liability</option>
+                            </select>
+                            {% endif %}
+                            <button type="button" class="btn-fetch" onclick="fetchEntities('{{ entity.key }}')" {% if not has_firefly_token %}disabled{% endif %}>
+                                <span class="btn-text">🔄 Fetch from my Firefly</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Owned Pool Section -->
+                <div class="sync-section open">
+                    <div class="sync-section-header" onclick="toggleSection(this)">
+                        <span class="sync-section-title">
+                            <span>📦</span> My Pool (Owned)
+                        </span>
+                        <span class="sync-section-toggle"></span>
+                    </div>
+                    <div class="sync-section-content">
+                        <div class="action-bar">
+                            <div class="action-bar-left">
+                                <label>
+                                    <input type="checkbox" class="select-all-owned" onchange="toggleSelectAll(this, '{{ entity.key }}', 'owned')">
+                                    Select All
+                                </label>
+                            </div>
+                            <button type="button" class="btn-share" onclick="openShareModal('{{ entity.key }}')" {% if not has_firefly_token %}disabled{% endif %}>
+                                👥 Share Selected
+                            </button>
+                        </div>
+                        <div class="owned-records-container" id="owned-{{ entity.key }}">
+                            <div class="empty-state">
+                                <div class="icon">📭</div>
+                                <p>No records yet. Fetch from your Firefly to populate your pool.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Shared With Me Section -->
+                <div class="sync-section open">
+                    <div class="sync-section-header" onclick="toggleSection(this)">
+                        <span class="sync-section-title">
+                            <span>📬</span> Shared With Me
+                        </span>
+                        <span class="sync-section-toggle"></span>
+                    </div>
+                    <div class="sync-section-content">
+                        <div class="action-bar">
+                            <div class="action-bar-left">
+                                <label>
+                                    <input type="checkbox" class="select-all-shared" onchange="toggleSelectAll(this, '{{ entity.key }}', 'shared')">
+                                    Select All
+                                </label>
+                            </div>
+                            <button type="button" class="btn-import" onclick="importSelected('{{ entity.key }}')" {% if not has_firefly_token %}disabled{% endif %}>
+                                📥 Import Selected to My Firefly
+                            </button>
+                        </div>
+                        <div class="shared-records-container" id="shared-{{ entity.key }}">
+                            <div class="empty-state">
+                                <div class="icon">📭</div>
+                                <p>No records have been shared with you yet.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Share Modal -->
+<div id="share-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 class="modal-title">Share with Users</h3>
+            <button type="button" class="modal-close" onclick="closeShareModal()">×</button>
+        </div>
+        <div class="modal-body">
+            <p style="margin-bottom: 0.75rem; font-size: 0.875rem; color: var(--gray-600);">
+                Select users to share the selected records with:
+            </p>
+            <div class="user-list" id="share-user-list">
+                <div class="empty-state">
+                    <p>Loading users...</p>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-sm btn-outline" onclick="closeShareModal()">Cancel</button>
+            <button type="button" class="btn-share" onclick="confirmShare()">Share</button>
+        </div>
+    </div>
+</div>
+
+<script>
+const CSRF_TOKEN = '{{ csrf_token }}';
+let currentShareEntityType = null;
+let eligibleUsers = [];
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    // Load all entity types
+    {% for entity in entity_types %}
+    loadPoolRecords('{{ entity.key }}');
+    {% endfor %}
+    
+    // Load eligible users
+    loadEligibleUsers();
+});
+
+function toggleSection(header) {
+    const section = header.parentElement;
+    section.classList.toggle('open');
+}
+
+function showToast(message, type = 'success') {
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    
+    setTimeout(() => {
+        toast.remove();
+    }, 3000);
+}
+
+async function fetchEntities(entityType) {
+    const btn = event.target.closest('.btn-fetch');
+    const originalHtml = btn.innerHTML;
+    btn.innerHTML = '<span class="loading-spinner"></span> Fetching...';
+    btn.disabled = true;
+    
+    try {
+        const response = await fetch(`/api/sync/fetch/${entityType}/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': CSRF_TOKEN
+            }
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast(`Fetched ${data.total} ${entityType}s (${data.created} new, ${data.updated} updated)`);
+            loadPoolRecords(entityType);
+        } else {
+            showToast(data.error || 'Failed to fetch', 'error');
+        }
+    } catch (error) {
+        showToast('Connection error', 'error');
+        console.error(error);
+    } finally {
+        btn.innerHTML = originalHtml;
+        btn.disabled = false;
+    }
+}
+
+async function loadPoolRecords(entityType) {
+    try {
+        const response = await fetch(`/api/sync/pool/${entityType}/`);
+        const data = await response.json();
+        
+        if (data.success) {
+            renderOwnedRecords(entityType, data.owned);
+            renderSharedRecords(entityType, data.shared);
+            
+            // Update stats
+            const card = document.querySelector(`[data-entity-type="${entityType}"]`);
+            card.querySelector('.owned-count').textContent = data.owned.length;
+            card.querySelector('.shared-count').textContent = data.shared.length;
+        }
+    } catch (error) {
+        console.error('Error loading pool records:', error);
+    }
+}
+
+function renderOwnedRecords(entityType, records) {
+    const container = document.getElementById(`owned-${entityType}`);
+    
+    if (!records.length) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <div class="icon">📭</div>
+                <p>No records yet. Fetch from your Firefly to populate your pool.</p>
+            </div>
+        `;
+        return;
+    }
+    
+    let html = `
+        <table class="records-table">
+            <thead>
+                <tr>
+                    <th class="checkbox-cell">
+                        <input type="checkbox" class="select-all-owned" onchange="toggleSelectAll(this, '${entityType}', 'owned')">
+                    </th>
+                    <th>Name</th>
+                    <th>Shared With</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+    
+    for (const record of records) {
+        const sharedWith = record.shared_with.length > 0 
+            ? `<span class="badge badge-shared">${record.shared_with.length} users</span>` 
+            : '<span style="color: var(--gray-400)">—</span>';
+        
+        html += `
+            <tr>
+                <td class="checkbox-cell">
+                    <input type="checkbox" class="record-checkbox owned-checkbox-${entityType}" value="${record.id}">
+                </td>
+                <td class="name-cell">${escapeHtml(record.name)}</td>
+                <td>${sharedWith}</td>
+            </tr>
+        `;
+    }
+    
+    html += '</tbody></table>';
+    container.innerHTML = html;
+}
+
+function renderSharedRecords(entityType, records) {
+    const container = document.getElementById(`shared-${entityType}`);
+    
+    if (!records.length) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <div class="icon">📭</div>
+                <p>No records have been shared with you yet.</p>
+            </div>
+        `;
+        return;
+    }
+    
+    let html = `
+        <table class="records-table">
+            <thead>
+                <tr>
+                    <th class="checkbox-cell">
+                        <input type="checkbox" class="select-all-shared" onchange="toggleSelectAll(this, '${entityType}', 'shared')">
+                    </th>
+                    <th>Name</th>
+                    <th>Owner</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+    
+    for (const record of records) {
+        html += `
+            <tr>
+                <td class="checkbox-cell">
+                    <input type="checkbox" class="record-checkbox shared-checkbox-${entityType}" value="${record.id}">
+                </td>
+                <td class="name-cell">${escapeHtml(record.name)}</td>
+                <td class="owner-cell">${escapeHtml(record.owner)}</td>
+                <td><span class="badge badge-create preview-${record.id}">Loading...</span></td>
+            </tr>
+        `;
+    }
+    
+    html += '</tbody></table>';
+    container.innerHTML = html;
+    
+    // Load preview status
+    loadPreviewStatus(entityType);
+}
+
+async function loadPreviewStatus(entityType) {
+    try {
+        const response = await fetch(`/api/sync/preview/${entityType}/`);
+        const data = await response.json();
+        
+        if (data.success) {
+            for (const preview of data.previews) {
+                const badge = document.querySelector(`.preview-${preview.id}`);
+                if (badge) {
+                    if (preview.status === 'create') {
+                        badge.className = 'badge badge-create';
+                        badge.textContent = 'Will Create';
+                    } else {
+                        badge.className = 'badge badge-skip';
+                        badge.textContent = 'Will Skip';
+                    }
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error loading preview status:', error);
+    }
+}
+
+function toggleSelectAll(checkbox, entityType, section) {
+    const checkboxes = document.querySelectorAll(`.${section}-checkbox-${entityType}`);
+    for (const cb of checkboxes) {
+        cb.checked = checkbox.checked;
+    }
+}
+
+async function loadEligibleUsers() {
+    try {
+        const response = await fetch('/api/sync/eligible-users/');
+        const data = await response.json();
+        
+        if (data.success) {
+            eligibleUsers = data.users;
+        }
+    } catch (error) {
+        console.error('Error loading eligible users:', error);
+    }
+}
+
+function openShareModal(entityType) {
+    currentShareEntityType = entityType;
+    
+    // Check if any records are selected
+    const selected = document.querySelectorAll(`.owned-checkbox-${entityType}:checked`);
+    if (selected.length === 0) {
+        showToast('Please select records to share', 'error');
+        return;
+    }
+    
+    // Render user list
+    const container = document.getElementById('share-user-list');
+    
+    if (eligibleUsers.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <p>No other users with Firefly tokens configured.</p>
+            </div>
+        `;
+    } else {
+        container.innerHTML = eligibleUsers.map(user => `
+            <div class="user-list-item" onclick="toggleUserSelection(this, ${user.id})">
+                <input type="checkbox" class="share-user-checkbox" value="${user.id}">
+                <span>${escapeHtml(user.username)}</span>
+            </div>
+        `).join('');
+    }
+    
+    document.getElementById('share-modal').style.display = 'flex';
+}
+
+function closeShareModal() {
+    document.getElementById('share-modal').style.display = 'none';
+    currentShareEntityType = null;
+}
+
+function toggleUserSelection(item, userId) {
+    item.classList.toggle('selected');
+    const checkbox = item.querySelector('input[type="checkbox"]');
+    checkbox.checked = !checkbox.checked;
+}
+
+async function confirmShare() {
+    if (!currentShareEntityType) return;
+    
+    const recordIds = Array.from(document.querySelectorAll(`.owned-checkbox-${currentShareEntityType}:checked`))
+        .map(cb => parseInt(cb.value));
+    
+    const userIds = Array.from(document.querySelectorAll('.share-user-checkbox:checked'))
+        .map(cb => parseInt(cb.value));
+    
+    if (userIds.length === 0) {
+        showToast('Please select users to share with', 'error');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/sync/share/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': CSRF_TOKEN
+            },
+            body: JSON.stringify({ record_ids: recordIds, user_ids: userIds })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast(`Created ${data.shares_created} shares`);
+            closeShareModal();
+            loadPoolRecords(currentShareEntityType);
+        } else {
+            showToast(data.error || 'Failed to share', 'error');
+        }
+    } catch (error) {
+        showToast('Connection error', 'error');
+        console.error(error);
+    }
+}
+
+async function importSelected(entityType) {
+    const selected = document.querySelectorAll(`.shared-checkbox-${entityType}:checked`);
+    if (selected.length === 0) {
+        showToast('Please select records to import', 'error');
+        return;
+    }
+    
+    const recordIds = Array.from(selected).map(cb => parseInt(cb.value));
+    
+    const btn = event.target.closest('.btn-import');
+    const originalHtml = btn.innerHTML;
+    btn.innerHTML = '<span class="loading-spinner"></span> Importing...';
+    btn.disabled = true;
+    
+    try {
+        const response = await fetch('/api/sync/import/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': CSRF_TOKEN
+            },
+            body: JSON.stringify({ record_ids: recordIds })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            const summary = data.summary;
+            showToast(`Imported: ${summary.created} created, ${summary.skipped} skipped, ${summary.errors} errors`);
+            loadPoolRecords(entityType);
+        } else {
+            showToast(data.error || 'Failed to import', 'error');
+        }
+    } catch (error) {
+        showToast('Connection error', 'error');
+        console.error(error);
+    } finally {
+        btn.innerHTML = originalHtml;
+        btn.disabled = false;
+    }
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+</script>
+{% endblock %}

@@ -207,4 +207,15 @@ urlpatterns = [
     # Processing History (Unified Archive + Documents + AI Queue + Audit)
     # ============================================================================
     path("processing-history/", views.processing_history, name="processing_history"),
+    # ============================================================================
+    # Firefly Sync Assistant (Pool + Share + Import)
+    # ============================================================================
+    path("sync-assistant/", views.sync_assistant, name="sync_assistant"),
+    path("api/sync/fetch/<str:entity_type>/", views.api_sync_fetch, name="api_sync_fetch"),
+    path("api/sync/pool/<str:entity_type>/", views.api_sync_pool, name="api_sync_pool"),
+    path("api/sync/share/", views.api_sync_share, name="api_sync_share"),
+    path("api/sync/share/<int:share_id>/", views.api_sync_unshare, name="api_sync_unshare"),
+    path("api/sync/import/", views.api_sync_import, name="api_sync_import"),
+    path("api/sync/eligible-users/", views.api_sync_eligible_users, name="api_sync_eligible_users"),
+    path("api/sync/preview/<str:entity_type>/", views.api_sync_preview, name="api_sync_preview"),
 ]

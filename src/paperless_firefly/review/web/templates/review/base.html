@@ -496,6 +496,7 @@
                     <div class="user-dropdown-menu" id="user-dropdown-menu" style="display: none; position: absolute; right: 0; top: 100%; margin-top: 0.25rem; background: white; border: 1px solid var(--gray-200); border-radius: 0.375rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1); min-width: 180px; z-index: 100;">
                         <a href="{% url 'settings' %}" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">⚙️ Settings</a>
                         <a href="{% url 'change_password' %}" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">🔑 Change Password</a>
+                        <a href="{% url 'sync_assistant' %}" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">🔄 Sync Assistant</a>
                         {% if syncthing_url or firefly_importer_url %}
                         <div style="border-top: 1px solid var(--gray-200); margin: 0.25rem 0;"></div>
                         {% if syncthing_url %}

@@ -6964,3 +6964,629 @@ def ai_queue_job_detail(request: HttpRequest, job_id: int) -> JsonResponse:
             },
         }
     )
+
+
+# =============================================================================
+# Firefly Sync Assistant Views (Pool + Share + Import)
+# =============================================================================
+
+
+@login_required
+def sync_assistant(request):
+    """
+    Main page for Firefly Sync Assistant.
+
+    Displays cards for each entity type with fetch, pool display, and import functionality.
+    """
+    # Check if user has Firefly token configured
+    has_firefly_token = False
+    try:
+        profile = UserProfile.objects.get(user=request.user)
+        has_firefly_token = profile.has_firefly_token
+    except UserProfile.DoesNotExist:
+        pass
+
+    context = {
+        "has_firefly_token": has_firefly_token,
+        "entity_types": [
+            {"key": "category", "name": "Categories", "icon": "📁"},
+            {"key": "tag", "name": "Tags", "icon": "🏷️"},
+            {"key": "account", "name": "Accounts", "icon": "🏦"},
+            {"key": "piggy_bank", "name": "Piggy Banks", "icon": "🐷"},
+        ],
+    }
+    return render(request, "review/sync_assistant.html", context)
+
+
+@login_required
+@require_POST
+def api_sync_fetch(request, entity_type: str):
+    """
+    Fetch entities from user's Firefly into their pool.
+
+    POST /api/sync/fetch/<entity_type>/
+    """
+    from ..services.sync_fingerprints import (
+        compute_fingerprint,
+        get_entity_name,
+        normalize_entity_data,
+    )
+    from .models import SyncPoolRecord
+
+    # Validate entity type
+    valid_types = ["category", "tag", "account", "piggy_bank"]
+    if entity_type not in valid_types:
+        return JsonResponse(
+            {"success": False, "error": f"Invalid entity type: {entity_type}"}, status=400
+        )
+
+    # Check Firefly token
+    try:
+        profile = UserProfile.objects.get(user=request.user)
+        if not profile.has_firefly_token:
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": "Please configure your Firefly token in Settings",
+                },
+                status=400,
+            )
+    except UserProfile.DoesNotExist:
+        return JsonResponse(
+            {"success": False, "error": "User profile not found"},
+            status=400,
+        )
+
+    # Get Firefly URL and token
+    firefly_url = profile.firefly_url or settings.FIREFLY_URL
+    firefly_token = profile.firefly_token
+
+    if not firefly_url:
+        return JsonResponse(
+            {"success": False, "error": "Firefly URL not configured"},
+            status=400,
+        )
+
+    try:
+        from ..firefly_client.client import FireflyClient
+
+        client = FireflyClient(firefly_url, firefly_token)
+
+        # Fetch entities from Firefly
+        entities = []
+        if entity_type == "category":
+            raw_entities = client.list_categories()
+            entities = [
+                {"id": e.id, "attrs": {"name": e.name, "notes": e.notes}} for e in raw_entities
+            ]
+        elif entity_type == "tag":
+            raw_entities = client.list_tags()
+            entities = [{"id": e["id"], "attrs": e} for e in raw_entities]
+        elif entity_type == "account":
+            # Fetch all account types
+            all_accounts = []
+            for acc_type in ["asset", "expense", "revenue", "liability", "cash"]:
+                all_accounts.extend(client.list_accounts(acc_type))
+            entities = [{"id": e["id"], "attrs": e} for e in all_accounts]
+        elif entity_type == "piggy_bank":
+            raw_entities = client.list_piggy_banks()
+            entities = [{"id": e["id"], "attrs": e} for e in raw_entities]
+
+        # Upsert into pool
+        created_count = 0
+        updated_count = 0
+        for entity in entities:
+            firefly_id = int(entity["id"])
+            attrs = entity["attrs"]
+
+            # Normalize and compute fingerprint
+            normalized_data = normalize_entity_data(entity_type, attrs)
+            fingerprint = compute_fingerprint(entity_type, normalized_data)
+            name = get_entity_name(entity_type, normalized_data)
+
+            # Upsert
+            record, created = SyncPoolRecord.objects.update_or_create(
+                owner=request.user,
+                entity_type=entity_type,
+                fingerprint=fingerprint,
+                defaults={
+                    "firefly_id": firefly_id,
+                    "data_json": json.dumps(normalized_data),
+                    "name": name,
+                },
+            )
+
+            if created:
+                created_count += 1
+            else:
+                updated_count += 1
+
+        return JsonResponse(
+            {
+                "success": True,
+                "created": created_count,
+                "updated": updated_count,
+                "total": len(entities),
+            }
+        )
+
+    except Exception as e:
+        logger.exception(f"Error fetching {entity_type} from Firefly")
+        return JsonResponse(
+            {"success": False, "error": str(e)},
+            status=500,
+        )
+
+
+@login_required
+def api_sync_pool(request, entity_type: str):
+    """
+    List pool records for an entity type.
+
+    GET /api/sync/pool/<entity_type>/
+
+    Returns owned and shared-with-me records separately.
+    """
+    from .models import SyncPoolRecord, SyncPoolShare
+
+    # Validate entity type
+    valid_types = ["category", "tag", "account", "piggy_bank"]
+    if entity_type not in valid_types:
+        return JsonResponse(
+            {"success": False, "error": f"Invalid entity type: {entity_type}"}, status=400
+        )
+
+    # Get owned records
+    owned_records = SyncPoolRecord.objects.filter(
+        owner=request.user, entity_type=entity_type
+    ).order_by("name")
+
+    owned_list = []
+    for record in owned_records:
+        # Get share count
+        share_count = SyncPoolShare.objects.filter(record=record).count()
+        shared_with = list(
+            SyncPoolShare.objects.filter(record=record)
+            .select_related("shared_with")
+            .values_list("shared_with__username", flat=True)
+        )
+
+        try:
+            data = json.loads(record.data_json)
+        except json.JSONDecodeError:
+            data = {}
+
+        owned_list.append(
+            {
+                "id": record.id,
+                "name": record.name,
+                "data": data,
+                "fingerprint": record.fingerprint,
+                "firefly_id": record.firefly_id,
+                "fetched_at": record.fetched_at.isoformat(),
+                "share_count": share_count,
+                "shared_with": shared_with,
+            }
+        )
+
+    # Get shared-with-me records
+    shared_record_ids = SyncPoolShare.objects.filter(shared_with=request.user).values_list(
+        "record_id", flat=True
+    )
+    shared_records = SyncPoolRecord.objects.filter(
+        id__in=shared_record_ids, entity_type=entity_type
+    ).select_related("owner")
+
+    shared_list = []
+    for record in shared_records:
+        try:
+            data = json.loads(record.data_json)
+        except json.JSONDecodeError:
+            data = {}
+
+        shared_list.append(
+            {
+                "id": record.id,
+                "name": record.name,
+                "data": data,
+                "fingerprint": record.fingerprint,
+                "owner": record.owner.username,
+                "fetched_at": record.fetched_at.isoformat(),
+            }
+        )
+
+    return JsonResponse(
+        {
+            "success": True,
+            "owned": owned_list,
+            "shared": shared_list,
+        }
+    )
+
+
+@login_required
+@require_POST
+def api_sync_share(request):
+    """
+    Share pool records with other users.
+
+    POST /api/sync/share/
+    Body: {"record_ids": [...], "user_ids": [...]}
+    """
+    from .models import SyncPoolRecord, SyncPoolShare
+
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"success": False, "error": "Invalid JSON"}, status=400)
+
+    record_ids = body.get("record_ids", [])
+    user_ids = body.get("user_ids", [])
+
+    if not record_ids or not user_ids:
+        return JsonResponse(
+            {"success": False, "error": "record_ids and user_ids are required"}, status=400
+        )
+
+    # Verify ownership of all records
+    owned_count = SyncPoolRecord.objects.filter(id__in=record_ids, owner=request.user).count()
+    if owned_count != len(record_ids):
+        return JsonResponse(
+            {"success": False, "error": "You can only share records you own"}, status=403
+        )
+
+    # Get target users (exclude self)
+    target_users = User.objects.filter(id__in=user_ids).exclude(id=request.user.id)
+
+    # Create shares
+    created_count = 0
+    for record_id in record_ids:
+        for user in target_users:
+            _, created = SyncPoolShare.objects.get_or_create(
+                record_id=record_id, shared_with=user, defaults={"shared_by": request.user}
+            )
+            if created:
+                created_count += 1
+
+    return JsonResponse(
+        {
+            "success": True,
+            "shares_created": created_count,
+        }
+    )
+
+
+@login_required
+@require_http_methods(["DELETE"])
+def api_sync_unshare(request, share_id: int):
+    """
+    Revoke a share.
+
+    DELETE /api/sync/share/<share_id>/
+    """
+    from .models import SyncPoolShare
+
+    try:
+        share = SyncPoolShare.objects.select_related("record").get(id=share_id)
+    except SyncPoolShare.DoesNotExist:
+        return JsonResponse({"success": False, "error": "Share not found"}, status=404)
+
+    # Verify ownership
+    if share.record.owner != request.user:
+        return JsonResponse(
+            {"success": False, "error": "You can only revoke shares for records you own"},
+            status=403,
+        )
+
+    share.delete()
+    return JsonResponse({"success": True})
+
+
+@login_required
+@require_POST
+def api_sync_import(request):
+    """
+    Import pool records into user's Firefly.
+
+    POST /api/sync/import/
+    Body: {"record_ids": [...]}
+    """
+    from ..firefly_client.client import FireflyClient
+    from ..services.sync_fingerprints import compute_fingerprint, normalize_entity_data
+    from .models import SyncImportLog, SyncPoolRecord, SyncPoolShare
+
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"success": False, "error": "Invalid JSON"}, status=400)
+
+    record_ids = body.get("record_ids", [])
+    if not record_ids:
+        return JsonResponse({"success": False, "error": "record_ids required"}, status=400)
+
+    # Check Firefly token
+    try:
+        profile = UserProfile.objects.get(user=request.user)
+        if not profile.has_firefly_token:
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": "Please configure your Firefly token in Settings",
+                },
+                status=400,
+            )
+    except UserProfile.DoesNotExist:
+        return JsonResponse(
+            {"success": False, "error": "User profile not found"},
+            status=400,
+        )
+
+    # Verify access to all records (owned or shared-with-me)
+    owned_ids = set(
+        SyncPoolRecord.objects.filter(id__in=record_ids, owner=request.user).values_list(
+            "id", flat=True
+        )
+    )
+    shared_ids = set(
+        SyncPoolShare.objects.filter(
+            record_id__in=record_ids, shared_with=request.user
+        ).values_list("record_id", flat=True)
+    )
+    accessible_ids = owned_ids | shared_ids
+
+    if len(accessible_ids) != len(record_ids):
+        return JsonResponse(
+            {"success": False, "error": "You can only import records you own or that are shared with you"},
+            status=403,
+        )
+
+    # Get records
+    records = SyncPoolRecord.objects.filter(id__in=record_ids).select_related("owner")
+
+    # Connect to user's Firefly
+    firefly_url = profile.firefly_url or settings.FIREFLY_URL
+    firefly_token = profile.firefly_token
+
+    try:
+        client = FireflyClient(firefly_url, firefly_token)
+    except Exception as e:
+        return JsonResponse(
+            {"success": False, "error": f"Could not connect to Firefly: {e}"},
+            status=500,
+        )
+
+    results = []
+    for record in records:
+        try:
+            data = json.loads(record.data_json)
+        except json.JSONDecodeError:
+            data = {}
+
+        result = {
+            "id": record.id,
+            "name": record.name,
+            "entity_type": record.entity_type,
+        }
+
+        try:
+            # Check if entity already exists in user's Firefly
+            existing = None
+            target_firefly_id = None
+
+            if record.entity_type == "category":
+                existing = client.find_category_by_name(data.get("name", ""))
+                if existing:
+                    result["status"] = "skipped"
+                    result["reason"] = "Already exists"
+                    target_firefly_id = existing.id
+                else:
+                    target_firefly_id = client.create_category(
+                        name=data.get("name", ""), notes=data.get("notes")
+                    )
+                    result["status"] = "created"
+
+            elif record.entity_type == "tag":
+                existing = client.find_tag_by_name(data.get("tag", ""))
+                if existing:
+                    result["status"] = "skipped"
+                    result["reason"] = "Already exists"
+                    target_firefly_id = existing["id"]
+                else:
+                    target_firefly_id = client.create_tag(
+                        tag=data.get("tag", ""), description=data.get("description")
+                    )
+                    result["status"] = "created"
+
+            elif record.entity_type == "account":
+                # Find by name and type
+                accounts = client.list_accounts(data.get("type", "expense"))
+                existing = None
+                name_lower = data.get("name", "").lower().strip()
+                for acc in accounts:
+                    if acc["name"].lower().strip() == name_lower:
+                        existing = acc
+                        break
+
+                if existing:
+                    result["status"] = "skipped"
+                    result["reason"] = "Already exists"
+                    target_firefly_id = int(existing["id"])
+                else:
+                    target_firefly_id = client.find_or_create_account(
+                        name=data.get("name", ""),
+                        account_type=data.get("type", "expense"),
+                        currency_code=data.get("currency_code", "EUR"),
+                    )
+                    result["status"] = "created"
+
+            elif record.entity_type == "piggy_bank":
+                existing = client.find_piggy_bank_by_name(data.get("name", ""))
+                if existing:
+                    result["status"] = "skipped"
+                    result["reason"] = "Already exists"
+                    target_firefly_id = existing["id"]
+                else:
+                    # Piggy banks require an account - get first asset account
+                    asset_accounts = client.list_accounts("asset")
+                    if not asset_accounts:
+                        result["status"] = "error"
+                        result["error"] = "No asset account available for piggy bank"
+                    else:
+                        target_firefly_id = client.create_piggy_bank(
+                            name=data.get("name", ""),
+                            account_id=int(asset_accounts[0]["id"]),
+                            target_amount=data.get("target_amount"),
+                            notes=data.get("notes"),
+                        )
+                        result["status"] = "created"
+
+            result["target_firefly_id"] = target_firefly_id
+
+        except Exception as e:
+            result["status"] = "error"
+            result["error"] = str(e)
+            logger.exception(f"Error importing {record.entity_type} {record.name}")
+
+        # Log the import
+        SyncImportLog.objects.create(
+            user=request.user,
+            pool_record=record,
+            entity_type=record.entity_type,
+            fingerprint=record.fingerprint,
+            name=record.name,
+            status=result.get("status", "error"),
+            target_firefly_id=result.get("target_firefly_id"),
+            error_message=result.get("error", ""),
+            source_owner=record.owner,
+        )
+
+        results.append(result)
+
+    # Summarize
+    created = sum(1 for r in results if r.get("status") == "created")
+    skipped = sum(1 for r in results if r.get("status") == "skipped")
+    errors = sum(1 for r in results if r.get("status") == "error")
+
+    return JsonResponse(
+        {
+            "success": True,
+            "results": results,
+            "summary": {
+                "created": created,
+                "skipped": skipped,
+                "errors": errors,
+                "total": len(results),
+            },
+        }
+    )
+
+
+@login_required
+def api_sync_eligible_users(request):
+    """
+    List users eligible for sharing (have Firefly token, not self).
+
+    GET /api/sync/eligible-users/
+    """
+    eligible = (
+        UserProfile.objects.filter(firefly_token__gt="")
+        .exclude(user=request.user)
+        .select_related("user")
+    )
+
+    users = [{"id": p.user.id, "username": p.user.username} for p in eligible]
+
+    return JsonResponse({"success": True, "users": users})
+
+
+@login_required
+def api_sync_preview(request, entity_type: str):
+    """
+    Preview import status for shared records.
+
+    GET /api/sync/preview/<entity_type>/
+
+    Returns which records would be created vs skipped.
+    """
+    from ..firefly_client.client import FireflyClient
+    from .models import SyncPoolRecord, SyncPoolShare
+
+    # Validate entity type
+    valid_types = ["category", "tag", "account", "piggy_bank"]
+    if entity_type not in valid_types:
+        return JsonResponse(
+            {"success": False, "error": f"Invalid entity type: {entity_type}"}, status=400
+        )
+
+    # Check Firefly token
+    try:
+        profile = UserProfile.objects.get(user=request.user)
+        if not profile.has_firefly_token:
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": "Please configure your Firefly token in Settings",
+                },
+                status=400,
+            )
+    except UserProfile.DoesNotExist:
+        return JsonResponse(
+            {"success": False, "error": "User profile not found"},
+            status=400,
+        )
+
+    # Get shared-with-me records
+    shared_record_ids = SyncPoolShare.objects.filter(shared_with=request.user).values_list(
+        "record_id", flat=True
+    )
+    shared_records = SyncPoolRecord.objects.filter(
+        id__in=shared_record_ids, entity_type=entity_type
+    )
+
+    if not shared_records.exists():
+        return JsonResponse({"success": True, "previews": []})
+
+    # Connect to Firefly and get existing entities
+    firefly_url = profile.firefly_url or settings.FIREFLY_URL
+    firefly_token = profile.firefly_token
+
+    try:
+        client = FireflyClient(firefly_url, firefly_token)
+
+        # Get existing entity names for comparison
+        existing_names = set()
+        if entity_type == "category":
+            for cat in client.list_categories():
+                existing_names.add(cat.name.lower().strip())
+        elif entity_type == "tag":
+            for tag in client.list_tags():
+                existing_names.add(tag["tag"].lower().strip())
+        elif entity_type == "account":
+            for acc_type in ["asset", "expense", "revenue", "liability", "cash"]:
+                for acc in client.list_accounts(acc_type):
+                    existing_names.add(acc["name"].lower().strip())
+        elif entity_type == "piggy_bank":
+            for pb in client.list_piggy_banks():
+                existing_names.add(pb["name"].lower().strip())
+
+        previews = []
+        for record in shared_records:
+            name_lower = record.name.lower().strip()
+            status = "skip" if name_lower in existing_names else "create"
+            previews.append(
+                {
+                    "id": record.id,
+                    "name": record.name,
+                    "status": status,
+                }
+            )
+
+        return JsonResponse({"success": True, "previews": previews})
+
+    except Exception as e:
+        logger.exception(f"Error generating preview for {entity_type}")
+        return JsonResponse(
+            {"success": False, "error": str(e)},
+            status=500,
+        )
+

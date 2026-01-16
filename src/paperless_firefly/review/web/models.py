@@ -494,3 +494,148 @@ class AIJobQueue(StateStoreModel):
     def can_retry(self) -> bool:
         """Check if job can be retried."""
         return self.status == self.STATUS_FAILED and self.retry_count < self.max_retries
+
+
+# =============================================================================
+# Sync Assistant Models (Firefly Pool + Share + Import)
+# =============================================================================
+
+
+class SyncPoolRecord(models.Model):
+    """
+    Pool record fetched from a user's Firefly instance.
+    
+    Stores entity data (categories, tags, accounts, piggy banks) that users
+    can share with other Sparklink users for cross-instance synchronization.
+    """
+
+    # Entity types
+    ENTITY_CATEGORY = "category"
+    ENTITY_TAG = "tag"
+    ENTITY_ACCOUNT = "account"
+    ENTITY_PIGGY_BANK = "piggy_bank"
+
+    ENTITY_TYPE_CHOICES = [
+        (ENTITY_CATEGORY, "Category"),
+        (ENTITY_TAG, "Tag"),
+        (ENTITY_ACCOUNT, "Account"),
+        (ENTITY_PIGGY_BANK, "Piggy Bank"),
+    ]
+
+    # Ownership
+    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="sync_pool_records")
+
+    # Entity identification
+    entity_type = models.CharField(max_length=50, choices=ENTITY_TYPE_CHOICES)
+    firefly_id = models.IntegerField(help_text="ID in owner's Firefly instance")
+
+    # Fingerprint for cross-instance deduplication (NOT Firefly ID)
+    fingerprint = models.CharField(
+        max_length=64, db_index=True, help_text="SHA256 hash for deduplication across instances"
+    )
+
+    # Cached entity data (JSON)
+    data_json = models.TextField(help_text="Full entity data for display/import")
+    name = models.CharField(max_length=255, help_text="Denormalized for display")
+
+    # Metadata
+    fetched_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = "web"
+        unique_together = ["owner", "entity_type", "fingerprint"]
+        indexes = [
+            models.Index(fields=["entity_type", "fingerprint"]),
+            models.Index(fields=["owner", "entity_type"]),
+        ]
+        verbose_name = "Sync Pool Record"
+        verbose_name_plural = "Sync Pool Records"
+
+    def __str__(self):
+        return f"{self.get_entity_type_display()}: {self.name} (owner: {self.owner.username})"
+
+
+class SyncPoolShare(models.Model):
+    """
+    Share permission for a pool record.
+    
+    Allows pool record owners to grant read access to specific other users,
+    enabling those users to import the shared entities into their own Firefly.
+    """
+
+    record = models.ForeignKey(SyncPoolRecord, on_delete=models.CASCADE, related_name="shares")
+    shared_with = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="received_sync_shares"
+    )
+
+    # Metadata
+    shared_at = models.DateTimeField(auto_now_add=True)
+    shared_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name="granted_sync_shares")
+
+    class Meta:
+        app_label = "web"
+        unique_together = ["record", "shared_with"]
+        verbose_name = "Sync Pool Share"
+        verbose_name_plural = "Sync Pool Shares"
+
+    def __str__(self):
+        return f"{self.record.name} shared with {self.shared_with.username}"
+
+
+class SyncImportLog(models.Model):
+    """
+    Audit log of import operations.
+    
+    Records every import attempt with outcome details for auditability.
+    """
+
+    # Status choices
+    STATUS_CREATED = "created"
+    STATUS_SKIPPED = "skipped"
+    STATUS_ERROR = "error"
+
+    STATUS_CHOICES = [
+        (STATUS_CREATED, "Created"),
+        (STATUS_SKIPPED, "Skipped (already exists)"),
+        (STATUS_ERROR, "Error"),
+    ]
+
+    # Who imported
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="sync_imports")
+
+    # What was imported (preserve data even if pool record is deleted)
+    pool_record = models.ForeignKey(
+        SyncPoolRecord, on_delete=models.SET_NULL, null=True, blank=True
+    )
+    entity_type = models.CharField(max_length=50)
+    fingerprint = models.CharField(max_length=64)
+    name = models.CharField(max_length=255)
+
+    # Outcome
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES)
+    target_firefly_id = models.IntegerField(
+        null=True, blank=True, help_text="ID in importer's Firefly if created"
+    )
+    error_message = models.TextField(blank=True, default="")
+
+    # Metadata
+    imported_at = models.DateTimeField(auto_now_add=True)
+    source_owner = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="Original owner of the pool record",
+    )
+
+    class Meta:
+        app_label = "web"
+        ordering = ["-imported_at"]
+        verbose_name = "Sync Import Log"
+        verbose_name_plural = "Sync Import Logs"
+
+    def __str__(self):
+        return f"{self.user.username} imported {self.name} ({self.status})"
+
