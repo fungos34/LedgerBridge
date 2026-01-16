@@ -7215,6 +7215,8 @@ def api_sync_share(request):
     POST /api/sync/share/
     Body: {"record_ids": [...], "user_ids": [...]}
     """
+    from django.contrib.auth.models import User
+
     from .models import SyncPoolRecord, SyncPoolShare
 
     try:
