@@ -7008,7 +7008,7 @@ def api_sync_fetch(request, entity_type: str):
 
     POST /api/sync/fetch/<entity_type>/
     """
-    from ..services.sync_fingerprints import (
+    from ...services.sync_fingerprints import (
         compute_fingerprint,
         get_entity_name,
         normalize_entity_data,
@@ -7294,7 +7294,7 @@ def api_sync_import(request):
     Body: {"record_ids": [...]}
     """
     from ..firefly_client.client import FireflyClient
-    from ..services.sync_fingerprints import compute_fingerprint, normalize_entity_data
+    from ...services.sync_fingerprints import compute_fingerprint, normalize_entity_data
     from .models import SyncImportLog, SyncPoolRecord, SyncPoolShare
 
     try:
@@ -7490,6 +7490,8 @@ def api_sync_eligible_users(request):
 
     GET /api/sync/eligible-users/
     """
+    from .models import UserProfile
+
     eligible = (
         UserProfile.objects.filter(firefly_token__gt="")
         .exclude(user=request.user)
