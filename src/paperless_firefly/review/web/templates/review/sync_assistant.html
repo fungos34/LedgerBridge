@@ -4,7 +4,7 @@
 {% block extra_head %}
 <style>
     .sync-container {
-        max-width: 1400px;
+        max-width: 1200px;
         margin: 0 auto;
         padding: 1.5rem;
     }
@@ -28,46 +28,69 @@
     }
 
     .no-token-warning {
-        background: #fef3c7;
+        background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
         border: 1px solid #fbbf24;
-        border-radius: 0.5rem;
-        padding: 1rem;
+        border-radius: 0.75rem;
+        padding: 1rem 1.25rem;
         margin-bottom: 1.5rem;
         display: flex;
-        align-items: center;
+        align-items: flex-start;
         gap: 0.75rem;
     }
 
     .no-token-warning .icon {
-        font-size: 1.5rem;
+        font-size: 1.25rem;
+        flex-shrink: 0;
+        margin-top: 0.125rem;
+    }
+
+    .no-token-warning .content {
+        flex: 1;
+    }
+
+    .no-token-warning strong {
+        color: #92400e;
+    }
+
+    .no-token-warning p {
+        margin-top: 0.25rem;
+        font-size: 0.875rem;
+        color: #a16207;
     }
 
     .no-token-warning a {
         color: #b45309;
         font-weight: 600;
+        text-decoration: underline;
     }
 
     .entity-cards {
-        display: flex;
-        flex-direction: column;
+        display: grid;
+        grid-template-columns: 1fr;
         gap: 1.5rem;
+    }
+
+    @media (min-width: 1024px) {
+        .entity-cards {
+            grid-template-columns: repeat(2, 1fr);
+        }
     }
 
     .entity-card {
         background: white;
         border: 1px solid var(--gray-200);
-        border-radius: 0.5rem;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        border-radius: 0.75rem;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+        overflow: hidden;
     }
 
     .entity-card-header {
-        padding: 1rem;
+        padding: 1rem 1.25rem;
         border-bottom: 1px solid var(--gray-200);
         display: flex;
         justify-content: space-between;
         align-items: center;
-        background: var(--gray-50);
-        border-radius: 0.5rem 0.5rem 0 0;
+        background: linear-gradient(135deg, var(--gray-50) 0%, white 100%);
     }
 
     .entity-card-title {
@@ -76,6 +99,34 @@
         display: flex;
         align-items: center;
         gap: 0.5rem;
+        color: var(--gray-800);
+    }
+
+    .entity-stats {
+        font-size: 0.8125rem;
+        color: var(--gray-500);
+        display: flex;
+        gap: 0.5rem;
+    }
+
+    .entity-stats .stat {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        background: var(--gray-100);
+        padding: 0.25rem 0.5rem;
+        border-radius: 9999px;
+        font-weight: 500;
+    }
+
+    .entity-stats .stat-owned {
+        background: #dbeafe;
+        color: #1e40af;
+    }
+
+    .entity-stats .stat-shared {
+        background: #f3e8ff;
+        color: #7c3aed;
     }
 
     .entity-card-body {
@@ -92,13 +143,14 @@
     }
 
     .sync-section-header {
-        padding: 0.75rem 1rem;
+        padding: 0.875rem 1.25rem;
         background: var(--gray-50);
         cursor: pointer;
         display: flex;
         justify-content: space-between;
         align-items: center;
         user-select: none;
+        transition: background 0.15s;
     }
 
     .sync-section-header:hover {
@@ -106,22 +158,26 @@
     }
 
     .sync-section-title {
-        font-weight: 500;
-        font-size: 0.875rem;
+        font-weight: 600;
+        font-size: 0.8125rem;
         color: var(--gray-700);
         display: flex;
         align-items: center;
         gap: 0.5rem;
+        text-transform: uppercase;
+        letter-spacing: 0.025em;
     }
 
     .sync-section-toggle {
-        color: var(--gray-500);
-        font-size: 0.75rem;
+        color: var(--gray-400);
+        font-size: 0.625rem;
+        transition: transform 0.2s;
     }
 
     .sync-section-content {
-        padding: 1rem;
+        padding: 1rem 1.25rem;
         display: none;
+        background: white;
     }
 
     .sync-section.open .sync-section-content {
@@ -146,19 +202,26 @@
 
     .fetch-filter {
         flex: 1;
-        min-width: 200px;
-        max-width: 400px;
+        min-width: 150px;
+        max-width: 200px;
         padding: 0.5rem 0.75rem;
         border: 1px solid var(--gray-300);
-        border-radius: 0.375rem;
+        border-radius: 0.5rem;
         font-size: 0.875rem;
+        background: white;
+    }
+
+    .fetch-filter:focus {
+        outline: none;
+        border-color: var(--primary);
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
     }
 
     .btn-fetch {
         background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
         color: white;
         padding: 0.5rem 1rem;
-        border-radius: 0.375rem;
+        border-radius: 0.5rem;
         border: none;
         font-weight: 600;
         font-size: 0.875rem;
@@ -167,60 +230,84 @@
         align-items: center;
         gap: 0.5rem;
         transition: all 0.15s;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
     }
 
     .btn-fetch:hover {
         background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
     }
 
     .btn-fetch:disabled {
         background: var(--gray-300);
         cursor: not-allowed;
+        box-shadow: none;
     }
 
-    /* Records table */
-    .records-table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 0.875rem;
+    /* Records list */
+    .records-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
     }
 
-    .records-table th,
-    .records-table td {
-        padding: 0.625rem 0.75rem;
-        text-align: left;
-        border-bottom: 1px solid var(--gray-100);
-    }
-
-    .records-table th {
+    .record-item {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.75rem 1rem;
         background: var(--gray-50);
-        font-weight: 600;
-        color: var(--gray-700);
+        border: 1px solid var(--gray-200);
+        border-radius: 0.5rem;
+        transition: all 0.15s;
     }
 
-    .records-table tbody tr:hover {
-        background: var(--gray-50);
+    .record-item:hover {
+        background: white;
+        border-color: var(--gray-300);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
     }
 
-    .records-table .checkbox-cell {
-        width: 40px;
-        text-align: center;
+    .record-item input[type="checkbox"] {
+        width: 1rem;
+        height: 1rem;
+        cursor: pointer;
+        accent-color: var(--primary);
     }
 
-    .records-table .name-cell {
+    .record-info {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .record-name {
         font-weight: 500;
+        color: var(--gray-800);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
-    .records-table .owner-cell {
-        color: var(--gray-600);
+    .record-meta {
+        font-size: 0.75rem;
+        color: var(--gray-500);
+        margin-top: 0.125rem;
     }
 
-    .records-table .badge {
-        display: inline-block;
+    .record-badges {
+        display: flex;
+        gap: 0.375rem;
+        flex-shrink: 0;
+    }
+
+    .badge {
+        display: inline-flex;
+        align-items: center;
         padding: 0.125rem 0.5rem;
         border-radius: 9999px;
-        font-size: 0.75rem;
-        font-weight: 500;
+        font-size: 0.6875rem;
+        font-weight: 600;
+        white-space: nowrap;
     }
 
     .badge-shared {
@@ -238,15 +325,25 @@
         color: #6b7280;
     }
 
+    .badge-owner {
+        background: #f3e8ff;
+        color: #7c3aed;
+    }
+
     .empty-state {
         text-align: center;
-        padding: 2rem;
+        padding: 2rem 1rem;
         color: var(--gray-500);
     }
 
     .empty-state .icon {
         font-size: 2rem;
         margin-bottom: 0.5rem;
+        opacity: 0.6;
+    }
+
+    .empty-state p {
+        font-size: 0.875rem;
     }
 
     /* Action bar */
@@ -254,53 +351,75 @@
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding: 0.75rem 0;
+        padding-bottom: 0.75rem;
+        margin-bottom: 0.75rem;
+        border-bottom: 1px solid var(--gray-100);
         flex-wrap: wrap;
-        gap: 0.75rem;
+        gap: 0.5rem;
     }
 
     .action-bar-left {
         display: flex;
         align-items: center;
-        gap: 0.75rem;
+        gap: 0.5rem;
+        font-size: 0.8125rem;
+        color: var(--gray-600);
+    }
+
+    .action-bar-left label {
+        display: flex;
+        align-items: center;
+        gap: 0.375rem;
+        cursor: pointer;
     }
 
     .btn-share {
         background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
         color: white;
-        padding: 0.375rem 0.75rem;
-        border-radius: 0.375rem;
+        padding: 0.375rem 0.875rem;
+        border-radius: 0.5rem;
         border: none;
         font-weight: 600;
-        font-size: 0.75rem;
+        font-size: 0.8125rem;
         cursor: pointer;
         transition: all 0.15s;
+        display: flex;
+        align-items: center;
+        gap: 0.375rem;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
     }
 
     .btn-share:hover {
         background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
     }
 
     .btn-import {
         background: linear-gradient(135deg, #10b981 0%, #059669 100%);
         color: white;
-        padding: 0.375rem 0.75rem;
-        border-radius: 0.375rem;
+        padding: 0.375rem 0.875rem;
+        border-radius: 0.5rem;
         border: none;
         font-weight: 600;
-        font-size: 0.75rem;
+        font-size: 0.8125rem;
         cursor: pointer;
         transition: all 0.15s;
+        display: flex;
+        align-items: center;
+        gap: 0.375rem;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
     }
 
     .btn-import:hover {
         background: linear-gradient(135deg, #059669 0%, #047857 100%);
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
     }
 
     .btn-import:disabled,
     .btn-share:disabled {
         background: var(--gray-300);
         cursor: not-allowed;
+        box-shadow: none;
     }
 
     /* Share modal */
@@ -312,20 +431,21 @@
         align-items: center;
         justify-content: center;
         z-index: 1000;
+        backdrop-filter: blur(2px);
     }
 
     .modal-content {
         background: white;
-        border-radius: 0.5rem;
+        border-radius: 0.75rem;
         max-width: 400px;
         width: 90%;
         max-height: 80vh;
         overflow-y: auto;
-        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15);
     }
 
     .modal-header {
-        padding: 1rem;
+        padding: 1rem 1.25rem;
         border-bottom: 1px solid var(--gray-200);
         display: flex;
         justify-content: space-between;
@@ -340,33 +460,47 @@
     .modal-close {
         background: none;
         border: none;
-        font-size: 1.25rem;
+        font-size: 1.5rem;
         cursor: pointer;
-        color: var(--gray-500);
+        color: var(--gray-400);
+        line-height: 1;
+        padding: 0.25rem;
+        border-radius: 0.25rem;
+        transition: all 0.15s;
+    }
+
+    .modal-close:hover {
+        color: var(--gray-600);
+        background: var(--gray-100);
     }
 
     .modal-body {
-        padding: 1rem;
+        padding: 1rem 1.25rem;
     }
 
     .user-list {
         display: flex;
         flex-direction: column;
         gap: 0.5rem;
+        max-height: 300px;
+        overflow-y: auto;
     }
 
     .user-list-item {
         display: flex;
         align-items: center;
-        gap: 0.5rem;
-        padding: 0.5rem;
+        gap: 0.75rem;
+        padding: 0.75rem 1rem;
         border: 1px solid var(--gray-200);
-        border-radius: 0.375rem;
+        border-radius: 0.5rem;
         cursor: pointer;
+        background: var(--gray-50);
+        transition: all 0.15s;
     }
 
     .user-list-item:hover {
-        background: var(--gray-50);
+        background: white;
+        border-color: var(--gray-300);
     }
 
     .user-list-item.selected {
@@ -374,8 +508,12 @@
         border-color: #3b82f6;
     }
 
+    .user-list-item input[type="checkbox"] {
+        accent-color: var(--primary);
+    }
+
     .modal-footer {
-        padding: 1rem;
+        padding: 1rem 1.25rem;
         border-top: 1px solid var(--gray-200);
         display: flex;
         justify-content: flex-end;
@@ -450,9 +588,9 @@
     {% if not has_firefly_token %}
     <div class="no-token-warning">
         <span class="icon">⚠️</span>
-        <div>
-            <strong>Firefly token not configured.</strong>
-            <p>Please add your Firefly III API token in <a href="{% url 'settings' %}">Settings</a> to use the Sync Assistant.</p>
+        <div class="content">
+            <strong>No personal Firefly token configured.</strong>
+            <p>You can still try to fetch — a fallback API key may be available. For best results, add your own Firefly III API token in <a href="{% url 'settings' %}">Settings</a>.</p>
         </div>
     </div>
     {% endif %}
@@ -466,8 +604,8 @@
                     <span>{{ entity.name }}</span>
                 </div>
                 <div class="entity-stats">
-                    <span class="owned-count">0</span> owned,
-                    <span class="shared-count">0</span> shared
+                    <span class="stat stat-owned"><span class="owned-count">0</span> owned</span>
+                    <span class="stat stat-shared"><span class="shared-count">0</span> shared</span>
                 </div>
             </div>
             <div class="entity-card-body">
@@ -475,14 +613,14 @@
                 <div class="sync-section open">
                     <div class="sync-section-header" onclick="toggleSection(this)">
                         <span class="sync-section-title">
-                            <span>📥</span> My Firefly → My Pool
+                            <span>📥</span> Fetch from Firefly
                         </span>
                         <span class="sync-section-toggle"></span>
                     </div>
                     <div class="sync-section-content">
                         <div class="fetch-controls">
                             {% if entity.key == 'account' %}
-                            <select class="type-filter" id="account-type-filter-{{ entity.key }}">
+                            <select class="fetch-filter" id="account-type-filter-{{ entity.key }}">
                                 <option value="">All Types</option>
                                 <option value="asset">Asset</option>
                                 <option value="expense">Expense</option>
@@ -490,8 +628,8 @@
                                 <option value="liability">Liability</option>
                             </select>
                             {% endif %}
-                            <button type="button" class="btn-fetch" onclick="fetchEntities('{{ entity.key }}')" {% if not has_firefly_token %}disabled{% endif %}>
-                                <span class="btn-text">🔄 Fetch from my Firefly</span>
+                            <button type="button" class="btn-fetch" onclick="fetchEntities('{{ entity.key }}')">
+                                <span class="btn-text">🔄 Fetch from Firefly</span>
                             </button>
                         </div>
                     </div>
@@ -501,7 +639,7 @@
                 <div class="sync-section open">
                     <div class="sync-section-header" onclick="toggleSection(this)">
                         <span class="sync-section-title">
-                            <span>📦</span> My Pool (Owned)
+                            <span>📦</span> My Pool
                         </span>
                         <span class="sync-section-toggle"></span>
                     </div>
@@ -513,7 +651,7 @@
                                     Select All
                                 </label>
                             </div>
-                            <button type="button" class="btn-share" onclick="openShareModal('{{ entity.key }}')" {% if not has_firefly_token %}disabled{% endif %}>
+                            <button type="button" class="btn-share" onclick="openShareModal('{{ entity.key }}')">
                                 👥 Share Selected
                             </button>
                         </div>
@@ -542,8 +680,8 @@
                                     Select All
                                 </label>
                             </div>
-                            <button type="button" class="btn-import" onclick="importSelected('{{ entity.key }}')" {% if not has_firefly_token %}disabled{% endif %}>
-                                📥 Import Selected to My Firefly
+                            <button type="button" class="btn-import" onclick="importSelected('{{ entity.key }}')">
+                                📥 Import to Firefly
                             </button>
                         </div>
                         <div class="shared-records-container" id="shared-{{ entity.key }}">
@@ -680,37 +818,27 @@ function renderOwnedRecords(entityType, records) {
         return;
     }
     
-    let html = `
-        <table class="records-table">
-            <thead>
-                <tr>
-                    <th class="checkbox-cell">
-                        <input type="checkbox" class="select-all-owned" onchange="toggleSelectAll(this, '${entityType}', 'owned')">
-                    </th>
-                    <th>Name</th>
-                    <th>Shared With</th>
-                </tr>
-            </thead>
-            <tbody>
-    `;
+    let html = '<div class="records-list">';
     
     for (const record of records) {
-        const sharedWith = record.shared_with.length > 0 
-            ? `<span class="badge badge-shared">${record.shared_with.length} users</span>` 
-            : '<span style="color: var(--gray-400)">—</span>';
+        const sharedBadge = record.shared_with.length > 0 
+            ? `<span class="badge badge-shared">👥 ${record.shared_with.length}</span>` 
+            : '';
         
         html += `
-            <tr>
-                <td class="checkbox-cell">
-                    <input type="checkbox" class="record-checkbox owned-checkbox-${entityType}" value="${record.id}">
-                </td>
-                <td class="name-cell">${escapeHtml(record.name)}</td>
-                <td>${sharedWith}</td>
-            </tr>
+            <div class="record-item">
+                <input type="checkbox" class="record-checkbox owned-checkbox-${entityType}" value="${record.id}">
+                <div class="record-info">
+                    <div class="record-name">${escapeHtml(record.name)}</div>
+                </div>
+                <div class="record-badges">
+                    ${sharedBadge}
+                </div>
+            </div>
         `;
     }
     
-    html += '</tbody></table>';
+    html += '</div>';
     container.innerHTML = html;
 }
 
@@ -727,35 +855,24 @@ function renderSharedRecords(entityType, records) {
         return;
     }
     
-    let html = `
-        <table class="records-table">
-            <thead>
-                <tr>
-                    <th class="checkbox-cell">
-                        <input type="checkbox" class="select-all-shared" onchange="toggleSelectAll(this, '${entityType}', 'shared')">
-                    </th>
-                    <th>Name</th>
-                    <th>Owner</th>
-                    <th>Status</th>
-                </tr>
-            </thead>
-            <tbody>
-    `;
+    let html = '<div class="records-list">';
     
     for (const record of records) {
         html += `
-            <tr>
-                <td class="checkbox-cell">
-                    <input type="checkbox" class="record-checkbox shared-checkbox-${entityType}" value="${record.id}">
-                </td>
-                <td class="name-cell">${escapeHtml(record.name)}</td>
-                <td class="owner-cell">${escapeHtml(record.owner)}</td>
-                <td><span class="badge badge-create preview-${record.id}">Loading...</span></td>
-            </tr>
+            <div class="record-item">
+                <input type="checkbox" class="record-checkbox shared-checkbox-${entityType}" value="${record.id}">
+                <div class="record-info">
+                    <div class="record-name">${escapeHtml(record.name)}</div>
+                    <div class="record-meta">Shared by ${escapeHtml(record.owner)}</div>
+                </div>
+                <div class="record-badges">
+                    <span class="badge badge-create preview-${record.id}">...</span>
+                </div>
+            </div>
         `;
     }
     
-    html += '</tbody></table>';
+    html += '</div>';
     container.innerHTML = html;
     
     // Load preview status
