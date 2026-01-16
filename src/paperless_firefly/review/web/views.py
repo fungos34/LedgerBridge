@@ -4427,12 +4427,19 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
                 # Get AI job status for this document
                 record["ai_status"] = None
                 record["ai_has_suggestions"] = False
+                record["ai_confidence"] = 0
                 try:
                     ai_job = store.get_ai_job_by_document(record["document_id"], active_only=False)
                     if ai_job:
                         record["ai_status"] = ai_job["status"]
                         if ai_job["status"] == "COMPLETED" and ai_job.get("suggestions_json"):
                             record["ai_has_suggestions"] = True
+                            # Extract overall confidence from suggestions (as percentage 0-100)
+                            try:
+                                suggestions = json.loads(ai_job["suggestions_json"])
+                                record["ai_confidence"] = round(float(suggestions.get("overall_confidence", 0.0)) * 100)
+                            except (json.JSONDecodeError, TypeError, ValueError):
+                                record["ai_confidence"] = 0
                 except Exception:
                     pass
 
