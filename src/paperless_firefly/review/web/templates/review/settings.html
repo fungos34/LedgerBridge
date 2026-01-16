@@ -263,6 +263,20 @@
                 {% endfor %}
             </div>
             {% endif %}
+            
+            {% if firefly_categories %}
+            <div class="account-list" style="margin-top: 1rem;">
+                <strong>Available Categories:</strong>
+                {% for category in firefly_categories %}
+                <div class="account-item">
+                    <span>{{ category.name }}</span>
+                    {% if category.notes %}
+                    <span title="{{ category.notes }}" style="color: var(--gray-400); cursor: help;">ℹ️</span>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
         </div>
         
         <!-- Processing Settings -->
@@ -321,6 +335,20 @@
                        value="{{ profile.importer_url }}"
                        placeholder="e.g., http://localhost:8081">
                 <div class="form-help">URL to Firefly Importer for bank statement imports</div>
+            </div>
+            
+            <div class="form-group">
+                <label class="form-label" for="firefly_importer_token">Firefly Importer API Token (optional)</label>
+                <div class="token-input-wrapper">
+                    <input type="password" 
+                           name="firefly_importer_token" 
+                           id="firefly_importer_token"
+                           class="form-input"
+                           value="{{ profile.firefly_importer_token }}"
+                           placeholder="Leave empty if same as Firefly III token">
+                    <button type="button" class="toggle-visibility" onclick="toggleVisibility('firefly_importer_token')">👁</button>
+                </div>
+                <div class="form-help">Separate API token for Firefly Importer (if different from Firefly III token)</div>
             </div>
         </div>
         

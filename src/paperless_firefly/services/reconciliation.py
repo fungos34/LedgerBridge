@@ -553,10 +553,13 @@ class ReconciliationService:
         linkage_marker_written: dict | None = None,
         firefly_write_action: str | None = None,
         firefly_target_id: int | None = None,
+        user_id: int | None = None,
     ) -> int:
         """Record an interpretation run for audit purposes.
 
         Every reconciliation attempt MUST create an interpretation run.
+        Interpretation runs are strictly private - each user can only see
+        their own AI/interpretation data.
 
         Args:
             document_id: Paperless document ID.
@@ -569,6 +572,7 @@ class ReconciliationService:
             linkage_marker_written: Optional linkage markers that were written.
             firefly_write_action: Optional action taken on Firefly.
             firefly_target_id: Optional Firefly target ID.
+            user_id: Owner user ID for privacy isolation.
 
         Returns:
             The created run ID.
@@ -605,6 +609,7 @@ class ReconciliationService:
             firefly_write_action=firefly_write_action,
             firefly_target_id=firefly_target_id,
             linkage_marker_written=linkage_marker_written,
+            user_id=user_id,
         )
 
     def _get_eligible_extractions(self) -> list[dict]:

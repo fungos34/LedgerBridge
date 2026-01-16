@@ -115,6 +115,22 @@ def upgrade(conn: sqlite3.Connection) -> None:
             ON ai_job_queue(user_id)
         """)
 
+    # Add to interpretation_runs for AI audit trail privacy
+    # This is strictly private - even superusers shouldn't see other users' AI data
+    cursor.execute("PRAGMA table_info(interpretation_runs)")
+    columns = [row[1] for row in cursor.fetchall()]
+    
+    if "user_id" not in columns:
+        cursor.execute("""
+            ALTER TABLE interpretation_runs
+            ADD COLUMN user_id INTEGER DEFAULT NULL
+        """)
+        
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_interpretation_runs_user_id
+            ON interpretation_runs(user_id)
+        """)
+
     conn.commit()
 
 

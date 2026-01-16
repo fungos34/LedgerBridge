@@ -372,6 +372,7 @@ def user_settings(request: HttpRequest) -> HttpResponse:
         # External links (optional)
         profile.syncthing_url = request.POST.get("syncthing_url", "")
         profile.importer_url = request.POST.get("importer_url", "")
+        profile.firefly_importer_token = request.POST.get("firefly_importer_token", "")
 
         # LLM/Ollama settings
         profile.llm_enabled = request.POST.get("llm_enabled") == "on"
@@ -410,6 +411,7 @@ def user_settings(request: HttpRequest) -> HttpResponse:
     paperless_status = None
     firefly_status = None
     firefly_accounts = []
+    firefly_categories = []
 
     if profile.paperless_token or settings.PAPERLESS_TOKEN:
         try:
@@ -434,6 +436,11 @@ def user_settings(request: HttpRequest) -> HttpResponse:
                 except Exception as accounts_err:
                     logger.warning("Failed to fetch Firefly accounts: %s", accounts_err)
                     # Connection is OK, just couldn't fetch accounts
+                # Fetch categories
+                try:
+                    firefly_categories = client.list_categories()
+                except Exception as categories_err:
+                    logger.warning("Failed to fetch Firefly categories: %s", categories_err)
             else:
                 firefly_status = "error"
         except Exception as e:
@@ -477,6 +484,7 @@ def user_settings(request: HttpRequest) -> HttpResponse:
         "paperless_status": paperless_status,
         "firefly_status": firefly_status,
         "firefly_accounts": firefly_accounts,
+        "firefly_categories": firefly_categories,
         "llm_status": llm_status,
         "available_models": available_models,
         "ai_queue_stats": ai_queue_stats,
@@ -1810,7 +1818,11 @@ def dismiss_failed_import(request: HttpRequest, external_id: str) -> HttpRespons
 @login_required
 @require_http_methods(["POST"])
 def run_extract(request: HttpRequest) -> HttpResponse:
-    """Trigger extraction from Paperless and sync Firefly transactions."""
+    """Trigger extraction from Paperless and sync Firefly transactions.
+    
+    Uses user-specific API tokens from their profile if configured,
+    otherwise falls back to environment/config defaults.
+    """
     global _extraction_status
 
     if _extraction_status["running"]:
@@ -1823,6 +1835,31 @@ def run_extract(request: HttpRequest) -> HttpResponse:
     
     # Get user_id for ownership of extracted documents
     extract_user_id = request.user.id if request.user.is_authenticated else None
+    
+    # Get user-specific API tokens from profile (if available)
+    # These override environment/config defaults
+    user_paperless_token = None
+    user_paperless_url = None
+    user_firefly_token = None
+    user_firefly_url = None
+    user_filter_tag = None
+    
+    if request.user.is_authenticated:
+        try:
+            profile = request.user.profile
+            if profile.paperless_token:
+                user_paperless_token = profile.paperless_token
+            if profile.paperless_url:
+                user_paperless_url = profile.paperless_url
+            if profile.firefly_token:
+                user_firefly_token = profile.firefly_token
+            if profile.firefly_url:
+                user_firefly_url = profile.firefly_url
+            if profile.paperless_filter_tags:
+                # Use user's tag filter preference if set
+                user_filter_tag = profile.paperless_filter_tags.split(",")[0].strip()
+        except Exception:
+            pass  # Use defaults
 
     def do_extract():
         global _extraction_status
@@ -1839,26 +1876,106 @@ def run_extract(request: HttpRequest) -> HttpResponse:
             from pathlib import Path
 
             from ...config import load_config
-            from ...runner.main import cmd_extract
+            from ...extractors import ExtractorRouter
+            from ...paperless_client import PaperlessClient
+            from ...schemas.dedupe import compute_file_hash
 
             config_path = Path(settings.STATE_DB_PATH).parent / "config.yaml"
             if not config_path.exists():
                 config_path = Path("/app/config/config.yaml")
 
             config = load_config(config_path)
+            
+            # Override config with user-specific tokens (user profile > env > config)
+            paperless_url = user_paperless_url or config.paperless.base_url
+            paperless_token = user_paperless_token or config.paperless.token
+            firefly_url = user_firefly_url or config.firefly.base_url
+            firefly_token = user_firefly_token or config.firefly.token
+            filter_tag = user_filter_tag or tag
 
-            _extraction_status["progress"] = f"Extracting documents with tag '{tag}'..."
-            result = cmd_extract(config, doc_id=None, tag=tag, limit=limit, user_id=extract_user_id)
+            _extraction_status["progress"] = f"Extracting documents with tag '{filter_tag}'..."
+            
+            # Create Paperless client with user tokens
+            paperless = PaperlessClient(
+                base_url=paperless_url,
+                token=paperless_token,
+            )
+            
+            store = _get_store()
+            router = ExtractorRouter()
+            
+            # Get documents to process
+            docs = list(paperless.list_documents(tags=[filter_tag]))[:limit]
+            
+            if not docs:
+                _extraction_status["result"] = "No documents to process"
+                _extraction_status["progress"] = "Done"
+                return
+            
+            extracted = 0
+            skipped = 0
+            
+            for doc in docs:
+                # Check if already processed
+                existing = store.get_extraction_by_document(doc.id)
+                if existing:
+                    logger.info(f"Skipping doc {doc.id} - already extracted")
+                    skipped += 1
+                    continue
+                
+                _extraction_status["progress"] = f"Processing: {doc.title[:50]}..."
+                
+                try:
+                    # Download original file
+                    file_bytes, filename = paperless.download_original(doc.id)
+                    source_hash = compute_file_hash(file_bytes)
+                    
+                    # Extract
+                    extraction = router.extract(
+                        document=doc,
+                        file_bytes=file_bytes,
+                        source_hash=source_hash,
+                        paperless_base_url=paperless_url,
+                        default_source_account=config.firefly.default_source_account,
+                    )
+                    
+                    # Save to store (with user_id for ownership)
+                    store.upsert_document(
+                        document_id=doc.id,
+                        source_hash=source_hash,
+                        title=doc.title,
+                        document_type=doc.document_type,
+                        correspondent=doc.correspondent,
+                        tags=doc.tags,
+                        user_id=extract_user_id,
+                    )
+                    
+                    import json
+                    store.save_extraction(
+                        document_id=doc.id,
+                        external_id=extraction.proposal.external_id,
+                        extraction_json=json.dumps(extraction.to_dict()),
+                        overall_confidence=extraction.confidence.overall,
+                        review_state=extraction.confidence.review_state.value,
+                        user_id=extract_user_id,
+                    )
+                    
+                    extracted += 1
+                    
+                except Exception as e:
+                    logger.exception(f"Failed to extract doc {doc.id}")
+            
+            result_msg = f"Extracted: {extracted}, Skipped: {skipped}"
 
             # Also sync Firefly transactions if requested
             if sync_firefly:
                 _extraction_status["progress"] = "Syncing Firefly III transactions..."
                 try:
+                    # Use user-specific Firefly tokens
                     firefly = FireflyClient(
-                        base_url=config.firefly.base_url,
-                        token=config.firefly.token,
+                        base_url=firefly_url,
+                        token=firefly_token,
                     )
-                    store = _get_store()
 
                     # Sync last 90 days by default
                     end_date = date.today()
@@ -1869,7 +1986,7 @@ def run_extract(request: HttpRequest) -> HttpResponse:
                         end_date=end_date.isoformat(),
                     )
 
-                    # Cache transactions
+                    # Cache transactions (with user_id for ownership)
                     for tx in transactions:
                         store.upsert_firefly_cache(
                             firefly_id=tx.id,
@@ -1884,20 +2001,21 @@ def run_extract(request: HttpRequest) -> HttpResponse:
                             internal_reference=tx.internal_reference,
                             notes=tx.notes,
                             tags=tx.tags,
+                            user_id=extract_user_id,
                         )
 
                     _extraction_status["result"] = (
-                        f"Extraction completed. Also synced {len(transactions)} Firefly transactions."
+                        f"{result_msg}. Also synced {len(transactions)} Firefly transactions."
                     )
                 except Exception as firefly_err:
                     logger.warning(
                         f"Firefly sync failed (extraction still succeeded): {firefly_err}"
                     )
                     _extraction_status["result"] = (
-                        f"Extraction completed (Firefly sync failed: {firefly_err})"
+                        f"{result_msg} (Firefly sync failed: {firefly_err})"
                     )
             else:
-                _extraction_status["result"] = f"Extraction completed with exit code {result}"
+                _extraction_status["result"] = result_msg
 
             _extraction_status["progress"] = "Done"
         except Exception as e:
@@ -1911,6 +2029,7 @@ def run_extract(request: HttpRequest) -> HttpResponse:
     thread.start()
 
     messages.info(request, "Extraction started in background. Refresh to see progress.")
+    return redirect("list")
     return redirect("list")
 
 
@@ -2763,6 +2882,7 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
 
     Fetches documents matching the configured filter tags and
     runs full extraction (OCR, e-invoice, etc.) on new ones.
+    Uses user-specific API tokens from profile if available.
     """
 
     from ...extractors.router import ExtractorRouter
@@ -2770,15 +2890,33 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
     from ...schemas.dedupe import compute_file_hash
 
     store = _get_store()
+    user_id = request.user.id if request.user.is_authenticated else None
 
     try:
         # Get filter tags
         tags = request.POST.get("tags", "finance/inbox")
+        
+        # Get user-specific tokens from profile
+        paperless_url = settings.PAPERLESS_BASE_URL
+        paperless_token = settings.PAPERLESS_TOKEN
+        
+        if request.user.is_authenticated:
+            try:
+                profile = request.user.profile
+                if profile.paperless_token:
+                    paperless_token = profile.paperless_token
+                if profile.paperless_url:
+                    paperless_url = profile.paperless_url
+                if profile.paperless_filter_tags:
+                    # Use user's tag filter preference if available
+                    tags = profile.paperless_filter_tags.split(",")[0].strip()
+            except Exception:
+                pass  # Use defaults
 
-        # Create Paperless client
+        # Create Paperless client with user tokens
         paperless = PaperlessClient(
-            base_url=settings.PAPERLESS_BASE_URL,
-            token=settings.PAPERLESS_TOKEN,
+            base_url=paperless_url,
+            token=paperless_token,
         )
 
         # Create extractor router for full extraction
@@ -2814,7 +2952,7 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
                 file_bytes, filename = paperless.download_original(doc_id)
                 source_hash = compute_file_hash(file_bytes)
 
-                # Store document record
+                # Store document record (with user_id for ownership)
                 store.upsert_document(
                     document_id=doc_id,
                     source_hash=source_hash,
@@ -2822,6 +2960,7 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
                     document_type=getattr(doc, "document_type", None),
                     correspondent=getattr(doc, "correspondent", None),
                     tags=doc.tags,
+                    user_id=user_id,
                 )
 
                 # Run full extraction (OCR, e-invoice parsing, etc.)
@@ -2829,7 +2968,7 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
                     document=doc,
                     file_bytes=file_bytes,
                     source_hash=source_hash,
-                    paperless_base_url=settings.PAPERLESS_BASE_URL,
+                    paperless_base_url=paperless_url,
                     default_source_account=(
                         config.firefly.default_source_account
                         if hasattr(config.firefly, "default_source_account")
@@ -2837,13 +2976,14 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
                     ),
                 )
 
-                # Save extraction with full data
+                # Save extraction with full data (with user_id for ownership)
                 store.save_extraction(
                     document_id=doc_id,
                     external_id=extraction.proposal.external_id,
                     extraction_json=json.dumps(extraction.to_dict()),
                     overall_confidence=extraction.confidence.overall,
                     review_state=extraction.confidence.review_state.value,
+                    user_id=user_id,
                 )
 
                 # Schedule AI job if AI scheduling is enabled
@@ -3408,6 +3548,7 @@ def sync_firefly_transactions(request: HttpRequest) -> HttpResponse:
 
     This fetches recent transactions from Firefly and stores them in the
     local cache for matching with Paperless documents.
+    Uses user-specific API tokens from profile if available.
     """
     global _firefly_sync_status
     from datetime import timedelta
@@ -3420,6 +3561,21 @@ def sync_firefly_transactions(request: HttpRequest) -> HttpResponse:
     # Get sync parameters from form
     days = int(request.POST.get("days", 90))
     type_filter = request.POST.get("type_filter", "")  # Empty = all types
+    
+    # Get user-specific tokens (capture before thread starts)
+    sync_user_id = request.user.id if request.user.is_authenticated else None
+    user_firefly_url = None
+    user_firefly_token = None
+    
+    if request.user.is_authenticated:
+        try:
+            profile = request.user.profile
+            if profile.firefly_token:
+                user_firefly_token = profile.firefly_token
+            if profile.firefly_url:
+                user_firefly_url = profile.firefly_url
+        except Exception:
+            pass  # Use defaults
 
     def do_sync():
         global _firefly_sync_status
@@ -3444,10 +3600,14 @@ def sync_firefly_transactions(request: HttpRequest) -> HttpResponse:
                 config_path = Path("/app/config/config.yaml")
 
             config = load_config(config_path)
+            
+            # Use user-specific tokens if available, otherwise use config
+            firefly_url = user_firefly_url or config.firefly.base_url
+            firefly_token = user_firefly_token or config.firefly.token
 
             firefly = FireflyClient(
-                base_url=config.firefly.base_url,
-                token=config.firefly.token,
+                base_url=firefly_url,
+                token=firefly_token,
             )
 
             store = _get_store()
@@ -3498,6 +3658,7 @@ def sync_firefly_transactions(request: HttpRequest) -> HttpResponse:
                     notes=tx.notes,
                     category_name=tx.category_name,
                     tags=tx.tags,
+                    user_id=sync_user_id,
                 )
                 synced += 1
 

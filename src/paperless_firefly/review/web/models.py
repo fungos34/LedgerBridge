@@ -61,6 +61,10 @@ class UserProfile(models.Model):
     importer_url = models.URLField(
         blank=True, default="", help_text="URL to Firefly Importer for bank statement imports"
     )
+    firefly_importer_token = models.CharField(
+        max_length=255, blank=True, default="",
+        help_text="API token for Firefly Importer (separate from Firefly III token)"
+    )
 
     # LLM/Ollama settings
     llm_enabled = models.BooleanField(

@@ -1058,48 +1058,110 @@ class StateStore:
         notes: str | None = None,
         category_name: str | None = None,
         tags: list[str] | None = None,
+        user_id: int | None = None,
     ) -> None:
-        """Upsert a Firefly transaction into the cache."""
+        """Upsert a Firefly transaction into the cache.
+        
+        Args:
+            firefly_id: Firefly transaction ID.
+            type_: Transaction type (withdrawal, deposit, transfer).
+            date: Transaction date.
+            amount: Transaction amount.
+            description: Transaction description.
+            external_id: External ID for deduplication.
+            internal_reference: Internal reference.
+            source_account: Source account name.
+            destination_account: Destination account name.
+            notes: Transaction notes.
+            category_name: Category name.
+            tags: List of tags.
+            user_id: Owner user ID for multi-user isolation.
+        """
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         tags_json = json.dumps(tags or [])
 
         with self._transaction() as conn:
-            conn.execute(
-                """
-                INSERT INTO firefly_cache
-                (firefly_id, external_id, internal_reference, type, date, amount, description,
-                 source_account, destination_account, notes, category_name, tags, synced_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(firefly_id) DO UPDATE SET
-                    external_id = excluded.external_id,
-                    internal_reference = excluded.internal_reference,
-                    type = excluded.type,
-                    date = excluded.date,
-                    amount = excluded.amount,
-                    description = excluded.description,
-                    source_account = excluded.source_account,
-                    destination_account = excluded.destination_account,
-                    notes = excluded.notes,
-                    category_name = excluded.category_name,
-                    tags = excluded.tags,
-                    synced_at = excluded.synced_at
-            """,
-                (
-                    firefly_id,
-                    external_id,
-                    internal_reference,
-                    type_,
-                    date,
-                    amount,
-                    description,
-                    source_account,
-                    destination_account,
-                    notes,
-                    category_name,
-                    tags_json,
-                    now,
-                ),
-            )
+            # Check if user_id column exists
+            cursor = conn.execute("PRAGMA table_info(firefly_cache)")
+            columns = [row[1] for row in cursor.fetchall()]
+            has_user_id = "user_id" in columns
+            
+            if has_user_id and user_id is not None:
+                conn.execute(
+                    """
+                    INSERT INTO firefly_cache
+                    (firefly_id, external_id, internal_reference, type, date, amount, description,
+                     source_account, destination_account, notes, category_name, tags, synced_at, user_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(firefly_id) DO UPDATE SET
+                        external_id = excluded.external_id,
+                        internal_reference = excluded.internal_reference,
+                        type = excluded.type,
+                        date = excluded.date,
+                        amount = excluded.amount,
+                        description = excluded.description,
+                        source_account = excluded.source_account,
+                        destination_account = excluded.destination_account,
+                        notes = excluded.notes,
+                        category_name = excluded.category_name,
+                        tags = excluded.tags,
+                        synced_at = excluded.synced_at,
+                        user_id = COALESCE(excluded.user_id, firefly_cache.user_id)
+                """,
+                    (
+                        firefly_id,
+                        external_id,
+                        internal_reference,
+                        type_,
+                        date,
+                        amount,
+                        description,
+                        source_account,
+                        destination_account,
+                        notes,
+                        category_name,
+                        tags_json,
+                        now,
+                        user_id,
+                    ),
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO firefly_cache
+                    (firefly_id, external_id, internal_reference, type, date, amount, description,
+                     source_account, destination_account, notes, category_name, tags, synced_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(firefly_id) DO UPDATE SET
+                        external_id = excluded.external_id,
+                        internal_reference = excluded.internal_reference,
+                        type = excluded.type,
+                        date = excluded.date,
+                        amount = excluded.amount,
+                        description = excluded.description,
+                        source_account = excluded.source_account,
+                        destination_account = excluded.destination_account,
+                        notes = excluded.notes,
+                        category_name = excluded.category_name,
+                        tags = excluded.tags,
+                        synced_at = excluded.synced_at
+                """,
+                    (
+                        firefly_id,
+                        external_id,
+                        internal_reference,
+                        type_,
+                        date,
+                        amount,
+                        description,
+                        source_account,
+                        destination_account,
+                        notes,
+                        category_name,
+                        tags_json,
+                        now,
+                    ),
+                )
 
     def get_unmatched_firefly_transactions(self) -> list[dict[str, Any]]:
         """Get cached Firefly transactions that are not yet matched (excludes soft-deleted)."""
@@ -1293,8 +1355,31 @@ class StateStore:
         firefly_target_id: int | None = None,
         linkage_marker_written: dict | None = None,
         taxonomy_version: str | None = None,
+        user_id: int | None = None,
     ) -> int:
-        """Create an interpretation run record. Returns the run ID."""
+        """Create an interpretation run record. Returns the run ID.
+        
+        Args:
+            document_id: The Paperless document ID.
+            firefly_id: The Firefly transaction ID (if applicable).
+            external_id: The external ID for deduplication.
+            pipeline_version: Version of the interpretation pipeline.
+            inputs_summary: Summary of inputs used.
+            final_state: Final state (GREEN, YELLOW, RED).
+            duration_ms: Processing duration in milliseconds.
+            algorithm_version: Version of the algorithm used.
+            rules_applied: List of rules that were applied.
+            llm_result: LLM results (if used).
+            suggested_category: Suggested category from interpretation.
+            suggested_splits: Suggested splits (if applicable).
+            auto_applied: Whether the result was auto-applied.
+            decision_source: Source of the decision (RULES, LLM, HYBRID, USER).
+            firefly_write_action: Action taken in Firefly.
+            firefly_target_id: Target Firefly transaction ID.
+            linkage_marker_written: Linkage marker info.
+            taxonomy_version: Version of category taxonomy.
+            user_id: Owner user ID for privacy isolation.
+        """
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
         with self._transaction() as conn:
@@ -1305,8 +1390,8 @@ class StateStore:
                  pipeline_version, algorithm_version, inputs_summary, rules_applied,
                  llm_result, final_state, suggested_category, suggested_splits,
                  auto_applied, decision_source, firefly_write_action, firefly_target_id,
-                 linkage_marker_written, taxonomy_version)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 linkage_marker_written, taxonomy_version, user_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     document_id,
@@ -1328,35 +1413,78 @@ class StateStore:
                     firefly_target_id,
                     json.dumps(linkage_marker_written) if linkage_marker_written else None,
                     taxonomy_version,
+                    user_id,
                 ),
             )
             return cursor.lastrowid or 0
 
-    def get_interpretation_runs(self, document_id: int) -> list[dict[str, Any]]:
-        """Get all interpretation runs for a document."""
+    def get_interpretation_runs(
+        self, document_id: int, user_id: int | None = None
+    ) -> list[dict[str, Any]]:
+        """Get all interpretation runs for a document.
+        
+        Note: AI interpretation runs are strictly private. Unlike other tables,
+        user_id filtering is always enforced - even superusers should only see
+        their own AI data to prevent context leakage across users.
+        
+        Args:
+            document_id: The document ID to get runs for.
+            user_id: Filter by user ID. For AI privacy, this should always be
+                     the current user's ID (no superuser override).
+        """
         with self._transaction() as conn:
-            rows = conn.execute(
-                """
-                SELECT * FROM interpretation_runs
-                WHERE document_id = ?
-                ORDER BY run_timestamp DESC
-            """,
-                (document_id,),
-            ).fetchall()
+            if user_id is not None:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM interpretation_runs
+                    WHERE document_id = ? AND (user_id = ? OR user_id IS NULL)
+                    ORDER BY run_timestamp DESC
+                """,
+                    (document_id, user_id),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM interpretation_runs
+                    WHERE document_id = ?
+                    ORDER BY run_timestamp DESC
+                """,
+                    (document_id,),
+                ).fetchall()
             return [dict(row) for row in rows]
 
-    def get_latest_interpretation_run(self, document_id: int) -> dict[str, Any] | None:
-        """Get the most recent interpretation run for a document."""
+    def get_latest_interpretation_run(
+        self, document_id: int, user_id: int | None = None
+    ) -> dict[str, Any] | None:
+        """Get the most recent interpretation run for a document.
+        
+        Note: AI interpretation runs are strictly private.
+        
+        Args:
+            document_id: The document ID to get the latest run for.
+            user_id: Filter by user ID for privacy.
+        """
         with self._transaction() as conn:
-            row = conn.execute(
-                """
-                SELECT * FROM interpretation_runs
-                WHERE document_id = ?
-                ORDER BY run_timestamp DESC
-                LIMIT 1
-            """,
-                (document_id,),
-            ).fetchone()
+            if user_id is not None:
+                row = conn.execute(
+                    """
+                    SELECT * FROM interpretation_runs
+                    WHERE document_id = ? AND (user_id = ? OR user_id IS NULL)
+                    ORDER BY run_timestamp DESC
+                    LIMIT 1
+                """,
+                    (document_id, user_id),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT * FROM interpretation_runs
+                    WHERE document_id = ?
+                    ORDER BY run_timestamp DESC
+                    LIMIT 1
+                """,
+                    (document_id,),
+                ).fetchone()
             return dict(row) if row else None
 
     # === LLM Feedback Methods ===

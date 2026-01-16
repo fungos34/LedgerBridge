@@ -40,7 +40,10 @@ class UserProfileInline(admin.StackedInline):
 
 
 class UserAdmin(BaseUserAdmin):
-    """Extended User admin with profile inline."""
+    """Extended User admin with profile inline.
+    
+    Allows superusers to promote/demote other users to staff/superuser status.
+    """
 
     inlines = (UserProfileInline,)
     list_display = (
@@ -49,9 +52,32 @@ class UserAdmin(BaseUserAdmin):
         "first_name",
         "last_name",
         "is_staff",
+        "is_superuser",
         "get_has_tokens",
     )
     list_select_related = ("profile",)
+    list_filter = ("is_staff", "is_superuser", "is_active")
+    
+    # Override fieldsets to make is_superuser and is_staff visible and editable
+    # Default BaseUserAdmin fieldsets include these but we make them more prominent
+    fieldsets = (
+        (None, {"fields": ("username", "password")}),
+        ("Personal info", {"fields": ("first_name", "last_name", "email")}),
+        (
+            "Permissions",
+            {
+                "fields": (
+                    "is_active",
+                    "is_staff",
+                    "is_superuser",
+                    "groups",
+                    "user_permissions",
+                ),
+                "description": "Staff users can access admin. Superusers have full access.",
+            },
+        ),
+        ("Important dates", {"fields": ("last_login", "date_joined")}),
+    )
 
     def get_has_tokens(self, instance):
         """Check if user has API tokens configured."""
@@ -66,6 +92,20 @@ class UserAdmin(BaseUserAdmin):
         if not obj:
             return []
         return super().get_inline_instances(request, obj)
+    
+    def get_readonly_fields(self, request, obj=None):
+        """Make superuser fields read-only for non-superusers."""
+        readonly = list(super().get_readonly_fields(request, obj))
+        # Only superusers can modify superuser/staff status
+        if not request.user.is_superuser:
+            readonly.extend(["is_superuser", "is_staff"])
+        return readonly
+    
+    def has_change_permission(self, request, obj=None):
+        """Allow users to edit their own profile, admins can edit all."""
+        if obj is not None and obj == request.user:
+            return True  # Users can edit themselves
+        return super().has_change_permission(request, obj)
 
 
 @admin.register(UserProfile)
