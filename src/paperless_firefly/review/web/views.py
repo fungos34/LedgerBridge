@@ -6978,6 +6978,8 @@ def sync_assistant(request):
 
     Displays cards for each entity type with fetch, pool display, and import functionality.
     """
+    from .models import UserProfile
+
     # Check if user has Firefly token configured
     has_firefly_token = False
     try:
