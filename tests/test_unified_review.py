@@ -620,7 +620,7 @@ class TestLandingPageDuplication:
         Verify there's only ONE entry point for review, not duplicate cards.
 
         The landing page had both "Review Queue" and "Reconciliation" cards
-        leading to confusion. These should be consolidated into "Review & Link".
+        leading to confusion. These should be consolidated into "Review & Import".
 
         Note: "Review Queue" may still appear in other contexts (like tooltips),
         but should NOT appear as a service-card title.
@@ -640,8 +640,8 @@ class TestLandingPageDuplication:
 
         content = template_path.read_text(encoding="utf-8")
 
-        # After the fix, we should have "Review & Link" as the service card title
-        review_link_count = content.count('<div class="service-title">Review & Link</div>')
+        # After the fix, we should have "Review & Import" as the service card title
+        review_import_count = content.count('<div class="service-title">Review & Import</div>')
 
         # Check for service card titles (the actual card names, not tooltips or links)
         # Service cards have pattern: <div class="service-title">TITLE</div>
@@ -652,10 +652,10 @@ class TestLandingPageDuplication:
             r'<div class="service-title">\s*Reconciliation\s*</div>', content
         )
 
-        # There should be exactly one "Review & Link" service card
+        # There should be exactly one "Review & Import" service card
         assert (
-            review_link_count == 1
-        ), f"Should have exactly one 'Review & Link' card, found {review_link_count}"
+            review_import_count == 1
+        ), f"Should have exactly one 'Review & Import' card, found {review_import_count}"
 
         # There should be no "Review Queue" SERVICE CARD (tooltips etc are OK)
         assert (

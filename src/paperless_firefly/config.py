@@ -273,13 +273,11 @@ def load_config(config_path: Path) -> Config:
         model_fallback=os.environ.get(
             "OLLAMA_MODEL_FALLBACK", llm_data.get("model_fallback", "qwen2.5:7b-instruct-q4_K_M")
         ),
-        timeout_seconds=int(os.environ.get(
-            "OLLAMA_TIMEOUT", llm_data.get("timeout_seconds", 30)
-        )),
+        timeout_seconds=int(os.environ.get("OLLAMA_TIMEOUT", llm_data.get("timeout_seconds", 30))),
         max_retries=llm_data.get("max_retries", 2),
-        cache_ttl_days=int(os.environ.get(
-            "SPARK_LLM_CACHE_TTL_DAYS", llm_data.get("cache_ttl_days", 30)
-        )),
+        cache_ttl_days=int(
+            os.environ.get("SPARK_LLM_CACHE_TTL_DAYS", llm_data.get("cache_ttl_days", 30))
+        ),
         green_threshold=llm_data.get("green_threshold", 0.85),
         calibration_count=llm_data.get("calibration_count", 100),
         max_concurrent=llm_data.get("max_concurrent", 2),

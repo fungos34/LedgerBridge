@@ -513,6 +513,65 @@
         white-space: pre-wrap;
         word-break: break-word;
     }
+
+    /* Owner Badge */
+    .owner-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        padding: 0.125rem 0.5rem;
+        background: #f0f9ff;
+        color: #0369a1;
+        border: 1px solid #bae6fd;
+        border-radius: 1rem;
+        font-size: 0.65rem;
+        font-weight: 500;
+    }
+
+    .owner-badge:hover {
+        background: #e0f2fe;
+        border-color: #7dd3fc;
+    }
+
+    /* Transfer Modal */
+    .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 1000;
+    }
+
+    .modal-content {
+        background: white;
+        border-radius: 0.5rem;
+        padding: 1.5rem;
+        max-width: 500px;
+        width: 90%;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+    }
+
+    .modal-content h3 {
+        margin-top: 0;
+        margin-bottom: 1rem;
+        color: var(--gray-900);
+    }
+
+    .modal-body p {
+        margin: 0.5rem 0;
+    }
+
+    .modal-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.75rem;
+        margin-top: 1.5rem;
+    }
 </style>
 {% endblock %}
 
@@ -643,9 +702,18 @@
         <div class="doc-card {% if doc.is_listed %}listed{% else %}unlisted{% endif %}" id="doc-{{ doc.id }}">
             <div style="display: flex; justify-content: space-between; align-items: flex-start;">
                 <span class="doc-title">{{ doc.title|truncatechars:50 }}</span>
-                <span class="status-badge {% if doc.is_listed %}success{% else %}secondary{% endif %}">
-                    {% if doc.is_listed %}Listed{% else %}Unlisted{% endif %}
-                </span>
+                <div style="display: flex; gap: 0.25rem; align-items: center;">
+                    {% if doc.owner_username and is_superuser %}
+                    <span class="owner-badge" title="Owned by {{ doc.owner_username }}" 
+                          onclick="openDocTransferModal({{ doc.id }}, '{{ doc.title|escapejs }}', '{{ doc.owner_username|escapejs }}', {{ doc.owner_user_id|default:'null' }})"
+                          style="cursor: pointer;">
+                        👤 {{ doc.owner_username }}
+                    </span>
+                    {% endif %}
+                    <span class="status-badge {% if doc.is_listed %}success{% else %}secondary{% endif %}">
+                        {% if doc.is_listed %}Listed{% else %}Unlisted{% endif %}
+                    </span>
+                </div>
             </div>
             <div class="doc-meta">
                 📅 {{ doc.created|slice:":10" }} &nbsp;|&nbsp; ID: {{ doc.id }}
@@ -1059,5 +1127,95 @@ function toggleDocument(docId, action) {
         btn.disabled = false;
     });
 }
+
+// Document Transfer Ownership
+let docTransferData = null;
+
+function openDocTransferModal(docId, title, currentOwner, currentOwnerId) {
+    docTransferData = {
+        docId: docId,
+        title: title,
+        currentOwner: currentOwner,
+        currentOwnerId: currentOwnerId
+    };
+    
+    document.getElementById('doc-transfer-title').textContent = title;
+    document.getElementById('doc-transfer-current-owner').textContent = currentOwner || 'Unknown';
+    document.getElementById('doc-transfer-new-owner').value = '';
+    document.getElementById('doc-transfer-modal').style.display = 'flex';
+}
+
+function closeDocTransferModal() {
+    document.getElementById('doc-transfer-modal').style.display = 'none';
+    docTransferData = null;
+}
+
+function transferDocOwnership() {
+    if (!docTransferData) return;
+    
+    const newOwnerId = document.getElementById('doc-transfer-new-owner').value;
+    if (!newOwnerId) {
+        alert('Please select a new owner');
+        return;
+    }
+    
+    const csrfToken = '{{ csrf_token }}';
+    
+    fetch('{% url "api_transfer_ownership" %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken
+        },
+        body: JSON.stringify({
+            record_type: 'paperless',
+            record_id: docTransferData.docId,
+            new_owner_id: parseInt(newOwnerId)
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Ownership transferred successfully!');
+            closeDocTransferModal();
+            location.reload();
+        } else {
+            alert('Error: ' + data.error);
+        }
+    })
+    .catch(error => {
+        alert('Error transferring ownership: ' + error);
+    });
+}
 </script>
+
+{% if is_superuser %}
+<!-- Document Transfer Ownership Modal -->
+<div id="doc-transfer-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+        <h3>📤 Transfer Document Ownership</h3>
+        <div class="modal-body">
+            <p><strong>Document:</strong> <span id="doc-transfer-title"></span></p>
+            <p><strong>Current Owner:</strong> <span id="doc-transfer-current-owner"></span></p>
+            <div class="form-group" style="margin-top: 1rem;">
+                <label for="doc-transfer-new-owner">Transfer to:</label>
+                <select id="doc-transfer-new-owner" class="form-control">
+                    <option value="">Select a user...</option>
+                    {% for user in all_users %}
+                    <option value="{{ user.id }}">{{ user.username }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <p class="text-warning" style="margin-top: 1rem; font-size: 0.875rem; color: #d97706;">
+                ⚠️ Warning: Transferring ownership will remove any existing transaction links. 
+                The new owner will need to re-link the document.
+            </p>
+        </div>
+        <div class="modal-actions">
+            <button type="button" class="btn btn-secondary" onclick="closeDocTransferModal()">Cancel</button>
+            <button type="button" class="btn btn-primary" onclick="transferDocOwnership()">Transfer</button>
+        </div>
+    </div>
+</div>
+{% endif %}
 {% endblock %}

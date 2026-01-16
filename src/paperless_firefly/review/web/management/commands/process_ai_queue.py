@@ -18,15 +18,12 @@ Usage:
     python manage.py process_ai_queue --daemon --interval 30
 """
 
-import json
 import logging
 import signal
-import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
-from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 logger = logging.getLogger(__name__)
@@ -94,9 +91,7 @@ class Command(BaseCommand):
         interval_minutes = options["interval"] or user_settings.get(
             "ai_schedule_interval_minutes", 60
         )
-        batch_size = options["batch_size"] or user_settings.get(
-            "ai_schedule_batch_size", 1
-        )
+        batch_size = options["batch_size"] or user_settings.get("ai_schedule_batch_size", 1)
         start_hour = user_settings.get("ai_schedule_start_hour", 0)
         end_hour = user_settings.get("ai_schedule_end_hour", 24)
 
@@ -139,9 +134,7 @@ class Command(BaseCommand):
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals."""
         self._shutdown_requested = True
-        self.stdout.write(
-            self.style.WARNING("\nShutdown requested, finishing current job...")
-        )
+        self.stdout.write(self.style.WARNING("\nShutdown requested, finishing current job..."))
 
     def _run_daemon(
         self,
@@ -230,9 +223,7 @@ class Command(BaseCommand):
             self.stdout.write(f"Processing job #{job_id} (document {document_id})...")
 
             if dry_run:
-                self.stdout.write(
-                    self.style.SUCCESS(f"  [DRY RUN] Would process job #{job_id}")
-                )
+                self.stdout.write(self.style.SUCCESS(f"  [DRY RUN] Would process job #{job_id}"))
                 processed += 1
                 continue
 
@@ -245,20 +236,14 @@ class Command(BaseCommand):
                 )
 
                 if success:
-                    self.stdout.write(
-                        self.style.SUCCESS(f"  ✓ Job #{job_id} completed")
-                    )
+                    self.stdout.write(self.style.SUCCESS(f"  ✓ Job #{job_id} completed"))
                     processed += 1
                 else:
-                    self.stdout.write(
-                        self.style.ERROR(f"  ✗ Job #{job_id} failed")
-                    )
+                    self.stdout.write(self.style.ERROR(f"  ✗ Job #{job_id} failed"))
 
             except Exception as e:
                 logger.exception(f"Error processing job #{job_id}")
-                self.stderr.write(
-                    self.style.ERROR(f"  ✗ Job #{job_id} error: {e}")
-                )
+                self.stderr.write(self.style.ERROR(f"  ✗ Job #{job_id} error: {e}"))
                 # Mark as failed
                 state_store.fail_ai_job(job_id, str(e), can_retry=True)
 

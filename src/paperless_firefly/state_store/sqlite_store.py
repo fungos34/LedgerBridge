@@ -328,7 +328,7 @@ class StateStore:
         user_id: int | None = None,
     ) -> None:
         """Insert or update a document record.
-        
+
         Args:
             document_id: The Paperless document ID.
             source_hash: Hash of the document source for change detection.
@@ -357,7 +357,16 @@ class StateStore:
                             tags = ?, last_seen = ?, user_id = COALESCE(user_id, ?)
                         WHERE document_id = ?
                     """,
-                        (source_hash, title, document_type, correspondent, tags_json, now, user_id, document_id),
+                        (
+                            source_hash,
+                            title,
+                            document_type,
+                            correspondent,
+                            tags_json,
+                            now,
+                            user_id,
+                            document_id,
+                        ),
                     )
                 else:
                     conn.execute(
@@ -367,7 +376,15 @@ class StateStore:
                             tags = ?, last_seen = ?
                         WHERE document_id = ?
                     """,
-                        (source_hash, title, document_type, correspondent, tags_json, now, document_id),
+                        (
+                            source_hash,
+                            title,
+                            document_type,
+                            correspondent,
+                            tags_json,
+                            now,
+                            document_id,
+                        ),
                     )
             else:
                 conn.execute(
@@ -391,7 +408,7 @@ class StateStore:
 
     def get_document(self, document_id: int, user_id: int | None = None) -> DocumentRecord | None:
         """Get a document record by ID.
-        
+
         Args:
             document_id: The document ID to retrieve.
             user_id: If provided, only return if owned by this user or shared (None owner).
@@ -429,7 +446,7 @@ class StateStore:
         user_id: int | None = None,
     ) -> int:
         """Save an extraction record. Returns the extraction ID.
-        
+
         Args:
             document_id: The Paperless document ID.
             external_id: Unique external ID for deduplication.
@@ -447,13 +464,23 @@ class StateStore:
                 (document_id, external_id, extraction_json, overall_confidence, review_state, created_at, user_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-                (document_id, external_id, extraction_json, overall_confidence, review_state, now, user_id),
+                (
+                    document_id,
+                    external_id,
+                    extraction_json,
+                    overall_confidence,
+                    review_state,
+                    now,
+                    user_id,
+                ),
             )
             return cursor.lastrowid or 0
 
-    def get_extraction_by_document(self, document_id: int, user_id: int | None = None) -> ExtractionRecord | None:
+    def get_extraction_by_document(
+        self, document_id: int, user_id: int | None = None
+    ) -> ExtractionRecord | None:
         """Get the latest extraction for a document.
-        
+
         Args:
             document_id: The document ID.
             user_id: If provided, only return if owned by this user or shared.
@@ -462,7 +489,7 @@ class StateStore:
         with self._transaction() as conn:
             if user_id is not None:
                 row = conn.execute(
-                    """SELECT * FROM extractions 
+                    """SELECT * FROM extractions
                        WHERE document_id = ? AND (user_id IS NULL OR user_id = ?)
                        ORDER BY created_at DESC LIMIT 1""",
                     (document_id, user_id),
@@ -474,9 +501,11 @@ class StateStore:
                 ).fetchone()
             return ExtractionRecord.from_row(row) if row else None
 
-    def get_extraction_by_external_id(self, external_id: str, user_id: int | None = None) -> ExtractionRecord | None:
+    def get_extraction_by_external_id(
+        self, external_id: str, user_id: int | None = None
+    ) -> ExtractionRecord | None:
         """Get extraction by external_id.
-        
+
         Args:
             external_id: The external ID.
             user_id: If provided, only return if owned by this user or shared.
@@ -545,7 +574,7 @@ class StateStore:
             # Check if updated_at column exists (for backwards compatibility)
             cursor = conn.execute("PRAGMA table_info(extractions)")
             columns = [row[1] for row in cursor.fetchall()]
-            
+
             if "updated_at" in columns:
                 cursor = conn.execute(
                     """
@@ -672,7 +701,7 @@ class StateStore:
 
     def get_extractions_for_review(self, user_id: int | None = None) -> list[ExtractionRecord]:
         """Get all extractions pending review.
-        
+
         Args:
             user_id: If provided, only return extractions owned by this user or shared.
                      If None, return all extractions (superuser access).
@@ -711,7 +740,7 @@ class StateStore:
         user_id: int | None = None,
     ) -> int:
         """Create an import record. Returns the import ID.
-        
+
         Args:
             external_id: Unique external ID for deduplication.
             document_id: The Paperless document ID.
@@ -872,7 +901,7 @@ class StateStore:
 
     def get_pending_imports(self, user_id: int | None = None) -> list[ImportRecord]:
         """Get all pending imports.
-        
+
         Args:
             user_id: If provided, only return imports owned by this user or shared.
                      If None, return all pending imports (superuser access).
@@ -949,7 +978,7 @@ class StateStore:
         Get all extractions that have been processed (imported, rejected, or pending import).
 
         Used to show archive/history of processed documents that can be reset.
-        
+
         Args:
             user_id: If provided, only return extractions owned by this user or shared.
                      If None, return all extractions (superuser access).
@@ -1004,7 +1033,7 @@ class StateStore:
 
     def get_stats(self, user_id: int | None = None) -> dict[str, Any]:
         """Get pipeline statistics.
-        
+
         Args:
             user_id: If provided, only count records owned by this user or shared.
                      If None, return all stats (superuser access).
@@ -1079,7 +1108,7 @@ class StateStore:
         user_id: int | None = None,
     ) -> None:
         """Upsert a Firefly transaction into the cache.
-        
+
         Args:
             firefly_id: Firefly transaction ID.
             type_: Transaction type (withdrawal, deposit, transfer).
@@ -1103,7 +1132,7 @@ class StateStore:
             cursor = conn.execute("PRAGMA table_info(firefly_cache)")
             columns = [row[1] for row in cursor.fetchall()]
             has_user_id = "user_id" in columns
-            
+
             if has_user_id and user_id is not None:
                 conn.execute(
                     """
@@ -1185,7 +1214,7 @@ class StateStore:
         self, user_id: int | None = None
     ) -> list[dict[str, Any]]:
         """Get cached Firefly transactions that are not yet matched (excludes soft-deleted).
-        
+
         Args:
             user_id: Filter by user ID. If None, returns all users' transactions
                      (for superuser access). If set, returns only that user's
@@ -1234,7 +1263,7 @@ class StateStore:
         self, firefly_id: int, user_id: int | None = None
     ) -> dict[str, Any] | None:
         """Get a single cached Firefly transaction.
-        
+
         Args:
             firefly_id: The Firefly transaction ID.
             user_id: Filter by user ID. If None, returns the entry regardless of owner
@@ -1410,7 +1439,7 @@ class StateStore:
         user_id: int | None = None,
     ) -> int:
         """Create an interpretation run record. Returns the run ID.
-        
+
         Args:
             document_id: The Paperless document ID.
             firefly_id: The Firefly transaction ID (if applicable).
@@ -1531,7 +1560,7 @@ class StateStore:
                     """
                     SELECT * FROM interpretation_runs
                     WHERE document_id = ? AND (user_id = ? OR user_id IS NULL)
-                    ORDER BY run_timestamp DESC
+                    ORDER BY run_timestamp DESC, id DESC
                 """,
                     (document_id, user_id),
                 ).fetchall()
@@ -1540,7 +1569,7 @@ class StateStore:
                     """
                     SELECT * FROM interpretation_runs
                     WHERE document_id = ?
-                    ORDER BY run_timestamp DESC
+                    ORDER BY run_timestamp DESC, id DESC
                 """,
                     (document_id,),
                 ).fetchall()
@@ -1550,9 +1579,9 @@ class StateStore:
         self, document_id: int, user_id: int | None = None
     ) -> dict[str, Any] | None:
         """Get the most recent interpretation run for a document.
-        
+
         Note: AI interpretation runs are strictly private.
-        
+
         Args:
             document_id: The document ID to get the latest run for.
             user_id: Filter by user ID for privacy.
@@ -1566,7 +1595,7 @@ class StateStore:
                     """
                     SELECT * FROM interpretation_runs
                     WHERE document_id = ? AND (user_id = ? OR user_id IS NULL)
-                    ORDER BY run_timestamp DESC
+                    ORDER BY run_timestamp DESC, id DESC
                     LIMIT 1
                 """,
                     (document_id, user_id),
@@ -1576,7 +1605,7 @@ class StateStore:
                     """
                     SELECT * FROM interpretation_runs
                     WHERE document_id = ?
-                    ORDER BY run_timestamp DESC
+                    ORDER BY run_timestamp DESC, id DESC
                     LIMIT 1
                 """,
                     (document_id,),
@@ -2057,12 +2086,12 @@ class StateStore:
     def get_ai_job(self, job_id: int) -> dict[str, Any] | None:
         """Get an AI job by ID."""
         with self._transaction() as conn:
-            row = conn.execute(
-                "SELECT * FROM ai_job_queue WHERE id = ?", (job_id,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM ai_job_queue WHERE id = ?", (job_id,)).fetchone()
             return dict(row) if row else None
 
-    def get_ai_job_by_document(self, document_id: int, active_only: bool = True) -> dict[str, Any] | None:
+    def get_ai_job_by_document(
+        self, document_id: int, active_only: bool = True
+    ) -> dict[str, Any] | None:
         """Get AI job for a document."""
         with self._transaction() as conn:
             if active_only:
@@ -2175,7 +2204,7 @@ class StateStore:
 
     def is_ai_job_cancelled(self, job_id: int) -> bool:
         """Check if an AI job has been cancelled.
-        
+
         Used by running jobs to check for cancellation requests
         during long-running Ollama calls.
         """
@@ -2185,11 +2214,10 @@ class StateStore:
                 (job_id,),
             ).fetchone()
             return row is not None and row["status"] == "CANCELLED"
-            return cursor.rowcount > 0
 
     def get_ai_queue_stats(self, user_id: int | None = None) -> dict[str, int]:
         """Get AI job queue statistics.
-        
+
         Args:
             user_id: If provided, only count jobs for this user.
                      If None, count all jobs (superuser access).
@@ -2240,12 +2268,12 @@ class StateStore:
         user_id: int | None = None,
     ) -> list[dict[str, Any]]:
         """Get list of AI jobs for display.
-        
+
         Orders by:
         1. Status (PROCESSING first, then PENDING, then others)
         2. Priority (higher priority first)
         3. ID (older jobs first for same priority)
-        
+
         Args:
             status: Filter by status (optional).
             limit: Maximum number of results.
@@ -2260,7 +2288,7 @@ class StateStore:
                     FROM ai_job_queue aq
                     LEFT JOIN paperless_documents pd ON aq.document_id = pd.document_id
                     WHERE aq.status = ? AND (aq.user_id IS NULL OR aq.user_id = ?)
-                    ORDER BY 
+                    ORDER BY
                         aq.priority DESC,
                         aq.id ASC
                     LIMIT ? OFFSET ?
@@ -2272,7 +2300,7 @@ class StateStore:
                     FROM ai_job_queue aq
                     LEFT JOIN paperless_documents pd ON aq.document_id = pd.document_id
                     WHERE aq.status = ?
-                    ORDER BY 
+                    ORDER BY
                         aq.priority DESC,
                         aq.id ASC
                     LIMIT ? OFFSET ?
@@ -2284,11 +2312,11 @@ class StateStore:
                     FROM ai_job_queue aq
                     LEFT JOIN paperless_documents pd ON aq.document_id = pd.document_id
                     WHERE (aq.user_id IS NULL OR aq.user_id = ?)
-                    ORDER BY 
-                        CASE aq.status 
-                            WHEN 'PROCESSING' THEN 0 
-                            WHEN 'PENDING' THEN 1 
-                            ELSE 2 
+                    ORDER BY
+                        CASE aq.status
+                            WHEN 'PROCESSING' THEN 0
+                            WHEN 'PENDING' THEN 1
+                            ELSE 2
                         END,
                         aq.priority DESC,
                         aq.id ASC
@@ -2300,11 +2328,11 @@ class StateStore:
                     SELECT aq.*, pd.title as doc_title
                     FROM ai_job_queue aq
                     LEFT JOIN paperless_documents pd ON aq.document_id = pd.document_id
-                    ORDER BY 
-                        CASE aq.status 
-                            WHEN 'PROCESSING' THEN 0 
-                            WHEN 'PENDING' THEN 1 
-                            ELSE 2 
+                    ORDER BY
+                        CASE aq.status
+                            WHEN 'PROCESSING' THEN 0
+                            WHEN 'PENDING' THEN 1
+                            ELSE 2
                         END,
                         aq.priority DESC,
                         aq.id ASC
@@ -2317,6 +2345,7 @@ class StateStore:
     def cleanup_old_ai_jobs(self, days: int = 30) -> int:
         """Remove completed/failed/cancelled jobs older than N days."""
         from datetime import timedelta
+
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
         with self._transaction() as conn:

@@ -21,7 +21,6 @@ from typing import NamedTuple
 
 from .dedupe import (
     LEGACY_EXTERNAL_ID_PREFIX,
-    PAPERLESS_LINK_MARKER,
     extract_document_id_from_external_id,
     is_spark_external_id,
 )

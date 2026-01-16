@@ -23,67 +23,77 @@ def upgrade(conn: sqlite3.Connection) -> None:
     cursor = conn.cursor()
 
     # Create AI job queue table
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS ai_job_queue (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             document_id INTEGER NOT NULL,
             extraction_id INTEGER,
             external_id TEXT,
-            
+
             -- Status: PENDING, PROCESSING, COMPLETED, FAILED, CANCELLED
             status TEXT NOT NULL DEFAULT 'PENDING',
-            
+
             -- Priority (higher = processed first)
             priority INTEGER NOT NULL DEFAULT 0,
-            
+
             -- Scheduling info
             scheduled_at TEXT NOT NULL,
             scheduled_for TEXT,  -- When to process (NULL = ASAP)
-            
+
             -- Processing info
             started_at TEXT,
             completed_at TEXT,
-            
+
             -- Results (JSON)
             suggestions_json TEXT,
             error_message TEXT,
-            
+
             -- Retry tracking
             retry_count INTEGER NOT NULL DEFAULT 0,
             max_retries INTEGER NOT NULL DEFAULT 3,
-            
+
             -- Metadata
             created_by TEXT,  -- 'AUTO', 'USER', 'SYSTEM'
             notes TEXT
         )
-    """)
+    """
+    )
 
     # Index for finding pending jobs (status + scheduled_for + priority)
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE INDEX IF NOT EXISTS idx_ai_job_queue_pending
         ON ai_job_queue (status, scheduled_for, priority DESC)
-    """)
+    """
+    )
 
     # Index for document lookups
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE INDEX IF NOT EXISTS idx_ai_job_queue_document
         ON ai_job_queue (document_id)
-    """)
+    """
+    )
 
     # Index for extraction lookups
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE INDEX IF NOT EXISTS idx_ai_job_queue_extraction
         ON ai_job_queue (extraction_id)
-    """)
+    """
+    )
 
     # Partial unique index: only one PENDING/PROCESSING job per document
     # Note: SQLite doesn't support partial unique indexes directly,
     # so we'll enforce this in the application layer
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE INDEX IF NOT EXISTS idx_ai_job_queue_active_doc
         ON ai_job_queue (document_id, status)
         WHERE status IN ('PENDING', 'PROCESSING')
-    """)
+    """
+    )
 
     conn.commit()
 

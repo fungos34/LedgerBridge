@@ -213,9 +213,11 @@ def cmd_scan(config: Config, tag: str, limit: int) -> int:
     return 0
 
 
-def cmd_extract(config: Config, doc_id: int | None, tag: str, limit: int, user_id: int | None = None) -> int:
+def cmd_extract(
+    config: Config, doc_id: int | None, tag: str, limit: int, user_id: int | None = None
+) -> int:
     """Extract finance data from documents.
-    
+
     Args:
         config: Configuration object.
         doc_id: Specific document ID to extract (optional).
@@ -438,7 +440,9 @@ def cmd_import(
 
             if dry_run:
                 if linked_firefly_id:
-                    print(f"     → [DRY RUN] Would UPDATE existing Firefly transaction {linked_firefly_id}")
+                    print(
+                        f"     → [DRY RUN] Would UPDATE existing Firefly transaction {linked_firefly_id}"
+                    )
                 else:
                     print("     → [DRY RUN] Would CREATE new transaction")
                 continue
@@ -456,18 +460,24 @@ def cmd_import(
             if linked_firefly_id and link_type == "LINKED":
                 # UPDATE existing Firefly transaction instead of creating new one
                 # This prevents duplicates when importing linked documents
-                logger.info(f"Updating existing Firefly transaction {linked_firefly_id} with document data")
+                logger.info(
+                    f"Updating existing Firefly transaction {linked_firefly_id} with document data"
+                )
                 print(f"     → Updating linked Firefly transaction {linked_firefly_id}")
-                
+
                 try:
                     success = firefly.update_transaction(linked_firefly_id, payload)
                     if success:
                         store.update_import_success(external_id, linked_firefly_id)
-                        logger.info(f"[{document_id}] Update successful, firefly_id={linked_firefly_id}")
+                        logger.info(
+                            f"[{document_id}] Update successful, firefly_id={linked_firefly_id}"
+                        )
                         print(f"     ✓ Updated (Firefly ID: {linked_firefly_id})")
                         imported += 1
                     else:
-                        store.update_import_failed(external_id, "Failed to update Firefly transaction")
+                        store.update_import_failed(
+                            external_id, "Failed to update Firefly transaction"
+                        )
                         logger.warning(f"[{document_id}] Update failed")
                         print("     ⚠ Update failed")
                         failed += 1

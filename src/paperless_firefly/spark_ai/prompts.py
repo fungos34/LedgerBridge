@@ -202,7 +202,7 @@ Return JSON with splits for each category."""
             Formatted user message.
         """
         categories_str = "\n".join(f"• {cat}" for cat in categories)
-        
+
         # Format bank data if available
         if bank_data:
             bank_str = f"""Bank Amount: {bank_data.get('amount', 'N/A')}
@@ -211,7 +211,7 @@ Bank Description: {bank_data.get('description', 'N/A')}
 Bank Category: {bank_data.get('category_name', 'N/A')}"""
         else:
             bank_str = "No bank data available"
-        
+
         return self.user_template.format(
             amount=amount,
             date=date,
@@ -292,12 +292,12 @@ Please answer based on the documentation and your knowledge of the system."""
                 content = msg.get("content", "")[:500]  # Limit length
                 history_parts.append(f"{role}: {content}")
             history_text = "\n".join(history_parts)
-        
+
         # Format page context
         page_text = ""
         if page_context:
             page_text = f"CURRENT PAGE CONTEXT:\n{page_context}"
-        
+
         return self.user_template.format(
             question=question,
             documentation=documentation or "No additional documentation available.",
@@ -312,7 +312,7 @@ class TransactionReviewPrompt:
 
     Used when reviewing a document to suggest values for all editable fields
     based on document content, OCR data, and linked bank transaction context.
-    
+
     IMPORTANT: This prompt must be imperative and clear to the AI model.
     Split transaction extraction is a core feature.
     """
@@ -508,7 +508,7 @@ Respond with complete JSON including ALL fields you can determine."""
             Formatted user message.
         """
         categories_str = "\n".join(f"• {cat}" for cat in categories)
-        
+
         # Format source accounts
         if source_accounts:
             source_accounts_str = "\n".join(f"• {acc}" for acc in source_accounts)

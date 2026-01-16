@@ -21,9 +21,9 @@ def llm_settings(request):
 
     try:
         # Load config to get default timeout
-        config_path = Path(
-            getattr(settings, "STATE_DB_PATH", "/app/data/state.db")
-        ).parent / "config.yaml"
+        config_path = (
+            Path(getattr(settings, "STATE_DB_PATH", "/app/data/state.db")).parent / "config.yaml"
+        )
         if not config_path.exists():
             config_path = Path("/app/config/config.yaml")
 
@@ -127,9 +127,7 @@ def _get_page_description(path: str) -> str:
             "Set the amount, date, category, and vendor before importing to Firefly."
         )
     if path.startswith("/review/"):
-        return (
-            "Review a transaction and link it to its matching document or mark as orphan."
-        )
+        return "Review a transaction and link it to its matching document or mark as orphan."
 
     return "SparkLink - Document to Transaction Matching"
 

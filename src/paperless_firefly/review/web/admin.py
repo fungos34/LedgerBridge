@@ -41,7 +41,7 @@ class UserProfileInline(admin.StackedInline):
 
 class UserAdmin(BaseUserAdmin):
     """Extended User admin with profile inline.
-    
+
     Allows superusers to promote/demote other users to staff/superuser status.
     """
 
@@ -57,7 +57,7 @@ class UserAdmin(BaseUserAdmin):
     )
     list_select_related = ("profile",)
     list_filter = ("is_staff", "is_superuser", "is_active")
-    
+
     # Override fieldsets to make is_superuser and is_staff visible and editable
     # Default BaseUserAdmin fieldsets include these but we make them more prominent
     fieldsets = (
@@ -92,7 +92,7 @@ class UserAdmin(BaseUserAdmin):
         if not obj:
             return []
         return super().get_inline_instances(request, obj)
-    
+
     def get_readonly_fields(self, request, obj=None):
         """Make superuser fields read-only for non-superusers."""
         readonly = list(super().get_readonly_fields(request, obj))
@@ -100,7 +100,7 @@ class UserAdmin(BaseUserAdmin):
         if not request.user.is_superuser:
             readonly.extend(["is_superuser", "is_staff"])
         return readonly
-    
+
     def has_change_permission(self, request, obj=None):
         """Allow users to edit their own profile, admins can edit all."""
         if obj is not None and obj == request.user:
@@ -545,9 +545,7 @@ class AIJobQueueAdmin(StateStoreAdmin):
     @admin.action(description="Cancel selected jobs")
     def cancel_jobs(self, request, queryset):
         """Cancel pending/processing jobs."""
-        updated = queryset.filter(status__in=["PENDING", "PROCESSING"]).update(
-            status="CANCELLED"
-        )
+        updated = queryset.filter(status__in=["PENDING", "PROCESSING"]).update(status="CANCELLED")
         self.message_user(request, f"Cancelled {updated} job(s).")
 
     @admin.action(description="Retry failed jobs")

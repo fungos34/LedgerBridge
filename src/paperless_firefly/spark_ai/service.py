@@ -90,11 +90,11 @@ class SplitSuggestion:
 @dataclass
 class FieldSuggestion:
     """Suggestion for a single form field."""
-    
+
     value: str
     confidence: float
     reason: str
-    
+
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
         return {
@@ -107,20 +107,20 @@ class FieldSuggestion:
 @dataclass
 class TransactionReviewSuggestion:
     """Result of comprehensive transaction review suggestion."""
-    
+
     suggestions: dict[str, FieldSuggestion]  # field_name -> FieldSuggestion
     overall_confidence: float
     analysis_notes: str
     model: str
     from_cache: bool = False
-    split_transactions: list[dict] | None = None  # [{"amount": float, "description": str, "category": str}]
-    
+    split_transactions: list[dict] | None = (
+        None  # [{"amount": float, "description": str, "category": str}]
+    )
+
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
         result = {
-            "suggestions": {
-                k: v.to_dict() for k, v in self.suggestions.items()
-            },
+            "suggestions": {k: v.to_dict() for k, v in self.suggestions.items()},
             "overall_confidence": self.overall_confidence,
             "analysis_notes": self.analysis_notes,
             "model": self.model,
@@ -462,8 +462,12 @@ class SparkAIService:
 
         # Build cache key including content hash and bank data
         content_hash = hashlib.sha256((content or "").encode()).hexdigest()[:8]
-        bank_hash = hashlib.sha256(json.dumps(bank_data or {}, sort_keys=True).encode()).hexdigest()[:8]
-        cache_key = self._build_cache_key("split", amount, date, vendor, description, content_hash, bank_hash)
+        bank_hash = hashlib.sha256(
+            json.dumps(bank_data or {}, sort_keys=True).encode()
+        ).hexdigest()[:8]
+        cache_key = self._build_cache_key(
+            "split", amount, date, vendor, description, content_hash, bank_hash
+        )
 
         # Check cache
         if use_cache:
@@ -529,11 +533,13 @@ class SparkAIService:
                 matched_category = self._match_category(raw_category)
 
                 if matched_category and amount > 0:
-                    normalized_splits.append({
-                        "category": matched_category,
-                        "amount": round(amount, 2),
-                        "description": str(split.get("description", "")).strip(),
-                    })
+                    normalized_splits.append(
+                        {
+                            "category": matched_category,
+                            "amount": round(amount, 2),
+                            "description": str(split.get("description", "")).strip(),
+                        }
+                    )
 
             suggestion = SplitSuggestion(
                 should_split=data.get("should_split", False) and len(normalized_splits) > 0,
@@ -550,12 +556,14 @@ class SparkAIService:
                     model=result["model"],
                     prompt_version=PROMPT_VERSION,
                     taxonomy_version=self._taxonomy_version,
-                    response_json=json.dumps({
-                        "should_split": suggestion.should_split,
-                        "splits": suggestion.splits,
-                        "confidence": suggestion.confidence,
-                        "reason": suggestion.reason,
-                    }),
+                    response_json=json.dumps(
+                        {
+                            "should_split": suggestion.should_split,
+                            "splits": suggestion.splits,
+                            "confidence": suggestion.confidence,
+                            "reason": suggestion.reason,
+                        }
+                    ),
                 )
 
             return suggestion
@@ -755,10 +763,10 @@ class SparkAIService:
 
         try:
             url = f"{self.llm_config.ollama_url}/api/chat"
-            
+
             # Use streaming if we have a cancel_check function
             use_streaming = cancel_check is not None and no_timeout
-            
+
             payload = {
                 "model": model,
                 "messages": [
@@ -771,8 +779,11 @@ class SparkAIService:
 
             # Debug logging only (never at INFO)
             if no_timeout:
-                logger.info("Calling Ollama model %s (no timeout - will wait indefinitely%s)", 
-                           model, ", with cancel check" if cancel_check else "")
+                logger.info(
+                    "Calling Ollama model %s (no timeout - will wait indefinitely%s)",
+                    model,
+                    ", with cancel check" if cancel_check else "",
+                )
             else:
                 logger.debug("Calling Ollama model %s at %s", model, self.llm_config.ollama_url)
 
@@ -788,18 +799,20 @@ class SparkAIService:
                     write=30.0,
                     pool=10.0,
                 )
-            
+
             if use_streaming:
                 # Stream response and check for cancellation between chunks
                 content_parts = []
-                with self._client.stream("POST", url, json=payload, timeout=request_timeout) as response:
+                with self._client.stream(
+                    "POST", url, json=payload, timeout=request_timeout
+                ) as response:
                     response.raise_for_status()
                     for line in response.iter_lines():
                         # Check for cancellation between chunks
                         if cancel_check and cancel_check():
                             logger.info("Ollama request cancelled by user")
                             return None
-                        
+
                         if line:
                             try:
                                 chunk = json.loads(line)
@@ -810,12 +823,12 @@ class SparkAIService:
                                     break
                             except json.JSONDecodeError:
                                 continue
-                
+
                 # Final cancellation check
                 if cancel_check and cancel_check():
                     logger.info("Ollama request cancelled by user after completion")
                     return None
-                    
+
                 content = "".join(content_parts)
             else:
                 # Non-streaming request
@@ -986,11 +999,11 @@ class SparkAIService:
         current_source_account: str | None = None,
     ) -> TransactionReviewSuggestion | None:
         """Suggest values for all editable transaction fields during review.
-        
+
         This is the comprehensive AI suggestion method used by the review UI.
         It analyzes the document content, linked bank transactions, and previous
         decisions to suggest values for category, transaction type, vendor, etc.
-        
+
         Args:
             amount: Transaction amount.
             date: Transaction date.
@@ -1011,40 +1024,45 @@ class SparkAIService:
                          Allows cancellation of long-running LLM requests.
             source_accounts: List of available source account names for suggestions.
             current_source_account: Currently selected source account.
-            
+
         Returns:
             TransactionReviewSuggestion with per-field suggestions, or None if LLM disabled/cancelled.
         """
         if not self.is_enabled:
             logger.debug("LLM service disabled, skipping review suggestions")
             return None
-            
+
         # Per-document opt-out check
         if document_id:
             opted_out, reason = self.check_opt_out(document_id)
             if opted_out:
                 logger.debug("LLM opted out for doc %d: %s", document_id, reason)
                 return None
-                
+
         if not self.categories:
             logger.warning("No categories configured for LLM suggestions")
             return None
-            
+
         # Build cache key including all context
         context_hash = hashlib.sha256(
-            json.dumps({
-                "amount": amount,
-                "date": date,
-                "vendor": vendor,
-                "description": description,
-                "current_category": current_category,
-                "current_type": current_type,
-                "bank_amount": bank_transaction.get("amount") if bank_transaction else None,
-                "content_hash": hashlib.sha256((document_content or "")[:500].encode()).hexdigest()[:8],
-            }, sort_keys=True).encode()
+            json.dumps(
+                {
+                    "amount": amount,
+                    "date": date,
+                    "vendor": vendor,
+                    "description": description,
+                    "current_category": current_category,
+                    "current_type": current_type,
+                    "bank_amount": bank_transaction.get("amount") if bank_transaction else None,
+                    "content_hash": hashlib.sha256(
+                        (document_content or "")[:500].encode()
+                    ).hexdigest()[:8],
+                },
+                sort_keys=True,
+            ).encode()
         ).hexdigest()[:16]
         cache_key = f"review:{context_hash}:{self._taxonomy_version}"
-        
+
         # Check cache
         if use_cache:
             cached = self.store.get_llm_cache(cache_key)
@@ -1067,7 +1085,7 @@ class SparkAIService:
                     )
                 except (json.JSONDecodeError, KeyError) as e:
                     logger.warning("Invalid cached review response: %s", e)
-                    
+
         # Build prompt with full context
         user_message = self._review_prompt.format_user_message(
             amount=amount,
@@ -1085,7 +1103,7 @@ class SparkAIService:
             source_accounts=source_accounts,
             current_source_account=current_source_account,
         )
-        
+
         # Try fast model first
         result = self._call_ollama(
             model=self.llm_config.model_fast,
@@ -1094,7 +1112,7 @@ class SparkAIService:
             no_timeout=no_timeout,
             cancel_check=cancel_check,
         )
-        
+
         # Fallback to slow model if needed
         if result is None and self.llm_config.model_fallback:
             # Check for cancellation before fallback
@@ -1109,13 +1127,13 @@ class SparkAIService:
                 no_timeout=no_timeout,
                 cancel_check=cancel_check,
             )
-            
+
         if result is None:
             return None
-            
+
         try:
             data = self._parse_json_response(result["content"])
-            
+
             # Parse suggestions from response
             suggestions = {}
             for field, field_data in data.get("suggestions", {}).items():
@@ -1128,19 +1146,23 @@ class SparkAIService:
                         )
                         continue
                     # Validate transaction_type suggestions
-                    if field == "transaction_type" and field_data["value"] not in ["withdrawal", "deposit", "transfer"]:
+                    if field == "transaction_type" and field_data["value"] not in [
+                        "withdrawal",
+                        "deposit",
+                        "transfer",
+                    ]:
                         logger.warning(
                             "LLM suggested invalid transaction_type '%s', skipping",
                             field_data["value"],
                         )
                         continue
-                        
+
                     suggestions[field] = FieldSuggestion(
                         value=str(field_data["value"]),
                         confidence=float(field_data.get("confidence", 0.5)),
                         reason=str(field_data.get("reason", "")),
                     )
-            
+
             # Parse split transactions if present
             split_transactions = None
             raw_splits = data.get("split_transactions")
@@ -1156,14 +1178,16 @@ class SparkAIService:
                                 split_cat,
                             )
                             split["category"] = None  # Clear invalid category
-                        valid_splits.append({
-                            "amount": float(split.get("amount", 0)),
-                            "description": str(split.get("description", "")),
-                            "category": split.get("category"),
-                        })
+                        valid_splits.append(
+                            {
+                                "amount": float(split.get("amount", 0)),
+                                "description": str(split.get("description", "")),
+                                "category": split.get("category"),
+                            }
+                        )
                 if valid_splits:
                     split_transactions = valid_splits
-                    
+
             review_suggestion = TransactionReviewSuggestion(
                 suggestions=suggestions,
                 overall_confidence=float(data.get("overall_confidence", 0.0)),
@@ -1171,7 +1195,7 @@ class SparkAIService:
                 model=result["model"],
                 split_transactions=split_transactions,
             )
-            
+
             # Cache the result
             self.store.set_llm_cache(
                 cache_key=cache_key,
@@ -1180,9 +1204,9 @@ class SparkAIService:
                 taxonomy_version=self._taxonomy_version,
                 response_json=json.dumps(review_suggestion.to_dict()),
             )
-            
+
             return review_suggestion
-            
+
         except (json.JSONDecodeError, ValueError, KeyError) as e:
             logger.warning("Failed to parse LLM review response: %s", e)
             return None

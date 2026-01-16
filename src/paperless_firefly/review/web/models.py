@@ -62,53 +62,49 @@ class UserProfile(models.Model):
         blank=True, default="", help_text="URL to Firefly Importer for bank statement imports"
     )
     firefly_importer_token = models.CharField(
-        max_length=255, blank=True, default="",
-        help_text="API token for Firefly Importer (separate from Firefly III token)"
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="API token for Firefly Importer (separate from Firefly III token)",
     )
 
     # LLM/Ollama settings
-    llm_enabled = models.BooleanField(
-        default=False, help_text="Enable LLM-assisted categorization"
-    )
+    llm_enabled = models.BooleanField(default=False, help_text="Enable LLM-assisted categorization")
     ollama_url = models.URLField(
         blank=True, default="", help_text="Ollama server URL (e.g., http://localhost:11434)"
     )
     ollama_model = models.CharField(
-        max_length=100, blank=True, default="",
-        help_text="Fast model name (e.g., qwen2.5:3b-instruct-q4_K_M)"
+        max_length=100,
+        blank=True,
+        default="",
+        help_text="Fast model name (e.g., qwen2.5:3b-instruct-q4_K_M)",
     )
     ollama_model_fallback = models.CharField(
-        max_length=100, blank=True, default="",
-        help_text="Fallback model for complex cases (e.g., qwen2.5:7b-instruct-q4_K_M)"
+        max_length=100,
+        blank=True,
+        default="",
+        help_text="Fallback model for complex cases (e.g., qwen2.5:7b-instruct-q4_K_M)",
     )
-    ollama_timeout = models.IntegerField(
-        default=30, help_text="Request timeout in seconds"
-    )
+    ollama_timeout = models.IntegerField(default=30, help_text="Request timeout in seconds")
 
     # AI Job Queue Settings
     ai_schedule_enabled = models.BooleanField(
-        default=True,
-        help_text="Automatically schedule AI interpretation for new documents"
+        default=True, help_text="Automatically schedule AI interpretation for new documents"
     )
     ai_schedule_interval_minutes = models.IntegerField(
-        default=60,
-        help_text="Process one job every N minutes (e.g., 60 = one per hour)"
+        default=60, help_text="Process one job every N minutes (e.g., 60 = one per hour)"
     )
     ai_schedule_batch_size = models.IntegerField(
-        default=1,
-        help_text="Number of jobs to process per scheduled run"
+        default=1, help_text="Number of jobs to process per scheduled run"
     )
     ai_schedule_max_retries = models.IntegerField(
-        default=3,
-        help_text="Maximum retry attempts for failed jobs"
+        default=3, help_text="Maximum retry attempts for failed jobs"
     )
     ai_schedule_start_hour = models.IntegerField(
-        default=0,
-        help_text="Start processing jobs from this hour (0-23)"
+        default=0, help_text="Start processing jobs from this hour (0-23)"
     )
     ai_schedule_end_hour = models.IntegerField(
-        default=24,
-        help_text="Stop processing jobs after this hour (0-24, 24=no limit)"
+        default=24, help_text="Stop processing jobs after this hour (0-24, 24=no limit)"
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -176,7 +172,9 @@ class PaperlessDocument(StateStoreModel):
     tags = models.TextField(blank=True, null=True, help_text="JSON array of tags")
     first_seen = models.TextField()
     last_seen = models.TextField()
-    user_id = models.IntegerField(blank=True, null=True, help_text="Owner user ID (null = shared/legacy)")
+    user_id = models.IntegerField(
+        blank=True, null=True, help_text="Owner user ID (null = shared/legacy)"
+    )
 
     class Meta(StateStoreModel.Meta):
         db_table = "paperless_documents"
@@ -203,7 +201,9 @@ class Extraction(StateStoreModel):
     reviewed_at = models.TextField(blank=True, null=True)
     review_decision = models.TextField(blank=True, null=True)
     llm_opt_out = models.BooleanField(default=False)
-    user_id = models.IntegerField(blank=True, null=True, help_text="Owner user ID (null = shared/legacy)")
+    user_id = models.IntegerField(
+        blank=True, null=True, help_text="Owner user ID (null = shared/legacy)"
+    )
 
     class Meta(StateStoreModel.Meta):
         db_table = "extractions"
@@ -229,7 +229,9 @@ class Import(StateStoreModel):
     payload_json = models.TextField()
     created_at = models.TextField()
     imported_at = models.TextField(blank=True, null=True)
-    user_id = models.IntegerField(blank=True, null=True, help_text="Owner user ID (null = shared/legacy)")
+    user_id = models.IntegerField(
+        blank=True, null=True, help_text="Owner user ID (null = shared/legacy)"
+    )
 
     class Meta(StateStoreModel.Meta):
         db_table = "imports"
@@ -454,8 +456,7 @@ class AIJobQueue(StateStoreModel):
     # Scheduling
     scheduled_at = models.TextField(help_text="When the job was added to queue")
     scheduled_for = models.TextField(
-        blank=True, null=True,
-        help_text="When to process (NULL = ASAP based on interval)"
+        blank=True, null=True, help_text="When to process (NULL = ASAP based on interval)"
     )
 
     # Processing
@@ -464,8 +465,7 @@ class AIJobQueue(StateStoreModel):
 
     # Results
     suggestions_json = models.TextField(
-        blank=True, null=True,
-        help_text="JSON with AI suggestions for each field"
+        blank=True, null=True, help_text="JSON with AI suggestions for each field"
     )
     error_message = models.TextField(blank=True, null=True)
 
@@ -474,10 +474,7 @@ class AIJobQueue(StateStoreModel):
     max_retries = models.IntegerField(default=3)
 
     # Metadata
-    created_by = models.TextField(
-        blank=True, null=True,
-        help_text="AUTO, USER, or SYSTEM"
-    )
+    created_by = models.TextField(blank=True, null=True, help_text="AUTO, USER, or SYSTEM")
     notes = models.TextField(blank=True, null=True)
 
     class Meta(StateStoreModel.Meta):

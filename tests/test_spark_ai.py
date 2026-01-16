@@ -7,10 +7,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from paperless_firefly.spark_ai.prompts import PROMPT_VERSION, CategoryPrompt, ChatPrompt, SplitPrompt
+from paperless_firefly.spark_ai.prompts import (
+    PROMPT_VERSION,
+    CategoryPrompt,
+    ChatPrompt,
+    SplitPrompt,
+)
 from paperless_firefly.spark_ai.service import (
     CategorySuggestion,
-    FieldSuggestion,
     SparkAIService,
     SplitSuggestion,
     TransactionReviewSuggestion,
@@ -98,7 +102,7 @@ class TestSplitPrompt:
                 "date": "2025-01-15",
                 "description": "TARGET STORE",
                 "category_name": "Shopping",
-            }
+            },
         )
 
         assert "Bank Amount: 150.00" in message
@@ -171,7 +175,7 @@ class TestChatPrompt:
     def test_system_prompt_content(self) -> None:
         """Test system prompt contains key information."""
         prompt = ChatPrompt()
-        
+
         assert "SparkLink" in prompt.system_prompt
         assert "Paperless-ngx" in prompt.system_prompt
         assert "Firefly III" in prompt.system_prompt
@@ -534,11 +538,13 @@ class TestSparkAIService:
     ) -> None:
         """Test parsing JSON from malformed response with extra text."""
         service = SparkAIService(store, mock_config_enabled, categories)
-        
+
         # Response with extra text before and after JSON
-        malformed = 'Here is my response:\n{"category": "Shopping", "confidence": 0.8}\nHope this helps!'
+        malformed = (
+            'Here is my response:\n{"category": "Shopping", "confidence": 0.8}\nHope this helps!'
+        )
         result = service._parse_json_response(malformed)
-        
+
         assert result["category"] == "Shopping"
         assert result["confidence"] == 0.8
 
@@ -547,11 +553,11 @@ class TestSparkAIService:
     ) -> None:
         """Test parsing JSON with trailing commas."""
         service = SparkAIService(store, mock_config_enabled, categories)
-        
+
         # Common LLM mistake: trailing comma
         malformed = '{"category": "Shopping", "confidence": 0.8,}'
         result = service._parse_json_response(malformed)
-        
+
         assert result["category"] == "Shopping"
         assert result["confidence"] == 0.8
 
@@ -560,11 +566,11 @@ class TestSparkAIService:
     ) -> None:
         """Test parsing JSON with unquoted keys."""
         service = SparkAIService(store, mock_config_enabled, categories)
-        
+
         # Another common LLM mistake
         malformed = '{category: "Shopping", confidence: 0.8}'
         result = service._parse_json_response(malformed)
-        
+
         assert result["category"] == "Shopping"
         assert result["confidence"] == 0.8
 
@@ -573,16 +579,16 @@ class TestSparkAIService:
     ) -> None:
         """Test extracting key-values from very malformed response."""
         service = SparkAIService(store, mock_config_enabled, categories)
-        
+
         # Badly formatted response
-        malformed = '''
+        malformed = """
         I think this should be categorized as follows:
         should_split: true
         confidence: 0.75
         reason: "Multiple items detected"
-        '''
+        """
         result = service._parse_json_response(malformed)
-        
+
         assert result.get("should_split") is True
         assert result.get("confidence") == 0.75
 
@@ -591,13 +597,13 @@ class TestSparkAIService:
     ) -> None:
         """Test extracting JSON array from split response."""
         service = SparkAIService(store, mock_config_enabled, categories)
-        
+
         # Response with just array (using proper JSON double quotes)
-        malformed = '''Here are the splits:
+        malformed = """Here are the splits:
         [{"category": "Groceries", "amount": 50.0}, {"category": "Household", "amount": 25.0}]
-        '''
+        """
         result = service._parse_json_response(malformed)
-        
+
         assert result["should_split"] is True
         assert len(result["splits"]) == 2
 
@@ -606,10 +612,10 @@ class TestSparkAIService:
     ) -> None:
         """Test exact category matching."""
         service = SparkAIService(store, mock_config_enabled, categories)
-        
+
         result = service._match_category("Shopping")
         assert result == "Shopping"
-        
+
         # Case insensitive
         result = service._match_category("shopping")
         assert result == "Shopping"
@@ -619,7 +625,7 @@ class TestSparkAIService:
     ) -> None:
         """Test substring category matching."""
         service = SparkAIService(store, mock_config_enabled, categories)
-        
+
         # LLM might say "Food & Groceries" but category is "Groceries"
         result = service._match_category("Food & Groceries")
         assert result == "Groceries"
@@ -629,7 +635,7 @@ class TestSparkAIService:
     ) -> None:
         """Test word overlap category matching."""
         service = SparkAIService(store, mock_config_enabled, categories)
-        
+
         # Test with partial word match
         result = service._match_category("Public Transportation")
         assert result == "Transportation"
@@ -639,7 +645,7 @@ class TestSparkAIService:
     ) -> None:
         """Test category matching with no match."""
         service = SparkAIService(store, mock_config_enabled, categories)
-        
+
         result = service._match_category("Healthcare")
         assert result is None
 
@@ -648,42 +654,50 @@ class TestSparkAIService:
     ) -> None:
         """Test chat returns None when LLM is disabled."""
         service = SparkAIService(store, mock_config_disabled, categories)
-        
+
         result = service.chat("What is SparkLink?")
         assert result is None
 
-    @patch.object(SparkAIService, '_call_ollama_text')
+    @patch.object(SparkAIService, "_call_ollama_text")
     def test_chat_returns_response(
-        self, mock_call: MagicMock, store: StateStore, mock_config_enabled: MagicMock, categories: list[str]
+        self,
+        mock_call: MagicMock,
+        store: StateStore,
+        mock_config_enabled: MagicMock,
+        categories: list[str],
     ) -> None:
         """Test chat returns response from LLM."""
         mock_call.return_value = {
             "content": "SparkLink is a financial document processing application.",
-            "model": "qwen2.5:7b"
+            "model": "qwen2.5:7b",
         }
-        
+
         service = SparkAIService(store, mock_config_enabled, categories)
         result = service.chat("What is SparkLink?", documentation="Test docs")
-        
+
         assert result == "SparkLink is a financial document processing application."
         mock_call.assert_called_once()
 
-    @patch.object(SparkAIService, '_call_ollama_text')
+    @patch.object(SparkAIService, "_call_ollama_text")
     def test_chat_with_history_and_context(
-        self, mock_call: MagicMock, store: StateStore, mock_config_enabled: MagicMock, categories: list[str]
+        self,
+        mock_call: MagicMock,
+        store: StateStore,
+        mock_config_enabled: MagicMock,
+        categories: list[str],
     ) -> None:
         """Test chat passes conversation history and page context to LLM."""
         mock_call.return_value = {
             "content": "The Confirm button saves and marks the document as reviewed.",
-            "model": "qwen2.5:7b"
+            "model": "qwen2.5:7b",
         }
-        
+
         conversation_history = [
             {"role": "user", "content": "What can I do on this page?"},
             {"role": "assistant", "content": "You can review and edit document details."},
         ]
         page_context = "Current page: Document Review\nThe user can edit amount, date, etc."
-        
+
         service = SparkAIService(store, mock_config_enabled, categories)
         result = service.chat(
             "What does the Confirm button do?",
@@ -691,10 +705,10 @@ class TestSparkAIService:
             page_context=page_context,
             conversation_history=conversation_history,
         )
-        
+
         assert result == "The Confirm button saves and marks the document as reviewed."
         mock_call.assert_called_once()
-        
+
         # Verify history and context were included in the user message
         call_args = mock_call.call_args
         user_message = call_args.kwargs["user_message"]
@@ -702,23 +716,27 @@ class TestSparkAIService:
         assert "RECENT CONVERSATION" in user_message
         assert "edit amount" in user_message
 
-    @patch.object(SparkAIService, '_call_ollama')
+    @patch.object(SparkAIService, "_call_ollama")
     def test_suggest_splits_with_bank_data(
-        self, mock_call: MagicMock, store: StateStore, mock_config_enabled: MagicMock, categories: list[str]
+        self,
+        mock_call: MagicMock,
+        store: StateStore,
+        mock_config_enabled: MagicMock,
+        categories: list[str],
     ) -> None:
         """Test suggest_splits includes bank data in prompt."""
         mock_call.return_value = {
-            "content": json.dumps({
-                "should_split": True,
-                "splits": [
-                    {"category": "Groceries", "amount": 50.0, "description": "Food"}
-                ],
-                "confidence": 0.8,
-                "reason": "Single item receipt"
-            }),
-            "model": "qwen2.5:14b"
+            "content": json.dumps(
+                {
+                    "should_split": True,
+                    "splits": [{"category": "Groceries", "amount": 50.0, "description": "Food"}],
+                    "confidence": 0.8,
+                    "reason": "Single item receipt",
+                }
+            ),
+            "model": "qwen2.5:14b",
         }
-        
+
         service = SparkAIService(store, mock_config_enabled, categories)
         result = service.suggest_splits(
             amount="50.00",
@@ -726,12 +744,9 @@ class TestSparkAIService:
             vendor="Supermarket",
             description="Purchase",
             content="Milk 2.99\nBread 3.50",
-            bank_data={
-                "amount": "50.00",
-                "description": "SUPERMARKET PURCHASE"
-            }
+            bank_data={"amount": "50.00", "description": "SUPERMARKET PURCHASE"},
         )
-        
+
         assert result is not None
         assert result.should_split is True
         assert len(result.splits) == 1
@@ -744,31 +759,26 @@ class TestSparkAIService:
     ) -> None:
         """Test split suggestion normalizes European number format."""
         service = SparkAIService(store, mock_config_enabled, categories)
-        
+
         # Test the amount normalization in _parse_json_response context
         # by checking that European format (comma decimal) is handled
-        response_with_european = json.dumps({
-            "should_split": True,
-            "splits": [
-                {"category": "Groceries", "amount": "12,50", "description": "Food"},
-            ],
-            "confidence": 0.8,
-            "reason": "Test"
-        })
-        
-        # Mock the Ollama call to return European format amounts
-        with patch.object(service, '_call_ollama') as mock_call:
-            mock_call.return_value = {
-                "content": response_with_european,
-                "model": "qwen2.5:14b"
+        response_with_european = json.dumps(
+            {
+                "should_split": True,
+                "splits": [
+                    {"category": "Groceries", "amount": "12,50", "description": "Food"},
+                ],
+                "confidence": 0.8,
+                "reason": "Test",
             }
-            
-            result = service.suggest_splits(
-                amount="12.50",
-                date="2025-01-15",
-                use_cache=False
-            )
-            
+        )
+
+        # Mock the Ollama call to return European format amounts
+        with patch.object(service, "_call_ollama") as mock_call:
+            mock_call.return_value = {"content": response_with_european, "model": "qwen2.5:14b"}
+
+            result = service.suggest_splits(amount="12.50", date="2025-01-15", use_cache=False)
+
             # The amount should be normalized to float
             if result and result.splits:
                 assert result.splits[0]["amount"] == 12.50
@@ -814,25 +824,47 @@ class TestSuggestForReview:
         """Test categories including Electronics for split tests."""
         return ["Shopping", "Groceries", "Dining", "Transportation", "Bills", "Electronics"]
 
-    @patch.object(SparkAIService, '_call_ollama')
+    @patch.object(SparkAIService, "_call_ollama")
     def test_suggest_for_review_returns_all_fields(
-        self, mock_call: MagicMock, store: StateStore, mock_config_enabled: MagicMock, categories: list[str]
+        self,
+        mock_call: MagicMock,
+        store: StateStore,
+        mock_config_enabled: MagicMock,
+        categories: list[str],
     ) -> None:
         """Test suggest_for_review returns suggestions for all requested fields."""
         mock_call.return_value = {
-            "content": json.dumps({
-                "suggestions": {
-                    "category": {"value": "Groceries", "confidence": 0.95, "reason": "Food items detected"},
-                    "description": {"value": "Grocery shopping at Lidl", "confidence": 0.85, "reason": "Based on receipt header"},
-                    "destination_account": {"value": "Lidl Store", "confidence": 0.90, "reason": "Vendor name from header"},
-                    "transaction_type": {"value": "withdrawal", "confidence": 0.99, "reason": "This is a purchase"}
-                },
-                "overall_confidence": 0.90,
-                "analysis_notes": "Clear receipt with itemized list"
-            }),
-            "model": "qwen2.5:14b"
+            "content": json.dumps(
+                {
+                    "suggestions": {
+                        "category": {
+                            "value": "Groceries",
+                            "confidence": 0.95,
+                            "reason": "Food items detected",
+                        },
+                        "description": {
+                            "value": "Grocery shopping at Lidl",
+                            "confidence": 0.85,
+                            "reason": "Based on receipt header",
+                        },
+                        "destination_account": {
+                            "value": "Lidl Store",
+                            "confidence": 0.90,
+                            "reason": "Vendor name from header",
+                        },
+                        "transaction_type": {
+                            "value": "withdrawal",
+                            "confidence": 0.99,
+                            "reason": "This is a purchase",
+                        },
+                    },
+                    "overall_confidence": 0.90,
+                    "analysis_notes": "Clear receipt with itemized list",
+                }
+            ),
+            "model": "qwen2.5:14b",
         }
-        
+
         service = SparkAIService(store, mock_config_enabled, categories)
         result = service.suggest_for_review(
             amount="45.99",
@@ -840,63 +872,93 @@ class TestSuggestForReview:
             vendor="Lidl",
             description="Purchase",
             document_content="LIDL\nMilk 2.99\nBread 1.50\nTotal 45.99",
-            use_cache=False
+            use_cache=False,
         )
-        
+
         assert result is not None
         assert isinstance(result, TransactionReviewSuggestion)
-        
+
         # Verify all field suggestions are present
         assert "category" in result.suggestions
         assert result.suggestions["category"].value == "Groceries"
         assert result.suggestions["category"].confidence == 0.95
-        
+
         assert "description" in result.suggestions
         assert result.suggestions["description"].value == "Grocery shopping at Lidl"
-        
+
         assert "destination_account" in result.suggestions
         assert result.suggestions["destination_account"].value == "Lidl Store"
-        
+
         assert "transaction_type" in result.suggestions
         assert result.suggestions["transaction_type"].value == "withdrawal"
 
-    @patch.object(SparkAIService, '_call_ollama')
+    @patch.object(SparkAIService, "_call_ollama")
     def test_suggest_for_review_with_split_transactions(
-        self, mock_call: MagicMock, store: StateStore, mock_config_enabled: MagicMock, categories: list[str]
+        self,
+        mock_call: MagicMock,
+        store: StateStore,
+        mock_config_enabled: MagicMock,
+        categories: list[str],
     ) -> None:
         """Test suggest_for_review handles split transaction suggestions."""
         mock_call.return_value = {
-            "content": json.dumps({
-                "suggestions": {
-                    "category": {"value": "Shopping", "confidence": 0.80, "reason": "Mixed categories"},
-                    "description": {"value": "Multi-category shopping", "confidence": 0.85, "reason": "Multiple item types"},
-                    "destination_account": {"value": "Supermarket", "confidence": 0.90, "reason": "Store name"},
-                    "transaction_type": {"value": "withdrawal", "confidence": 0.99, "reason": "Purchase"}
-                },
-                "split_transactions": [
-                    {"amount": 25.50, "description": "Food items (milk, bread, eggs)", "category": "Groceries"},
-                    {"amount": 15.00, "description": "Cleaning supplies", "category": "Shopping"},
-                    {"amount": 9.49, "description": "Electronics", "category": "Electronics"}
-                ],
-                "overall_confidence": 0.85,
-                "analysis_notes": "Receipt with multiple categories detected"
-            }),
-            "model": "qwen2.5:14b"
+            "content": json.dumps(
+                {
+                    "suggestions": {
+                        "category": {
+                            "value": "Shopping",
+                            "confidence": 0.80,
+                            "reason": "Mixed categories",
+                        },
+                        "description": {
+                            "value": "Multi-category shopping",
+                            "confidence": 0.85,
+                            "reason": "Multiple item types",
+                        },
+                        "destination_account": {
+                            "value": "Supermarket",
+                            "confidence": 0.90,
+                            "reason": "Store name",
+                        },
+                        "transaction_type": {
+                            "value": "withdrawal",
+                            "confidence": 0.99,
+                            "reason": "Purchase",
+                        },
+                    },
+                    "split_transactions": [
+                        {
+                            "amount": 25.50,
+                            "description": "Food items (milk, bread, eggs)",
+                            "category": "Groceries",
+                        },
+                        {
+                            "amount": 15.00,
+                            "description": "Cleaning supplies",
+                            "category": "Shopping",
+                        },
+                        {"amount": 9.49, "description": "Electronics", "category": "Electronics"},
+                    ],
+                    "overall_confidence": 0.85,
+                    "analysis_notes": "Receipt with multiple categories detected",
+                }
+            ),
+            "model": "qwen2.5:14b",
         }
-        
+
         service = SparkAIService(store, mock_config_enabled, categories)
         result = service.suggest_for_review(
             amount="49.99",
             date="2025-01-15",
             vendor="Supermarket",
             document_content="Supermarket\nMilk 2.99\nCleaning spray 15.00\nUSB Cable 9.49\nTotal 49.99",
-            use_cache=False
+            use_cache=False,
         )
-        
+
         assert result is not None
         assert result.split_transactions is not None
         assert len(result.split_transactions) == 3
-        
+
         # Verify split details
         assert result.split_transactions[0]["amount"] == 25.50
         assert result.split_transactions[0]["category"] == "Groceries"
@@ -904,30 +966,40 @@ class TestSuggestForReview:
         assert result.split_transactions[1]["category"] == "Shopping"
         assert result.split_transactions[2]["amount"] == 9.49
 
-    @patch.object(SparkAIService, '_call_ollama')
+    @patch.object(SparkAIService, "_call_ollama")
     def test_suggest_for_review_invalid_category_rejected(
-        self, mock_call: MagicMock, store: StateStore, mock_config_enabled: MagicMock, categories: list[str]
+        self,
+        mock_call: MagicMock,
+        store: StateStore,
+        mock_config_enabled: MagicMock,
+        categories: list[str],
     ) -> None:
         """Test suggest_for_review rejects invalid category suggestions."""
         mock_call.return_value = {
-            "content": json.dumps({
-                "suggestions": {
-                    "category": {"value": "InvalidCategory", "confidence": 0.95, "reason": "Test"},
-                    "description": {"value": "Valid description", "confidence": 0.85, "reason": "Test"}
-                },
-                "overall_confidence": 0.90,
-                "analysis_notes": "Test"
-            }),
-            "model": "qwen2.5:14b"
+            "content": json.dumps(
+                {
+                    "suggestions": {
+                        "category": {
+                            "value": "InvalidCategory",
+                            "confidence": 0.95,
+                            "reason": "Test",
+                        },
+                        "description": {
+                            "value": "Valid description",
+                            "confidence": 0.85,
+                            "reason": "Test",
+                        },
+                    },
+                    "overall_confidence": 0.90,
+                    "analysis_notes": "Test",
+                }
+            ),
+            "model": "qwen2.5:14b",
         }
-        
+
         service = SparkAIService(store, mock_config_enabled, categories)
-        result = service.suggest_for_review(
-            amount="10.00",
-            date="2025-01-15",
-            use_cache=False
-        )
-        
+        result = service.suggest_for_review(amount="10.00", date="2025-01-15", use_cache=False)
+
         assert result is not None
         # Category should be rejected as invalid
         assert "category" not in result.suggestions
@@ -935,30 +1007,36 @@ class TestSuggestForReview:
         assert "description" in result.suggestions
         assert result.suggestions["description"].value == "Valid description"
 
-    @patch.object(SparkAIService, '_call_ollama')
+    @patch.object(SparkAIService, "_call_ollama")
     def test_suggest_for_review_invalid_transaction_type_rejected(
-        self, mock_call: MagicMock, store: StateStore, mock_config_enabled: MagicMock, categories: list[str]
+        self,
+        mock_call: MagicMock,
+        store: StateStore,
+        mock_config_enabled: MagicMock,
+        categories: list[str],
     ) -> None:
         """Test suggest_for_review rejects invalid transaction_type suggestions."""
         mock_call.return_value = {
-            "content": json.dumps({
-                "suggestions": {
-                    "category": {"value": "Groceries", "confidence": 0.95, "reason": "Test"},
-                    "transaction_type": {"value": "payment", "confidence": 0.80, "reason": "Invalid type"}
-                },
-                "overall_confidence": 0.90,
-                "analysis_notes": "Test"
-            }),
-            "model": "qwen2.5:14b"
+            "content": json.dumps(
+                {
+                    "suggestions": {
+                        "category": {"value": "Groceries", "confidence": 0.95, "reason": "Test"},
+                        "transaction_type": {
+                            "value": "payment",
+                            "confidence": 0.80,
+                            "reason": "Invalid type",
+                        },
+                    },
+                    "overall_confidence": 0.90,
+                    "analysis_notes": "Test",
+                }
+            ),
+            "model": "qwen2.5:14b",
         }
-        
+
         service = SparkAIService(store, mock_config_enabled, categories)
-        result = service.suggest_for_review(
-            amount="10.00",
-            date="2025-01-15",
-            use_cache=False
-        )
-        
+        result = service.suggest_for_review(amount="10.00", date="2025-01-15", use_cache=False)
+
         assert result is not None
         # Invalid transaction_type should be rejected
         assert "transaction_type" not in result.suggestions
@@ -970,99 +1048,105 @@ class TestSuggestForReview:
     ) -> None:
         """Test suggest_for_review returns None when LLM is disabled."""
         service = SparkAIService(store, mock_config_disabled, categories)
-        
-        result = service.suggest_for_review(
-            amount="10.00",
-            date="2025-01-15"
-        )
-        
+
+        result = service.suggest_for_review(amount="10.00", date="2025-01-15")
+
         assert result is None
 
-    @patch.object(SparkAIService, '_call_ollama')
+    @patch.object(SparkAIService, "_call_ollama")
     def test_suggest_for_review_caches_result(
-        self, mock_call: MagicMock, store: StateStore, mock_config_enabled: MagicMock, categories: list[str]
+        self,
+        mock_call: MagicMock,
+        store: StateStore,
+        mock_config_enabled: MagicMock,
+        categories: list[str],
     ) -> None:
         """Test suggest_for_review uses cache for repeated calls."""
         mock_call.return_value = {
-            "content": json.dumps({
-                "suggestions": {
-                    "category": {"value": "Groceries", "confidence": 0.95, "reason": "Test"}
-                },
-                "overall_confidence": 0.90,
-                "analysis_notes": "Test"
-            }),
-            "model": "qwen2.5:14b"
+            "content": json.dumps(
+                {
+                    "suggestions": {
+                        "category": {"value": "Groceries", "confidence": 0.95, "reason": "Test"}
+                    },
+                    "overall_confidence": 0.90,
+                    "analysis_notes": "Test",
+                }
+            ),
+            "model": "qwen2.5:14b",
         }
-        
+
         service = SparkAIService(store, mock_config_enabled, categories)
-        
+
         # First call - should hit LLM
         result1 = service.suggest_for_review(
-            amount="10.00",
-            date="2025-01-15",
-            vendor="Test",
-            use_cache=True
+            amount="10.00", date="2025-01-15", vendor="Test", use_cache=True
         )
-        
+
         # Second call with same params - should use cache
         result2 = service.suggest_for_review(
-            amount="10.00",
-            date="2025-01-15",
-            vendor="Test",
-            use_cache=True
+            amount="10.00", date="2025-01-15", vendor="Test", use_cache=True
         )
-        
+
         # LLM should only be called once
         assert mock_call.call_count == 1
-        
+
         # Both results should be valid
         assert result1 is not None
         assert result2 is not None
         assert result2.from_cache is True
 
-    @patch.object(SparkAIService, '_call_ollama')
+    @patch.object(SparkAIService, "_call_ollama")
     def test_suggest_for_review_to_dict_structure(
-        self, mock_call: MagicMock, store: StateStore, mock_config_enabled: MagicMock, categories: list[str]
+        self,
+        mock_call: MagicMock,
+        store: StateStore,
+        mock_config_enabled: MagicMock,
+        categories: list[str],
     ) -> None:
         """Test suggest_for_review to_dict produces correct structure for UI."""
         mock_call.return_value = {
-            "content": json.dumps({
-                "suggestions": {
-                    "category": {"value": "Groceries", "confidence": 0.95, "reason": "Food items"},
-                    "description": {"value": "Test purchase", "confidence": 0.85, "reason": "Based on content"}
-                },
-                "split_transactions": [
-                    {"amount": 10.00, "description": "Item 1", "category": "Groceries"}
-                ],
-                "overall_confidence": 0.90,
-                "analysis_notes": "Test analysis"
-            }),
-            "model": "qwen2.5:14b"
+            "content": json.dumps(
+                {
+                    "suggestions": {
+                        "category": {
+                            "value": "Groceries",
+                            "confidence": 0.95,
+                            "reason": "Food items",
+                        },
+                        "description": {
+                            "value": "Test purchase",
+                            "confidence": 0.85,
+                            "reason": "Based on content",
+                        },
+                    },
+                    "split_transactions": [
+                        {"amount": 10.00, "description": "Item 1", "category": "Groceries"}
+                    ],
+                    "overall_confidence": 0.90,
+                    "analysis_notes": "Test analysis",
+                }
+            ),
+            "model": "qwen2.5:14b",
         }
-        
+
         service = SparkAIService(store, mock_config_enabled, categories)
-        result = service.suggest_for_review(
-            amount="10.00",
-            date="2025-01-15",
-            use_cache=False
-        )
-        
+        result = service.suggest_for_review(amount="10.00", date="2025-01-15", use_cache=False)
+
         assert result is not None
-        
+
         # Convert to dict for UI consumption
         data = result.to_dict()
-        
+
         # Verify structure matches what UI expects
         assert "suggestions" in data
         assert "category" in data["suggestions"]
         assert "value" in data["suggestions"]["category"]
         assert "confidence" in data["suggestions"]["category"]
         assert "reason" in data["suggestions"]["category"]
-        
+
         assert "split_transactions" in data
         assert len(data["split_transactions"]) == 1
         assert data["split_transactions"][0]["amount"] == 10.00
-        
+
         assert "overall_confidence" in data
         assert "analysis_notes" in data
-

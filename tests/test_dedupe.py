@@ -327,9 +327,7 @@ class TestExtractDocumentIdFromExternalId:
 
     def test_legacy_format(self):
         """Extract doc ID from legacy format."""
-        doc_id = extract_document_id_from_external_id(
-            "paperless:456:abc123:10.00:2024-01-01"
-        )
+        doc_id = extract_document_id_from_external_id("paperless:456:abc123:10.00:2024-01-01")
         assert doc_id == 456
 
     def test_v2_format(self):

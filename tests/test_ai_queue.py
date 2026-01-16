@@ -3,10 +3,10 @@ Tests for AI Job Queue functionality.
 """
 
 import json
-import pytest
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import Mock, patch
+
+import pytest
 
 from paperless_firefly.state_store.sqlite_store import StateStore
 
@@ -184,16 +184,16 @@ class TestAIJobQueueOperations:
     def test_cancel_running_ai_job(self, store: StateStore):
         """Test cancelling a running (PROCESSING) AI job."""
         job_id = store.schedule_ai_job(document_id=123, created_by="TEST")
-        
+
         # Start the job
         store.start_ai_job(job_id)
         job = store.get_ai_job(job_id)
         assert job["status"] == "PROCESSING"
-        
+
         # Cancel while running
         result = store.cancel_ai_job(job_id)
         assert result is True
-        
+
         job = store.get_ai_job(job_id)
         assert job["status"] == "CANCELLED"
         assert job["completed_at"] is not None
@@ -201,14 +201,14 @@ class TestAIJobQueueOperations:
     def test_is_ai_job_cancelled(self, store: StateStore):
         """Test checking if a job is cancelled."""
         job_id = store.schedule_ai_job(document_id=123, created_by="TEST")
-        
+
         # Not cancelled initially
         assert store.is_ai_job_cancelled(job_id) is False
-        
+
         # Start the job
         store.start_ai_job(job_id)
         assert store.is_ai_job_cancelled(job_id) is False
-        
+
         # Cancel it
         store.cancel_ai_job(job_id)
         assert store.is_ai_job_cancelled(job_id) is True
@@ -309,27 +309,47 @@ class TestAIJobQueueOperations:
         # Comprehensive suggestions matching what suggest_for_review produces
         suggestions = {
             "suggestions": {
-                "category": {"value": "Food & Dining", "confidence": 0.85, "reason": "Restaurant receipt"},
-                "transaction_type": {"value": "withdrawal", "confidence": 0.95, "reason": "This is a purchase"},
-                "destination_account": {"value": "Restaurant XYZ", "confidence": 0.90, "reason": "From header"},
-                "description": {"value": "Dinner at Restaurant XYZ", "confidence": 0.80, "reason": "Occasion"}
+                "category": {
+                    "value": "Food & Dining",
+                    "confidence": 0.85,
+                    "reason": "Restaurant receipt",
+                },
+                "transaction_type": {
+                    "value": "withdrawal",
+                    "confidence": 0.95,
+                    "reason": "This is a purchase",
+                },
+                "destination_account": {
+                    "value": "Restaurant XYZ",
+                    "confidence": 0.90,
+                    "reason": "From header",
+                },
+                "description": {
+                    "value": "Dinner at Restaurant XYZ",
+                    "confidence": 0.80,
+                    "reason": "Occasion",
+                },
             },
             "split_transactions": [
-                {"amount": 15.99, "description": "Main course - Pasta", "category": "Food & Dining"},
+                {
+                    "amount": 15.99,
+                    "description": "Main course - Pasta",
+                    "category": "Food & Dining",
+                },
                 {"amount": 4.50, "description": "Beverage - Soda", "category": "Food & Dining"},
-                {"amount": 3.00, "description": "Tip", "category": "Food & Dining"}
+                {"amount": 3.00, "description": "Tip", "category": "Food & Dining"},
             ],
             "overall_confidence": 0.85,
-            "analysis_notes": "Receipt from Restaurant XYZ with 3 line items"
+            "analysis_notes": "Receipt from Restaurant XYZ with 3 line items",
         }
-        
+
         result = store.complete_ai_job(job_id, json.dumps(suggestions))
         assert result is True
 
         job = store.get_ai_job(job_id)
         assert job["status"] == "COMPLETED"
         assert job["suggestions_json"] is not None
-        
+
         # Verify all fields are retrievable
         parsed = json.loads(job["suggestions_json"])
         assert parsed["suggestions"]["category"]["value"] == "Food & Dining"
@@ -388,23 +408,27 @@ class TestAIJobQueueService:
         # Schedule and complete a job with comprehensive suggestions
         job_id = service.schedule_job(document_id=123, created_by="TEST")
         assert job_id is not None
-        
+
         # Simulate processing and completion
         store.start_ai_job(job_id)
         suggestions = {
             "suggestions": {
                 "category": {"value": "Groceries", "confidence": 0.85, "reason": "Food items"},
-                "description": {"value": "Weekly shopping", "confidence": 0.80, "reason": "Regular purchase"}
+                "description": {
+                    "value": "Weekly shopping",
+                    "confidence": 0.80,
+                    "reason": "Regular purchase",
+                },
             },
             "split_transactions": [
                 {"amount": 10.00, "description": "Bread, milk", "category": "Groceries"},
-                {"amount": 5.00, "description": "Snacks", "category": "Groceries"}
+                {"amount": 5.00, "description": "Snacks", "category": "Groceries"},
             ],
             "overall_confidence": 0.85,
-            "analysis_notes": "Receipt with line items"
+            "analysis_notes": "Receipt with line items",
         }
         store.complete_ai_job(job_id, json.dumps(suggestions))
-        
+
         # Retrieve suggestions via service
         result = service.get_job_suggestions(document_id=123)
         assert result is not None

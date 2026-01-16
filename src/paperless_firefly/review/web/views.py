@@ -1363,7 +1363,9 @@ def rerun_interpretation(request: HttpRequest, extraction_id: int) -> HttpRespon
                             }
 
                     # Get previous interpretation decisions (filtered by user for privacy)
-                    previous_decisions = store.get_interpretation_runs(document_id, user_id=user_id)[:3]
+                    previous_decisions = store.get_interpretation_runs(
+                        document_id, user_id=user_id
+                    )[:3]
 
                     # Create SparkAI service and call comprehensive review
                     ai_service = SparkAIService(store, config, categories)
@@ -2967,7 +2969,7 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
     Uses user-specific API tokens from profile if available.
     """
     from datetime import date, timedelta
-    
+
     from ...extractors.router import ExtractorRouter
     from ...paperless_client import PaperlessClient
     from ...schemas.dedupe import compute_file_hash
@@ -2979,7 +2981,7 @@ def sync_paperless(request: HttpRequest) -> HttpResponse:
         # Get filter parameters from form
         days = int(request.POST.get("days", 90))
         tag_filter = request.POST.get("tag_filter", "").strip()
-        
+
         # Calculate date range
         start_date = date.today() - timedelta(days=days)
         added_after = start_date.isoformat()
@@ -3738,7 +3740,8 @@ def sync_firefly_transactions(request: HttpRequest) -> HttpResponse:
                         account_name = account_info.get("name", "")
                         original_count = len(transactions)
                         transactions = [
-                            tx for tx in transactions
+                            tx
+                            for tx in transactions
                             if tx.source_name == account_name or tx.destination_name == account_name
                         ]
                         _firefly_sync_status["progress"] = (
@@ -4281,15 +4284,15 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
     showing all records that need review and/or linking before import.
     """
     from django.contrib.auth.models import User
-    
+
     store = _get_store()
     user_id = _get_user_id_for_filter(request)
     current_user_id = request.user.id if request.user.is_authenticated else None
     is_superuser = request.user.is_superuser if request.user.is_authenticated else False
-    
+
     # Cache for user lookups to avoid repeated database queries
     user_cache: dict[int, str] = {}
-    
+
     def get_username(uid: int | None) -> str | None:
         """Get username by user_id with caching."""
         if uid is None:
@@ -4414,15 +4417,15 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
                             record["ai_has_suggestions"] = True
                 except Exception:
                     pass
-                
+
                 # Owner information for shared document badges
                 record_user_id = record.get("user_id")
                 record["owner_user_id"] = record_user_id
                 record["owner_username"] = get_username(record_user_id)
                 record["is_shared_from_other"] = (
-                    is_superuser and 
-                    record_user_id is not None and 
-                    record_user_id != current_user_id
+                    is_superuser
+                    and record_user_id is not None
+                    and record_user_id != current_user_id
                 )
             except (json.JSONDecodeError, TypeError):
                 record["title"] = f"Document #{record['document_id']}"
@@ -4489,15 +4492,13 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
             )
             record["is_orphan"] = record.get("match_status") == "ORPHAN_CONFIRMED"
             record["category"] = record.get("category_name")
-            
+
             # Owner information for shared document badges
             record_user_id = record.get("user_id")
             record["owner_user_id"] = record_user_id
             record["owner_username"] = get_username(record_user_id)
             record["is_shared_from_other"] = (
-                is_superuser and 
-                record_user_id is not None and 
-                record_user_id != current_user_id
+                is_superuser and record_user_id is not None and record_user_id != current_user_id
             )
             firefly_records.append(record)
     except Exception as e:
@@ -4613,7 +4614,7 @@ def unified_review_list(request: HttpRequest) -> HttpResponse:
     # Get all users for ownership transfer modal (only for superusers)
     all_users = []
     if is_superuser:
-        all_users = list(User.objects.all().values('id', 'username').order_by('username'))
+        all_users = list(User.objects.all().values("id", "username").order_by("username"))
 
     context = {
         "paperless_records": paperless_records,
@@ -5237,52 +5238,52 @@ def api_unlink(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["POST"])
 def api_transfer_ownership(request: HttpRequest) -> JsonResponse:
     """API endpoint to transfer ownership of a record to a different user.
-    
+
     This is used by superusers to reassign shared documents to other users.
     When ownership is transferred:
     - The extraction/firefly_cache user_id is updated
     - Any existing linkages are removed (must be re-established)
     - AI suggestions and interpretations are cleared (will need to re-run)
-    
+
     Expects JSON body with:
     - record_type: "paperless" or "firefly"
     - record_id: The extraction ID (for paperless) or firefly_id (for firefly)
     - new_owner_id: The user ID to transfer ownership to
     """
     from django.contrib.auth.models import User
-    
+
     # Only superusers can transfer ownership
     if not request.user.is_superuser:
         return JsonResponse(
             {"success": False, "error": "Only superusers can transfer ownership"}, status=403
         )
-    
+
     try:
         body = json.loads(request.body) if request.body else {}
     except json.JSONDecodeError:
         return JsonResponse({"success": False, "error": "Invalid JSON"}, status=400)
-    
+
     record_type = body.get("record_type")
     record_id = body.get("record_id")
     new_owner_id = body.get("new_owner_id")
-    
+
     if not all([record_type, record_id, new_owner_id]):
         return JsonResponse(
-            {"success": False, "error": "record_type, record_id, and new_owner_id are required"}, 
-            status=400
+            {"success": False, "error": "record_type, record_id, and new_owner_id are required"},
+            status=400,
         )
-    
+
     # Validate the new owner exists
     try:
         new_owner = User.objects.get(id=new_owner_id)
     except User.DoesNotExist:
         return JsonResponse({"success": False, "error": "User not found"}, status=404)
-    
+
     store = _get_store()
-    
+
     try:
         record_id = int(record_id)
-        
+
         if record_type == "paperless":
             # Get the extraction to find its actual ID
             conn = store._get_connection()
@@ -5291,53 +5292,49 @@ def api_transfer_ownership(request: HttpRequest) -> JsonResponse:
                 row = conn.execute(
                     "SELECT id, document_id FROM extractions WHERE id = ?", (record_id,)
                 ).fetchone()
-                
+
                 if not row:
-                    return JsonResponse({"success": False, "error": "Extraction not found"}, status=404)
-                
+                    return JsonResponse(
+                        {"success": False, "error": "Extraction not found"}, status=404
+                    )
+
                 extraction_id = row["id"]
                 document_id = row["document_id"]
-                
+
                 # Update extraction owner
                 conn.execute(
-                    "UPDATE extractions SET user_id = ? WHERE id = ?",
-                    (new_owner_id, extraction_id)
+                    "UPDATE extractions SET user_id = ? WHERE id = ?", (new_owner_id, extraction_id)
                 )
-                
+
                 # Update paperless_documents owner if it exists
                 conn.execute(
                     "UPDATE paperless_documents SET user_id = ? WHERE document_id = ?",
-                    (new_owner_id, document_id)
+                    (new_owner_id, document_id),
                 )
-                
+
                 # Remove any linkage (must be re-established by new owner)
-                conn.execute(
-                    "DELETE FROM linkage WHERE extraction_id = ?",
-                    (extraction_id,)
-                )
-                
+                conn.execute("DELETE FROM linkage WHERE extraction_id = ?", (extraction_id,))
+
                 # Clear AI jobs for this document (new owner may want to re-run)
-                conn.execute(
-                    "DELETE FROM ai_job_queue WHERE document_id = ?",
-                    (document_id,)
-                )
-                
+                conn.execute("DELETE FROM ai_job_queue WHERE document_id = ?", (document_id,))
+
                 # Clear interpretation runs (privacy - belongs to old owner)
                 conn.execute(
-                    "DELETE FROM interpretation_runs WHERE document_id = ?",
-                    (document_id,)
+                    "DELETE FROM interpretation_runs WHERE document_id = ?", (document_id,)
                 )
-                
+
                 conn.commit()
-                
-                return JsonResponse({
-                    "success": True,
-                    "message": f"Ownership transferred to {new_owner.username}",
-                    "new_owner": new_owner.username
-                })
+
+                return JsonResponse(
+                    {
+                        "success": True,
+                        "message": f"Ownership transferred to {new_owner.username}",
+                        "new_owner": new_owner.username,
+                    }
+                )
             finally:
                 conn.close()
-                
+
         elif record_type == "firefly":
             conn = store._get_connection()
             try:
@@ -5345,36 +5342,37 @@ def api_transfer_ownership(request: HttpRequest) -> JsonResponse:
                 row = conn.execute(
                     "SELECT firefly_id FROM firefly_cache WHERE firefly_id = ?", (record_id,)
                 ).fetchone()
-                
+
                 if not row:
-                    return JsonResponse({"success": False, "error": "Firefly record not found"}, status=404)
-                
+                    return JsonResponse(
+                        {"success": False, "error": "Firefly record not found"}, status=404
+                    )
+
                 # Update firefly_cache owner
                 conn.execute(
                     "UPDATE firefly_cache SET user_id = ?, match_status = 'UNMATCHED', matched_document_id = NULL WHERE firefly_id = ?",
-                    (new_owner_id, record_id)
+                    (new_owner_id, record_id),
                 )
-                
+
                 # Remove any linkage referencing this firefly_id
-                conn.execute(
-                    "DELETE FROM linkage WHERE firefly_id = ?",
-                    (record_id,)
-                )
-                
+                conn.execute("DELETE FROM linkage WHERE firefly_id = ?", (record_id,))
+
                 conn.commit()
-                
-                return JsonResponse({
-                    "success": True,
-                    "message": f"Ownership transferred to {new_owner.username}",
-                    "new_owner": new_owner.username
-                })
+
+                return JsonResponse(
+                    {
+                        "success": True,
+                        "message": f"Ownership transferred to {new_owner.username}",
+                        "new_owner": new_owner.username,
+                    }
+                )
             finally:
                 conn.close()
         else:
             return JsonResponse(
                 {"success": False, "error": f"Invalid record_type: {record_type}"}, status=400
             )
-            
+
     except Exception as e:
         logger.error(f"Error transferring ownership: {e}")
         return JsonResponse({"success": False, "error": str(e)}, status=500)
@@ -6200,16 +6198,60 @@ def processing_history(request: HttpRequest) -> HttpResponse:
                 documents_total = data.get("count", 0)
                 documents_total_pages = (documents_total + page_size - 1) // page_size
 
+                # Get owner info for documents from extractions table
+                doc_ids = [doc.get("id") for doc in data.get("results", [])]
+                owner_map = {}
+                if doc_ids:
+                    try:
+                        from django.contrib.auth.models import User
+
+                        conn = store._get_connection()
+                        try:
+                            placeholders = ",".join("?" * len(doc_ids))
+                            query = f"""
+                                SELECT document_id, user_id FROM extractions
+                                WHERE document_id IN ({placeholders})
+                            """
+                            rows = conn.execute(query, doc_ids).fetchall()
+                            for row in rows:
+                                owner_map[row["document_id"]] = row["user_id"]
+
+                            # Get usernames for owner IDs
+                            owner_ids = {v for v in owner_map.values() if v}
+                            username_map = {}
+                            if owner_ids:
+                                for uid in owner_ids:
+                                    try:
+                                        user = User.objects.get(id=uid)
+                                        username_map[uid] = user.username
+                                    except User.DoesNotExist:
+                                        username_map[uid] = f"User {uid}"
+                        finally:
+                            conn.close()
+                    except Exception as e:
+                        logger.debug(f"Could not fetch owner info: {e}")
+
                 for doc in data.get("results", []):
                     doc_tags = doc.get("tags", [])
                     is_listed = filter_tag_id in doc_tags if filter_tag_id else False
+                    doc_id = doc.get("id")
+                    owner_user_id = owner_map.get(doc_id)
 
                     documents.append(
                         {
-                            "id": doc.get("id"),
+                            "id": doc_id,
                             "title": doc.get("title"),
                             "created": doc.get("created"),
                             "is_listed": is_listed,
+                            "owner_user_id": owner_user_id,
+                            "owner_username": (
+                                username_map.get(owner_user_id) if owner_user_id else None
+                            ),
+                            "is_shared_from_other": (
+                                owner_user_id is not None
+                                and user_id is not None
+                                and owner_user_id != user_id
+                            ),
                         }
                     )
         except Exception as e:
@@ -6327,6 +6369,16 @@ def processing_history(request: HttpRequest) -> HttpResponse:
         except Exception:
             archive_count = 0
 
+    # Get all users for ownership transfer (superuser only)
+    all_users = []
+    if request.user.is_superuser:
+        try:
+            from django.contrib.auth.models import User
+
+            all_users = list(User.objects.values("id", "username").order_by("username"))
+        except Exception:
+            pass
+
     context = {
         "active_tab": active_tab,
         # Archive
@@ -6360,6 +6412,9 @@ def processing_history(request: HttpRequest) -> HttpResponse:
         "audit_filter_document": audit_filter_document,
         "audit_filter_firefly": audit_filter_firefly,
         "audit_filter_source": audit_filter_source,
+        # User management
+        "all_users": all_users,
+        "is_superuser": request.user.is_superuser,
         # General
         "debug_mode": _is_debug_mode(),
         **_get_external_urls(request.user if hasattr(request, "user") else None),

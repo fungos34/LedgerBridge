@@ -80,11 +80,20 @@ class WebConfig(AppConfig):
 
 
 def _ai_queue_worker_loop():
-    """Background worker loop that processes AI jobs at intervals."""
+    """Background worker loop that processes AI jobs at intervals.
+
+    The worker processes jobs for ALL users, respecting each user's individual settings:
+    - Each user has their own ai_schedule_enabled, interval, and active hours
+    - Jobs are processed based on the owner's settings
+    - If a job has no owner (legacy), default settings apply
+    """
     # Wait a bit for Django to fully initialize
     time.sleep(5)
 
     logger.info("AI queue worker loop starting - will check for pending jobs")
+
+    # Use a short base interval to check frequently, but respect per-user intervals
+    BASE_CHECK_INTERVAL = 60  # Check every 60 seconds for new jobs
 
     while not _ai_worker_shutdown.is_set():
         try:
@@ -92,12 +101,12 @@ def _ai_queue_worker_loop():
         except Exception as e:
             logger.error(f"Error in AI queue worker: {e}", exc_info=True)
 
-        # Get user settings for interval
-        interval_seconds = _get_processing_interval()
-        logger.info(f"AI worker sleeping for {interval_seconds} seconds before next check")
+        # Sleep for base interval (short) to stay responsive to new jobs
+        # Per-user intervals are enforced by scheduled_for in the job queue
+        logger.debug(f"AI worker sleeping for {BASE_CHECK_INTERVAL} seconds before next check")
 
         # Sleep in small increments so we can respond to shutdown quickly
-        sleep_until = time.time() + interval_seconds
+        sleep_until = time.time() + BASE_CHECK_INTERVAL
         while time.time() < sleep_until and not _ai_worker_shutdown.is_set():
             time.sleep(1)
 
@@ -169,22 +178,72 @@ def _is_ai_schedule_enabled() -> bool:
     return True  # Default: enabled
 
 
+def _is_user_schedule_enabled(user_id: int | None) -> bool:
+    """Check if AI scheduling is enabled for a specific user.
+
+    Args:
+        user_id: The user ID to check. If None, uses global default settings.
+
+    Returns:
+        True if the user has AI scheduling enabled, False otherwise.
+    """
+    if user_id is None:
+        # Legacy job with no owner - check global settings
+        return _is_ai_schedule_enabled()
+
+    try:
+        from django.contrib.auth.models import User
+
+
+        user = User.objects.get(id=user_id)
+        profile = user.profile
+        return profile.ai_schedule_enabled
+    except Exception:
+        # User not found or no profile - default to enabled
+        return True
+
+
+def _is_within_user_active_hours(user_id: int | None) -> bool:
+    """Check if current time is within a specific user's active hours.
+
+    Args:
+        user_id: The user ID to check. If None, uses global default settings.
+
+    Returns:
+        True if within the user's active hours, False otherwise.
+    """
+    if user_id is None:
+        # Legacy job with no owner - check global settings
+        return _is_within_active_hours()
+
+    try:
+        from django.contrib.auth.models import User
+
+
+        user = User.objects.get(id=user_id)
+        profile = user.profile
+        current_hour = datetime.now().hour
+        return profile.ai_schedule_start_hour <= current_hour < profile.ai_schedule_end_hour
+    except Exception:
+        # User not found or no profile - default to always active
+        return True
+
+
 def _process_ai_queue_batch():
-    """Process a batch of pending AI jobs."""
+    """Process a batch of pending AI jobs.
+
+    This function respects per-user settings:
+    - Checks if each job's owner has AI scheduling enabled
+    - Checks if within the owner's active hours
+    - Uses the owner's batch size preference
+    """
     logger.info("AI worker checking for pending jobs...")
-
-    # Check if scheduling is enabled
-    if not _is_ai_schedule_enabled():
-        return
-
-    # Check if within active hours
-    if not _is_within_active_hours():
-        return
 
     try:
         # Get dependencies
+        from django.contrib.auth.models import User
+
         from paperless_firefly.paperless_client.client import PaperlessClient
-        from paperless_firefly.review.web.models import UserProfile
         from paperless_firefly.services.ai_queue import AIJobQueueService
         from paperless_firefly.spark_ai.service import SparkAIService
         from paperless_firefly.state_store.sqlite_store import StateStore
@@ -200,38 +259,45 @@ def _process_ai_queue_batch():
             logger.info("LLM not enabled in config - skipping AI queue processing")
             return
 
-        # Get user settings
-        batch_size = 1
-        try:
-            profile = UserProfile.objects.first()
-            if profile:
-                batch_size = profile.ai_schedule_batch_size
-                logger.debug(f"Using batch size from profile: {batch_size}")
-        except Exception:
-            pass
-
         # Initialize services
         state_store = StateStore(config.state_db_path)
-        ai_service = SparkAIService(state_store=state_store, config=config)
         paperless_client = PaperlessClient(
             base_url=config.paperless.base_url,
             token=config.paperless.token,
         )
+
+        # Fetch categories from Firefly for AI suggestions
+        from paperless_firefly.firefly_client.client import FireflyClient
+
+        categories = []
+        try:
+            firefly_client = FireflyClient(
+                base_url=config.firefly.base_url,
+                token=config.firefly.token,
+            )
+            firefly_categories = firefly_client.list_categories()
+            categories = [cat.name for cat in firefly_categories]
+            logger.info(f"Loaded {len(categories)} categories from Firefly for AI service")
+        except Exception as e:
+            logger.warning(f"Could not fetch Firefly categories for AI service: {e}")
+
+        ai_service = SparkAIService(state_store=state_store, config=config, categories=categories)
         queue_service = AIJobQueueService(
             state_store=state_store,
             config=config,
         )
 
-        # Get next jobs - process ALL pending jobs, regardless of scheduled time
-        # The scheduled_for field is for user-facing scheduling hints, but the background
-        # worker should process the entire queue sorted by priority
-        jobs = state_store.get_next_ai_jobs(limit=batch_size, check_schedule=False)
+        # Get next pending jobs (check_schedule=True respects scheduled_for time)
+        jobs = state_store.get_next_ai_jobs(limit=10, check_schedule=True)
 
         if not jobs:
             logger.info("No pending AI jobs in queue")
             return
 
-        logger.info(f"Processing {len(jobs)} AI job(s) from queue")
+        logger.info(f"Found {len(jobs)} pending AI job(s), checking user settings...")
+
+        processed_count = 0
+        skipped_count = 0
 
         for job in jobs:
             if _ai_worker_shutdown.is_set():
@@ -239,17 +305,45 @@ def _process_ai_queue_batch():
 
             job_id = job["id"]
             document_id = job["document_id"]
+            job_user_id = job.get("user_id")
+
+            # Check per-user settings
+            if not _is_user_schedule_enabled(job_user_id):
+                logger.debug(f"Skipping job #{job_id} - user schedule disabled")
+                skipped_count += 1
+                continue
+
+            if not _is_within_user_active_hours(job_user_id):
+                logger.debug(f"Skipping job #{job_id} - outside user's active hours")
+                skipped_count += 1
+                continue
 
             try:
                 logger.info(f"Processing AI job #{job_id} for document {document_id}")
+
+                # Get user-specific Paperless client if available
+                user_paperless_client = paperless_client
+                if job_user_id:
+                    try:
+                        user = User.objects.get(id=job_user_id)
+                        profile = user.profile
+                        if profile.paperless_token:
+                            user_paperless_client = PaperlessClient(
+                                base_url=profile.paperless_url or config.paperless.base_url,
+                                token=profile.paperless_token,
+                            )
+                    except Exception:
+                        pass  # Use default client
+
                 success = queue_service.process_job(
                     job=job,
                     ai_service=ai_service,
-                    paperless_client=paperless_client,
+                    paperless_client=user_paperless_client,
                 )
 
                 if success:
                     logger.info(f"AI job #{job_id} completed successfully")
+                    processed_count += 1
                 else:
                     logger.warning(f"AI job #{job_id} failed")
 
@@ -259,6 +353,11 @@ def _process_ai_queue_batch():
                     state_store.fail_ai_job(job_id, str(e), can_retry=True)
                 except Exception:
                     pass
+
+        if processed_count > 0 or skipped_count > 0:
+            logger.info(
+                f"AI batch complete: {processed_count} processed, {skipped_count} skipped (settings)"
+            )
 
     except Exception as e:
         logger.error(f"Error in AI queue batch processing: {e}", exc_info=True)

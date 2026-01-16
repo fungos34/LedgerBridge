@@ -10,7 +10,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from ..schemas.dedupe import compute_transaction_hash, generate_external_id_v2
+from ..schemas.dedupe import generate_external_id_v2
 from ..schemas.firefly_payload import FireflyTransactionStore, validate_firefly_payload
 
 logger = logging.getLogger(__name__)
