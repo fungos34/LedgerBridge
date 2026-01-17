@@ -99,7 +99,7 @@ Before using SparkLink, ensure you have:
 | Icon | Section | Purpose |
 |------|---------|---------|
 | 🏠 | **Home** | Dashboard with stats and quick actions |
-| ✏️ | **Review & Import** | Main workflow for reviewing and importing documents |
+| 📝 | **Review & Import** | Main workflow for reviewing and importing documents |
 | 📊 | **History** | View archive, documents, AI queue, and audit trail |
 
 ### User Dropdown Menu
@@ -108,9 +108,9 @@ Before using SparkLink, ensure you have:
 |------|------|-------------|
 | ⚙️ | Settings | Configure API connections and preferences |
 | 🔑 | Change Password | Update your account password |
-| 🔗 | Reconciliation | Match documents to existing bank transactions |
-| 🔄 | Sync Assistant | Share Firefly entities between users |
-| � | Paperless-ngx ↗ | External link to Paperless (if configured) |
+| 🔗 | Bank Reconciliation | Match documents to existing bank transactions |
+| 🔄 | Firefly Sync Assistant | Share Firefly entities between users |
+| 📄 | Paperless-ngx ↗ | External link to Paperless (if configured) |
 | 💰 | Firefly III ↗ | External link to Firefly III (if configured) |
 | 📡 | Syncthing ↗ | External link to Syncthing (if configured) |
 | 📥 | Firefly Data Importer ↗ | External link to Data Importer (if configured) |
@@ -650,3 +650,4 @@ You are the SparkLink Assistant, an AI helper integrated into the SparkLink appl
 
 *SparkLink User Guide - Version 1.0*
 *Last Updated: January 2026*
+

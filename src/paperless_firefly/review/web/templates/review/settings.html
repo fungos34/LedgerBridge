@@ -430,10 +430,10 @@
                            name="ollama_timeout" 
                            id="ollama_timeout"
                            class="form-input"
-                           value="{{ profile.ollama_timeout|default:30 }}"
-                           min="5" max="300" step="5"
+                           value="{{ profile.ollama_timeout|default:300 }}"
+                           min="5" step="5"
                            style="max-width: 150px;">
-                    <div class="form-help">How long to wait for LLM response (default: 30s, max: 300s)</div>
+                    <div class="form-help">How long to wait for LLM response (default: 300s, no limit)</div>
                 </div>
                 
                 {% if available_models %}

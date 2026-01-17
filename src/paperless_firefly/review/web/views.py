@@ -5773,57 +5773,108 @@ def api_ai_confirm(request: HttpRequest, document_id: int) -> JsonResponse:
 # ============================================================================
 
 
-def _load_documentation_context() -> str:
-    """Load documentation files as context for the chatbot.
+def _load_documentation_context(page_path: str = "") -> str:
+    """Load documentation context for the chatbot, optimized by current page.
 
-    Prioritizes the comprehensive SPARKLINK_USER_GUIDE.md which contains
-    all features, workflows, and step-by-step guides for users.
+    Uses a condensed AI context file for faster responses and passes only
+    relevant sections based on the user's current page.
+
+    Args:
+        page_path: The current URL path the user is viewing.
 
     Returns:
-        Combined documentation content.
+        Context string optimized for the current page.
     """
     from pathlib import Path
 
+    # Load the condensed AI context file (primary source)
+    ai_context_dir = Path(__file__).parent / "ai_context"
+    context_file = ai_context_dir / "SPARKLINK_AI_CONTEXT.txt"
+
+    if context_file.exists():
+        try:
+            full_context = context_file.read_text(encoding="utf-8")
+
+            # Extract relevant sections based on current page
+            sections_to_include = ["## APPLICATION IDENTITY", "## CORE CONCEPT", "## MAIN NAVIGATION"]
+
+            # Page-specific context
+            if not page_path or page_path == "/" or "home" in page_path:
+                # Welcome page - general overview
+                sections_to_include.extend([
+                    "## DROPDOWN MENU ITEMS",
+                    "## COMMON USER QUESTIONS",
+                ])
+            elif "unified-review" in page_path or "/review/" in page_path:
+                # Review page - detailed review info
+                sections_to_include.extend([
+                    "## REVIEW & IMPORT PAGE",
+                    "## AI ASSISTANT FEATURES",
+                    "## COMMON USER QUESTIONS",
+                ])
+            elif "processing-history" in page_path or "archive" in page_path or "ai-queue" in page_path:
+                sections_to_include.extend([
+                    "## PROCESSING HISTORY PAGE",
+                    "## AI ASSISTANT FEATURES",
+                ])
+            elif "reconciliation" in page_path:
+                sections_to_include.extend([
+                    "## BANK RECONCILIATION PAGE",
+                    "## COMMON USER QUESTIONS",
+                ])
+            elif "settings" in page_path:
+                sections_to_include.extend([
+                    "## SETTINGS PAGE",
+                    "## AI ASSISTANT FEATURES",
+                ])
+            elif "sync-assistant" in page_path:
+                sections_to_include.extend([
+                    "## DROPDOWN MENU ITEMS",
+                ])
+            else:
+                # Default - include common questions
+                sections_to_include.extend([
+                    "## COMMON USER QUESTIONS",
+                    "## KEYBOARD SHORTCUTS",
+                ])
+
+            # Extract matching sections
+            context_parts = []
+            current_section = None
+            current_content = []
+
+            for line in full_context.split("\n"):
+                if line.startswith("## "):
+                    # Save previous section if it was needed
+                    if current_section and any(s in current_section for s in sections_to_include):
+                        context_parts.append(current_section + "\n" + "\n".join(current_content))
+                    current_section = line
+                    current_content = []
+                else:
+                    current_content.append(line)
+
+            # Don't forget the last section
+            if current_section and any(s in current_section for s in sections_to_include):
+                context_parts.append(current_section + "\n" + "\n".join(current_content))
+
+            return "\n\n".join(context_parts) if context_parts else full_context[:8000]
+
+        except Exception as e:
+            logger.warning(f"Could not read AI context file: {e}")
+
+    # Fallback to old method if context file doesn't exist
     docs_dir = Path(__file__).parent.parent.parent.parent.parent / "docs"
+    guide_file = docs_dir / "SPARKLINK_USER_GUIDE.md"
 
-    # Primary document - comprehensive user guide (higher priority, higher limit)
-    primary_docs = [
-        ("SPARKLINK_USER_GUIDE.md", 25000),  # Main user guide - allow more content
-    ]
+    if guide_file.exists():
+        try:
+            text = guide_file.read_text(encoding="utf-8")
+            # Limit to 10KB for faster response
+            return text[:10000] if len(text) > 10000 else text
+        except Exception as e:
+            logger.warning(f"Could not read user guide: {e}")
 
-    # Secondary documents - technical references (lower priority, stricter limit)
-    secondary_docs = [
-        ("DEVELOPER_GUIDE.md", 5000),
-        ("DOCKER_QUICK_START.md", 3000),
-    ]
-
-    content_parts = []
-
-    # Load primary documentation with higher limits
-    for filename, max_length in primary_docs:
-        filepath = docs_dir / filename
-        if filepath.exists():
-            try:
-                text = filepath.read_text(encoding="utf-8")
-                if len(text) > max_length:
-                    text = text[:max_length] + "\n\n[... see full guide for more ...]"
-                content_parts.append(f"# PRIMARY REFERENCE: {filename}\n\n{text}")
-            except Exception as e:
-                logger.warning(f"Could not read {filename}: {e}")
-
-    # Load secondary documentation with stricter limits
-    for filename, max_length in secondary_docs:
-        filepath = docs_dir / filename
-        if filepath.exists():
-            try:
-                text = filepath.read_text(encoding="utf-8")
-                if len(text) > max_length:
-                    text = text[:max_length] + "\n\n[... truncated ...]"
-                content_parts.append(f"## {filename}\n\n{text}")
-            except Exception as e:
-                logger.warning(f"Could not read {filename}: {e}")
-
-    return "\n\n---\n\n".join(content_parts) if content_parts else ""
+    return ""
 
 
 @login_required
@@ -6074,8 +6125,17 @@ def api_chat(request: HttpRequest) -> JsonResponse:
             # Create AI service (no categories needed for chat)
             ai_service = SparkAIService(store, config, categories=[])
 
-            # Load documentation context
-            documentation = _load_documentation_context()
+            # Extract page path from page_context or use referer
+            page_path = ""
+            if page_context:
+                # Try to extract path from context
+                for line in page_context.split("\n"):
+                    if "Page URL:" in line:
+                        page_path = line.split("Page URL:")[-1].strip()
+                        break
+
+            # Load documentation context optimized for current page
+            documentation = _load_documentation_context(page_path)
 
             # Get response
             response = ai_service.chat(

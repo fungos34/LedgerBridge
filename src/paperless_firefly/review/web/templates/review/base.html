@@ -483,7 +483,7 @@
                 {% if user.is_authenticated %}
                 <a href="{% url 'home' %}" {% if request.path == '/' %}class="active"{% endif %} title="Dashboard overview">🏠 Home</a>
                 <a href="{% url 'unified_review_list' %}" {% if '/unified-review' in request.path or '/review' in request.path and '/reconciliation' not in request.path %}class="active"{% endif %} title="Review, link and import documents">📝 Review & Import</a>
-                <a href="{% url 'processing_history' %}" {% if '/processing-history' in request.path or '/archive' in request.path or '/ai-queue' in request.path or '/audit' in request.path or '/documents' in request.path %}class="active"{% endif %} title="View history, AI queue, audit trail">📊 History</a>
+                <a href="{% url 'processing_history' %}" {% if '/processing-history' in request.path or '/archive' in request.path or '/ai-queue' in request.path or '/audit' in request.path or '/documents' in request.path %}class="active"{% endif %} title="View history, AI queue, audit trail">📊 Processing History</a>
                 {% endif %}
             </nav>
             <div class="user-menu">
@@ -499,8 +499,8 @@
                         <a href="{% url 'change_password' %}" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">🔑 Change Password</a>
                         <div style="border-top: 1px solid var(--gray-200); margin: 0.25rem 0;"></div>
                         <div style="padding: 0.25rem 1rem; font-size: 0.7rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Tools</div>
-                        <a href="{% url 'reconciliation_dashboard' %}" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">🔗 Reconciliation</a>
-                        <a href="{% url 'sync_assistant' %}" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">🔄 Sync Assistant</a>
+                        <a href="{% url 'reconciliation_dashboard' %}" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">🔗 Bank Reconciliation</a>
+                        <a href="{% url 'sync_assistant' %}" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">🔄 Firefly Sync Assistant</a>
                         <div style="border-top: 1px solid var(--gray-200); margin: 0.25rem 0;"></div>
                         <div style="padding: 0.25rem 1rem; font-size: 0.7rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">External Services</div>
                         {% if paperless_url %}

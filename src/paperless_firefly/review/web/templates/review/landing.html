@@ -376,7 +376,7 @@
             <span class="node-name">Paperless-ngx</span>
             <span class="node-desc">Document Storage</span>
             {% endif %}
-            <div class="tooltip">📤 <strong>Upload receipts & invoices</strong><br>Tag documents for processing. Supports PDF, images, ZUGFeRD, and e-invoices.</div>
+            <div class="tooltip">📤 <strong>Document Management + OCR</strong><br>Upload receipts & invoices. Paperless runs OCR to extract text. Tag documents for processing.</div>
         </div>
         
         <div class="pipeline-arrow">
@@ -388,9 +388,9 @@
             <a href="{% url 'unified_review_list' %}" title="Go to Review & Import">
                 <span class="node-icon">⚡</span>
                 <span class="node-name">SparkLink</span>
-                <span class="node-desc">AI Extraction & Review</span>
+                <span class="node-desc">Data Parsing & Review</span>
             </a>
-            <div class="tooltip">🤖 <strong>Intelligent Processing</strong><br>OCR extracts amounts, dates, vendors. AI suggests categories. You review and approve.</div>
+            <div class="tooltip">🧠 <strong>Intelligent Parsing</strong><br>Reads OCR text, parses structured invoices (ZUGFeRD, UBL), extracts amounts & dates. AI suggests categories. You review.</div>
         </div>
         
         <div class="pipeline-arrow">
@@ -505,7 +505,7 @@
     <!-- Syncthing -->
     {% if syncthing_url %}
     <a href="{{ syncthing_url }}" target="_blank" class="service-card">
-        <div class="service-icon">�</div>
+        <div class="service-icon">📡</div>
         <div class="service-title">Syncthing</div>
         <div class="service-desc">File synchronization between devices</div>
     </a>

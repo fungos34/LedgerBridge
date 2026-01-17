@@ -1,0 +1,140 @@
+# SparkLink AI Context File
+# This file provides condensed context for the AI assistant
+# Location: src/paperless_firefly/review/web/ai_context/
+# DO NOT DELETE - Used by AI chat feature
+
+## APPLICATION IDENTITY
+Name: SparkLink
+Purpose: Bridge between Paperless-ngx (documents) and Firefly III (finance)
+Workflow: Documents → Data Extraction → Review → Transaction Import
+
+## CORE CONCEPT
+- Paperless-ngx: Stores documents, runs OCR to extract text
+- SparkLink: Parses OCR text, reads structured invoices (ZUGFeRD, UBL, XRechnung), extracts financial data, provides review interface
+- Firefly III: Personal finance manager where transactions are created
+
+## MAIN NAVIGATION
+- 🏠 Home: Dashboard with stats and quick links
+- 📝 Review & Import: Main workflow (at /unified-review/)
+- 📊 Processing History: Archive, Documents, AI Queue, Audit Trail (at /processing-history/)
+
+## DROPDOWN MENU ITEMS
+Account Section:
+- ⚙️ Settings: Configure Paperless/Firefly API tokens, Ollama, preferences
+- 🔑 Change Password: Update user password
+
+Tools Section:
+- 🔗 Bank Reconciliation: Match documents to existing bank transactions
+- 🔄 Firefly Sync Assistant: Share Firefly entities (categories, tags) between users
+
+External Services:
+- 📄 Paperless-ngx: Link to document management system
+- 💰 Firefly III: Link to finance manager
+- 📡 Syncthing: File synchronization
+- 📥 Firefly Data Importer: Import bank statements/CSV
+
+## REVIEW & IMPORT PAGE (/unified-review/)
+Purpose: Main workflow for processing documents
+
+Quick Actions Card:
+- 📄 Sync Paperless: Fetch documents from Paperless (with time range and tag filters)
+- 🏦 Sync Firefly: Fetch transactions from Firefly (with time range and account filters)
+- 🔗 Run Auto-Match: Automatically link documents to transactions by amount/date
+
+Document Cards show:
+- Title, Amount, Date, Confidence score
+- Status badges: pending, ready, imported, linked
+- Actions: Review, Quick Accept, Link
+
+Review Form Fields:
+- Amount: Transaction amount
+- Date: Transaction date
+- Description: Note about transaction
+- Category: Expense category from Firefly
+- Source Account: Where money comes from
+- Destination Account: Where money goes to
+- Transaction Type: withdrawal (expense), deposit (income), transfer
+- Tags: Optional tags
+
+Review Actions:
+- Save: Save changes, stay on page
+- Confirm/Accept: Approve and move to import queue
+- Skip: Review later
+- Reject: Don't import this document
+
+## PROCESSING HISTORY PAGE (/processing-history/)
+Tabs:
+- 📦 Archive: Processed extractions (imported, rejected, failed)
+- 📄 Documents: Browse all Paperless documents, List/Unlist for extraction
+- 🤖 AI Queue: View AI job status (pending, processing, completed, failed)
+- 📜 Audit Trail: Full history of all decisions
+
+Archive Actions:
+- Reset: Send back to review queue
+- View: See details
+
+## BANK RECONCILIATION PAGE (/reconciliation/)
+Purpose: Link documents to existing bank transactions
+
+Dashboard shows:
+- Paperless Pending: Documents waiting for matches
+- Firefly Unmatched: Transactions without receipts
+- Match Proposals: Suggested document-transaction pairs
+
+Workflow:
+1. Sync Firefly transactions
+2. Sync Paperless documents
+3. Run Auto-Match
+4. Review proposals - Accept or Reject
+5. Documents get linked to existing transactions
+
+## SETTINGS PAGE (/settings/)
+Sections:
+- Paperless-ngx: URL, API Token, Filter Tag
+- Firefly III: URL, API Token, Default Account
+- External Services: Syncthing URL, Firefly Data Importer URL
+- AI Assistant (Ollama): Enable/Disable, URL, Model, Timeout
+
+Test Connection buttons verify API access works.
+
+## AI ASSISTANT FEATURES
+- Category suggestions based on vendor/description
+- Field suggestions for missing data
+- Split transaction suggestions for itemized receipts
+- Chat assistant (this feature) for help
+
+AI Jobs:
+- Scheduled automatically after extraction
+- Run in background
+- Can be cancelled, retried, or viewed in AI Queue tab
+
+## COMMON USER QUESTIONS
+
+Q: How do I start processing documents?
+A: 1) Upload to Paperless with finance tag, 2) Go to Review & Import, 3) Click Sync Paperless, 4) Review each document, 5) Click Accept
+
+Q: Document not appearing?
+A: Check the tag in Paperless matches your filter tag in Settings. Click Sync Paperless to refresh.
+
+Q: What's the difference between Accept and Link?
+A: Accept creates a NEW transaction. Link connects to an EXISTING transaction (from bank import).
+
+Q: How do I match receipts to bank transactions?
+A: Go to Bank Reconciliation, sync both sources, run Auto-Match, review proposals.
+
+Q: Low confidence score?
+A: Document quality issue or unusual format. Review the extracted data carefully.
+
+Q: AI suggestions not appearing?
+A: Check Ollama is running and enabled in Settings. Wait for the 🤖 badge to appear.
+
+## KEYBOARD SHORTCUTS
+- Enter: Submit form
+- Escape: Cancel/close modal
+- Tab: Next field
+
+## STATUS COLORS
+- 🟢 Green: Success/Imported/Linked
+- 🟡 Yellow: Pending/Review needed
+- 🔴 Red: Error/Failed/Rejected
+- 🔵 Blue: Processing
