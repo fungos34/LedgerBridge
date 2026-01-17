@@ -5776,8 +5776,8 @@ def api_ai_confirm(request: HttpRequest, document_id: int) -> JsonResponse:
 def _load_documentation_context(page_path: str = "") -> str:
     """Load documentation context for the chatbot, optimized by current page.
 
-    Uses a condensed AI context file for faster responses and passes only
-    relevant sections based on the user's current page.
+    ONLY uses the dedicated AI context file (SPARKLINK_AI_CONTEXT.txt).
+    No fallback to other documentation files to keep responses fast.
 
     Args:
         page_path: The current URL path the user is viewing.
@@ -5787,94 +5787,89 @@ def _load_documentation_context(page_path: str = "") -> str:
     """
     from pathlib import Path
 
-    # Load the condensed AI context file (primary source)
+    # Load ONLY the condensed AI context file (no other files)
     ai_context_dir = Path(__file__).parent / "ai_context"
     context_file = ai_context_dir / "SPARKLINK_AI_CONTEXT.txt"
 
-    if context_file.exists():
-        try:
-            full_context = context_file.read_text(encoding="utf-8")
+    if not context_file.exists():
+        logger.warning(f"AI context file not found: {context_file}")
+        return "SparkLink bridges Paperless-ngx and Firefly III for document-based financial management."
 
-            # Extract relevant sections based on current page
-            sections_to_include = ["## APPLICATION IDENTITY", "## CORE CONCEPT", "## MAIN NAVIGATION"]
+    try:
+        full_context = context_file.read_text(encoding="utf-8")
 
-            # Page-specific context
-            if not page_path or page_path == "/" or "home" in page_path:
-                # Welcome page - general overview
-                sections_to_include.extend([
-                    "## DROPDOWN MENU ITEMS",
-                    "## COMMON USER QUESTIONS",
-                ])
-            elif "unified-review" in page_path or "/review/" in page_path:
-                # Review page - detailed review info
-                sections_to_include.extend([
-                    "## REVIEW & IMPORT PAGE",
-                    "## AI ASSISTANT FEATURES",
-                    "## COMMON USER QUESTIONS",
-                ])
-            elif "processing-history" in page_path or "archive" in page_path or "ai-queue" in page_path:
-                sections_to_include.extend([
-                    "## PROCESSING HISTORY PAGE",
-                    "## AI ASSISTANT FEATURES",
-                ])
-            elif "reconciliation" in page_path:
-                sections_to_include.extend([
-                    "## BANK RECONCILIATION PAGE",
-                    "## COMMON USER QUESTIONS",
-                ])
-            elif "settings" in page_path:
-                sections_to_include.extend([
-                    "## SETTINGS PAGE",
-                    "## AI ASSISTANT FEATURES",
-                ])
-            elif "sync-assistant" in page_path:
-                sections_to_include.extend([
-                    "## DROPDOWN MENU ITEMS",
-                ])
+        # Extract relevant sections based on current page
+        sections_to_include = ["## APPLICATION IDENTITY", "## EXACT WORKFLOW", "## MAIN NAVIGATION"]
+
+        # Page-specific context
+        if not page_path or page_path == "/" or "home" in page_path:
+            # Welcome page - general overview
+            sections_to_include.extend([
+                "## DROPDOWN MENU ITEMS",
+                "## COMMON USER QUESTIONS",
+            ])
+        elif "unified-review" in page_path or "/review/" in page_path:
+            # Review page - detailed review info
+            sections_to_include.extend([
+                "## REVIEW & MATCH & IMPORT PAGE",
+                "## AI ASSISTANT FEATURES",
+                "## COMMON USER QUESTIONS",
+            ])
+        elif "processing-history" in page_path or "archive" in page_path or "ai-queue" in page_path:
+            sections_to_include.extend([
+                "## PROCESSING HISTORY PAGE",
+                "## AI ASSISTANT FEATURES",
+            ])
+        elif "reconciliation" in page_path:
+            sections_to_include.extend([
+                "## RECONCILIATION FEATURES",
+                "## COMMON USER QUESTIONS",
+            ])
+        elif "settings" in page_path:
+            sections_to_include.extend([
+                "## SETTINGS PAGE",
+                "## AI ASSISTANT FEATURES",
+            ])
+        elif "sync-assistant" in page_path:
+            sections_to_include.extend([
+                "## DROPDOWN MENU ITEMS",
+            ])
+        else:
+            # Default - include common questions
+            sections_to_include.extend([
+                "## COMMON USER QUESTIONS",
+                "## KEYBOARD SHORTCUTS",
+            ])
+
+        # Extract matching sections
+        context_parts = []
+        current_section = None
+        current_content = []
+
+        for line in full_context.split("\n"):
+            if line.startswith("## "):
+                # Save previous section if it was needed
+                if current_section and any(s in current_section for s in sections_to_include):
+                    context_parts.append(current_section + "\n" + "\n".join(current_content))
+                current_section = line
+                current_content = []
             else:
-                # Default - include common questions
-                sections_to_include.extend([
-                    "## COMMON USER QUESTIONS",
-                    "## KEYBOARD SHORTCUTS",
-                ])
+                current_content.append(line)
 
-            # Extract matching sections
-            context_parts = []
-            current_section = None
-            current_content = []
+        # Don't forget the last section
+        if current_section and any(s in current_section for s in sections_to_include):
+            context_parts.append(current_section + "\n" + "\n".join(current_content))
 
-            for line in full_context.split("\n"):
-                if line.startswith("## "):
-                    # Save previous section if it was needed
-                    if current_section and any(s in current_section for s in sections_to_include):
-                        context_parts.append(current_section + "\n" + "\n".join(current_content))
-                    current_section = line
-                    current_content = []
-                else:
-                    current_content.append(line)
+        result = "\n\n".join(context_parts) if context_parts else full_context[:5000]
+        
+        # Log the size for debugging
+        logger.debug(f"AI chat context loaded: {len(result)} chars for page: {page_path}")
+        
+        return result
 
-            # Don't forget the last section
-            if current_section and any(s in current_section for s in sections_to_include):
-                context_parts.append(current_section + "\n" + "\n".join(current_content))
-
-            return "\n\n".join(context_parts) if context_parts else full_context[:8000]
-
-        except Exception as e:
-            logger.warning(f"Could not read AI context file: {e}")
-
-    # Fallback to old method if context file doesn't exist
-    docs_dir = Path(__file__).parent.parent.parent.parent.parent / "docs"
-    guide_file = docs_dir / "SPARKLINK_USER_GUIDE.md"
-
-    if guide_file.exists():
-        try:
-            text = guide_file.read_text(encoding="utf-8")
-            # Limit to 10KB for faster response
-            return text[:10000] if len(text) > 10000 else text
-        except Exception as e:
-            logger.warning(f"Could not read user guide: {e}")
-
-    return ""
+    except Exception as e:
+        logger.warning(f"Could not read AI context file: {e}")
+        return "SparkLink bridges Paperless-ngx and Firefly III for document-based financial management."
 
 
 @login_required

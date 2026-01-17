@@ -332,13 +332,13 @@ Please answer based on the documentation and your knowledge of the system."""
         Returns:
             Formatted user message.
         """
-        # Format conversation history
+        # Format conversation history (keep it minimal)
         history_text = ""
         if conversation_history:
             history_parts = ["RECENT CONVERSATION:"]
             for msg in conversation_history:
                 role = msg.get("role", "user").upper()
-                content = msg.get("content", "")[:500]  # Limit length
+                content = msg.get("content", "")[:300]  # Limit to 300 chars per message
                 history_parts.append(f"{role}: {content}")
             history_text = "\n".join(history_parts)
 
