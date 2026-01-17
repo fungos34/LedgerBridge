@@ -311,6 +311,51 @@ class SparkAIService:
         self.categories = categories
         self._taxonomy_version = self._compute_taxonomy_version()
 
+    def _ensure_model_pulled(self, model: str) -> bool:
+        """Ensure a model is available, pulling it if necessary.
+
+        This is called before using the fallback model to ensure it's ready.
+
+        Args:
+            model: Model name to check/pull (e.g., "qwen2.5:7b-instruct-q4_K_M")
+
+        Returns:
+            True if model is available, False if pull failed.
+        """
+        try:
+            # First, check if model exists
+            url = f"{self.llm_config.ollama_url}/api/tags"
+            response = self._client.get(url, timeout=10.0)
+            if response.status_code == 200:
+                data = response.json()
+                models = [m.get("name", "") for m in data.get("models", [])]
+                if model in models or any(model.split(":")[0] in m for m in models):
+                    logger.debug("Model %s is already available", model)
+                    return True
+
+            # Model not found, attempt to pull it
+            logger.info("Pulling fallback model %s (this may take a while)...", model)
+            pull_url = f"{self.llm_config.ollama_url}/api/pull"
+            pull_response = self._client.post(
+                pull_url,
+                json={"name": model},
+                timeout=None,  # No timeout for pull - can take a long time
+            )
+            if pull_response.status_code == 200:
+                logger.info("Successfully pulled model %s", model)
+                return True
+            else:
+                logger.error(
+                    "Failed to pull model %s: HTTP %s",
+                    model,
+                    pull_response.status_code,
+                )
+                return False
+
+        except Exception as e:
+            logger.error("Error checking/pulling model %s: %s", model, e)
+            return False
+
     def suggest_category(
         self,
         amount: str,
@@ -383,14 +428,15 @@ class SparkAIService:
             user_message=user_message,
         )
 
-        # Fallback to slow model if needed
+        # Fallback to slow model if needed (pull it first if not available)
         if result is None and self.llm_config.model_fallback:
             logger.info("Fast model failed, falling back to %s", self.llm_config.model_fallback)
-            result = self._call_ollama(
-                model=self.llm_config.model_fallback,
-                system_prompt=self._category_prompt.system_prompt,
-                user_message=user_message,
-            )
+            if self._ensure_model_pulled(self.llm_config.model_fallback):
+                result = self._call_ollama(
+                    model=self.llm_config.model_fallback,
+                    system_prompt=self._category_prompt.system_prompt,
+                    user_message=user_message,
+                )
 
         if result is None:
             return None
@@ -1122,20 +1168,21 @@ class SparkAIService:
             cancel_check=cancel_check,
         )
 
-        # Fallback to slow model if needed
+        # Fallback to slow model if needed (pull it first if not available)
         if result is None and self.llm_config.model_fallback:
             # Check for cancellation before fallback
             if cancel_check and cancel_check():
                 logger.info("Job cancelled, skipping fallback model")
                 return None
             logger.info("Fast model failed, falling back to %s", self.llm_config.model_fallback)
-            result = self._call_ollama(
-                model=self.llm_config.model_fallback,
-                system_prompt=self._review_prompt.system_prompt,
-                user_message=user_message,
-                no_timeout=no_timeout,
-                cancel_check=cancel_check,
-            )
+            if self._ensure_model_pulled(self.llm_config.model_fallback):
+                result = self._call_ollama(
+                    model=self.llm_config.model_fallback,
+                    system_prompt=self._review_prompt.system_prompt,
+                    user_message=user_message,
+                    no_timeout=no_timeout,
+                    cancel_check=cancel_check,
+                )
 
         if result is None:
             return None
@@ -1298,10 +1345,12 @@ class SparkAIService:
         )
 
         # Use fast model for chat (without JSON format requirement)
+        # Wait indefinitely - chat is sequential and user expects a response
         result = self._call_ollama_text(
             model=self.llm_config.model_fast,
             system_prompt=chat_prompt.system_prompt,
             user_message=user_message,
+            no_timeout=True,  # Wait indefinitely for chat responses
         )
 
         if result:
@@ -1313,6 +1362,7 @@ class SparkAIService:
         model: str,
         system_prompt: str,
         user_message: str,
+        no_timeout: bool = False,
     ) -> dict | None:
         """Call Ollama API for text completion (no JSON format).
 
@@ -1320,15 +1370,16 @@ class SparkAIService:
         Used for chatbot responses.
 
         Args:
-            model: Model name (e.g., "qwen2.5:7b").
+            model: Model name (e.g., "qwen2.5:3b").
             system_prompt: System message.
             user_message: User message.
+            no_timeout: If True, wait indefinitely for response (for chat).
 
         Returns:
             Dict with "content" and "model" keys, or None on failure.
         """
-        # Acquire concurrency slot with timeout
-        wait_timeout = self.llm_config.timeout_seconds
+        # Acquire concurrency slot - wait indefinitely if no_timeout
+        wait_timeout = None if no_timeout else self.llm_config.timeout_seconds
         if not self._limiter.acquire(timeout=wait_timeout):
             logger.warning(
                 "LLM request timed out waiting for concurrency slot (max=%d, active=%d)",
@@ -1349,15 +1400,21 @@ class SparkAIService:
                 # No "format": "json" - we want natural text
             }
 
-            logger.debug("Calling Ollama chat model %s at %s", model, url)
+            if no_timeout:
+                logger.debug("Calling Ollama chat model %s (no timeout - will wait indefinitely)", model)
+            else:
+                logger.debug("Calling Ollama chat model %s at %s", model, url)
 
-            # Use explicit Timeout with long read timeout for LLM inference
-            request_timeout = httpx.Timeout(
-                connect=10.0,
-                read=float(self.llm_config.timeout_seconds),
-                write=30.0,
-                pool=10.0,
-            )
+            # Use explicit Timeout - None for chat that must wait indefinitely
+            if no_timeout:
+                request_timeout = None
+            else:
+                request_timeout = httpx.Timeout(
+                    connect=10.0,
+                    read=float(self.llm_config.timeout_seconds),
+                    write=30.0,
+                    pool=10.0,
+                )
             response = self._client.post(url, json=payload, timeout=request_timeout)
             response.raise_for_status()
 

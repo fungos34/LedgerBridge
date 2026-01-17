@@ -6076,8 +6076,6 @@ def api_chat(request: HttpRequest) -> JsonResponse:
         config = load_config(config_path)
 
         # Override with user profile settings if available
-        # Default lock timeout if no user profile
-        lock_timeout = 30.0
         try:
             profile = UserProfile.objects.get(user=request.user)
             if profile.llm_enabled:
@@ -6091,8 +6089,6 @@ def api_chat(request: HttpRequest) -> JsonResponse:
                     config.llm.model_fallback = profile.ollama_model_fallback
                 if profile.ollama_timeout:
                     config.llm.timeout_seconds = profile.ollama_timeout
-                    # Use user's configured timeout for lock wait as well
-                    lock_timeout = float(profile.ollama_timeout)
         except UserProfile.DoesNotExist:
             pass
 
@@ -6105,15 +6101,17 @@ def api_chat(request: HttpRequest) -> JsonResponse:
                 status=400,
             )
 
-        # Acquire AI lock - chatbot waits up to user's configured timeout, then gives up
-        lock_acquired = acquire_ai_lock(timeout=lock_timeout)
+        # Acquire AI lock - chat waits indefinitely since it's sequential
+        # and the user expects a response (shows loading indicator)
+        lock_acquired = acquire_ai_lock(timeout=None)  # Wait indefinitely
         if not lock_acquired:
+            # This should rarely happen with timeout=None, but handle it
             return JsonResponse(
                 {
                     "success": False,
-                    "error": "AI is currently busy processing documents. Please try again in a few moments.",
+                    "error": "AI lock acquisition failed unexpectedly.",
                 },
-                status=503,  # Service Unavailable
+                status=503,
             )
 
         try:
