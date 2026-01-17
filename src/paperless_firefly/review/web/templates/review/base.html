@@ -493,18 +493,34 @@
                         <span class="user-name">{{ user.username }}</span>
                         <span>▼</span>
                     </button>
-                    <div class="user-dropdown-menu" id="user-dropdown-menu" style="display: none; position: absolute; right: 0; top: 100%; margin-top: 0.25rem; background: white; border: 1px solid var(--gray-200); border-radius: 0.375rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1); min-width: 180px; z-index: 100;">
+                    <div class="user-dropdown-menu" id="user-dropdown-menu" style="display: none; position: absolute; right: 0; top: 100%; margin-top: 0.25rem; background: white; border: 1px solid var(--gray-200); border-radius: 0.375rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1); min-width: 200px; z-index: 100;">
+                        <div style="padding: 0.25rem 1rem; font-size: 0.7rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Account</div>
                         <a href="{% url 'settings' %}" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">⚙️ Settings</a>
                         <a href="{% url 'change_password' %}" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">🔑 Change Password</a>
+                        <div style="border-top: 1px solid var(--gray-200); margin: 0.25rem 0;"></div>
+                        <div style="padding: 0.25rem 1rem; font-size: 0.7rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Tools</div>
+                        <a href="{% url 'reconciliation_dashboard' %}" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">🔗 Reconciliation</a>
+                        <a href="{% url 'document_browser' %}" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">📄 Document Browser</a>
                         <a href="{% url 'sync_assistant' %}" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">🔄 Sync Assistant</a>
+                        <div style="border-top: 1px solid var(--gray-200); margin: 0.25rem 0;"></div>
+                        <div style="padding: 0.25rem 1rem; font-size: 0.7rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">History</div>
+                        <a href="{% url 'archive' %}" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">📁 Archive</a>
+                        <a href="{% url 'ai_queue_list' %}" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">🤖 AI Queue</a>
+                        <a href="{% url 'audit_trail_list' %}" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">📋 Audit Trail</a>
                         {% if syncthing_url or firefly_importer_url %}
                         <div style="border-top: 1px solid var(--gray-200); margin: 0.25rem 0;"></div>
+                        <div style="padding: 0.25rem 1rem; font-size: 0.7rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">External</div>
                         {% if syncthing_url %}
-                        <a href="{{ syncthing_url }}" target="_blank" rel="noopener noreferrer" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">🔄 Syncthing</a>
+                        <a href="{{ syncthing_url }}" target="_blank" rel="noopener noreferrer" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">🔄 Syncthing ↗</a>
                         {% endif %}
                         {% if firefly_importer_url %}
-                        <a href="{{ firefly_importer_url }}" target="_blank" rel="noopener noreferrer" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">📥 Bank Importer</a>
+                        <a href="{{ firefly_importer_url }}" target="_blank" rel="noopener noreferrer" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">📥 Bank Importer ↗</a>
                         {% endif %}
+                        {% endif %}
+                        {% if user.is_staff %}
+                        <div style="border-top: 1px solid var(--gray-200); margin: 0.25rem 0;"></div>
+                        <div style="padding: 0.25rem 1rem; font-size: 0.7rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Admin</div>
+                        <a href="{% url 'admin:index' %}" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">🛠️ Admin Panel</a>
                         {% endif %}
                         <div style="border-top: 1px solid var(--gray-200); margin: 0.25rem 0;"></div>
                         <form method="post" action="{% url 'logout' %}" style="margin: 0;">
