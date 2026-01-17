@@ -745,68 +745,16 @@ def review_list_legacy(request: HttpRequest) -> HttpResponse:
 
 
 @login_required
+@require_http_methods(["GET"])
 def extraction_archive(request: HttpRequest) -> HttpResponse:
     """
-    Show archive of processed extractions (imported, rejected).
+    Redirect to Processing History with archive tab.
 
-    Allows resetting extractions for re-review or reimport.
+    The archive functionality is now part of the unified Processing History view.
     """
-    store = _get_store()
-    user_id = _get_user_id_for_filter(request)
-    processed = store.get_processed_extractions(user_id=user_id)
+    from django.urls import reverse
 
-    # Parse extractions for display
-    items = []
-    for row in processed:
-        try:
-            data = json.loads(row["extraction_json"])
-            extraction = FinanceExtraction.from_dict(data)
-
-            # Determine status for display
-            status = "unknown"
-            status_class = "secondary"
-            if row["import_status"] == "IMPORTED":
-                status = "Imported"
-                status_class = "success"
-            elif row["import_status"] == "FAILED":
-                status = "Failed"
-                status_class = "danger"
-            elif row["review_decision"] == "REJECTED":
-                status = "Rejected"
-                status_class = "warning"
-            elif row["review_decision"] in ("ACCEPTED", "EDITED"):
-                status = "Approved (pending import)"
-                status_class = "info"
-
-            items.append(
-                {
-                    "id": row["id"],
-                    "document_id": row["document_id"],
-                    "external_id": row["external_id"],
-                    "title": extraction.paperless_title,
-                    "amount": extraction.proposal.amount,
-                    "currency": extraction.proposal.currency,
-                    "date": extraction.proposal.date,
-                    "vendor": extraction.proposal.destination_account,
-                    "status": status,
-                    "status_class": status_class,
-                    "review_decision": row["review_decision"],
-                    "import_status": row["import_status"],
-                    "firefly_id": row["firefly_id"],
-                    "import_error": row["import_error"],
-                    "reviewed_at": row["reviewed_at"],
-                    "created_at": row["created_at"],
-                }
-            )
-        except Exception as e:
-            logger.error(f"Error parsing extraction {row['id']}: {e}")
-
-    context = {
-        "items": items,
-        "debug_mode": _is_debug_mode(),
-        **_get_external_urls(request.user if hasattr(request, "user") else None),
-    }
-    return render(request, "review/archive.html", context)
+    return redirect(f"{reverse('processing_history')}?tab=archive")
 
 
 def _get_llm_suggestion_for_document(
@@ -2555,88 +2503,20 @@ def api_extract_status(request: HttpRequest) -> JsonResponse:
 
 @login_required
 def document_browser(request: HttpRequest) -> HttpResponse:
-    """Browse Paperless documents and select/deselect for extraction."""
-    session = _get_paperless_session(request)
-    filter_tag = getattr(settings, "PAPERLESS_FILTER_TAG", "finance/inbox")
+    """Redirect to Processing History with Documents tab.
 
-    # Get query parameters
-    page = int(request.GET.get("page", 1))
-    search = request.GET.get("search", "")
-    show_listed = request.GET.get("listed", "all")  # all, listed, unlisted
+    The Document Browser functionality is now part of the unified Processing History view.
+    """
+    from django.urls import reverse
 
-    documents = []
-    total_count = 0
-    page_size = 25
-    filter_tag_id = None
+    # Preserve query params
+    params = {k: v for k, v in request.GET.items() if k != "tab"}
+    base_url = f"{reverse('processing_history')}?tab=documents"
+    if params:
+        from urllib.parse import urlencode
 
-    try:
-        # First, get/create the filter tag ID
-        tags_resp = session.get(f"{settings.PAPERLESS_BASE_URL}/api/tags/")
-        if tags_resp.ok:
-            tags_data = tags_resp.json()
-            for tag in tags_data.get("results", []):
-                if tag.get("name") == filter_tag:
-                    filter_tag_id = tag.get("id")
-                    break
-
-        # Build query params
-        params = {
-            "page": page,
-            "page_size": page_size,
-            "ordering": "-created",
-        }
-
-        if search:
-            params["query"] = search
-
-        # Filter by tag presence
-        if show_listed == "listed" and filter_tag_id:
-            params["tags__id__all"] = filter_tag_id
-        elif show_listed == "unlisted" and filter_tag_id:
-            params["tags__id__none"] = filter_tag_id
-
-        # Fetch documents
-        resp = session.get(f"{settings.PAPERLESS_BASE_URL}/api/documents/", params=params)
-        if resp.ok:
-            data = resp.json()
-            total_count = data.get("count", 0)
-
-            for doc in data.get("results", []):
-                doc_tags = doc.get("tags", [])
-                is_listed = filter_tag_id in doc_tags if filter_tag_id else False
-
-                documents.append(
-                    {
-                        "id": doc.get("id"),
-                        "title": doc.get("title"),
-                        "created": doc.get("created"),
-                        "added": doc.get("added"),
-                        "correspondent": doc.get("correspondent"),
-                        "document_type": doc.get("document_type"),
-                        "is_listed": is_listed,
-                    }
-                )
-    except Exception as e:
-        logger.error(f"Error fetching documents: {e}")
-        messages.error(request, f"Could not fetch documents from Paperless: {e}")
-
-    # Pagination
-    total_pages = (total_count + page_size - 1) // page_size
-
-    context = {
-        "documents": documents,
-        "filter_tag": filter_tag,
-        "filter_tag_id": filter_tag_id,
-        "search": search,
-        "show_listed": show_listed,
-        "page": page,
-        "total_pages": total_pages,
-        "total_count": total_count,
-        "has_prev": page > 1,
-        "has_next": page < total_pages,
-        **_get_external_urls(request.user if hasattr(request, "user") else None),
-    }
-    return render(request, "review/document_browser.html", context)
+        base_url += f"&{urlencode(params)}"
+    return redirect(base_url)
 
 
 @login_required
@@ -4062,92 +3942,20 @@ def _get_reconciliation_stats(store: StateStore, user_id: int | None = None) -> 
 
 @login_required
 def audit_trail_list(request: HttpRequest) -> HttpResponse:
+    """Redirect to Processing History with Audit Trail tab.
+
+    The Audit Trail functionality is now part of the unified Processing History view.
     """
-    List all interpretation runs (audit trail).
+    from django.urls import reverse
 
-    Read-only view showing history of all reconciliation decisions.
-    """
-    store = _get_store()
+    # Preserve query params
+    params = {k: v for k, v in request.GET.items() if k != "tab"}
+    base_url = f"{reverse('processing_history')}?tab=audit"
+    if params:
+        from urllib.parse import urlencode
 
-    # Pagination
-    page = int(request.GET.get("page", 1))
-    page_size = 50
-
-    # Filter options
-    filter_document = request.GET.get("document_id")
-    filter_firefly = request.GET.get("firefly_id")
-    filter_source = request.GET.get("decision_source")
-
-    conn = store._get_connection()
-    try:
-        # Build query with filters
-        query = "SELECT * FROM interpretation_runs WHERE 1=1"
-        params = []
-
-        if filter_document:
-            query += " AND document_id = ?"
-            params.append(int(filter_document))
-
-        if filter_firefly:
-            query += " AND firefly_id = ?"
-            params.append(int(filter_firefly))
-
-        if filter_source:
-            query += " AND decision_source = ?"
-            params.append(filter_source)
-
-        # Count total
-        count_query = query.replace("SELECT *", "SELECT COUNT(*)")
-        total_count = conn.execute(count_query, params).fetchone()[0]
-
-        # Add ordering and pagination
-        query += " ORDER BY run_timestamp DESC LIMIT ? OFFSET ?"
-        params.extend([page_size, (page - 1) * page_size])
-
-        rows = conn.execute(query, params).fetchall()
-        runs = [dict(row) for row in rows]
-
-        # Parse JSON fields
-        for run in runs:
-            if run.get("inputs_summary"):
-                try:
-                    run["inputs_summary"] = json.loads(run["inputs_summary"])
-                except (json.JSONDecodeError, TypeError):
-                    pass
-            if run.get("rules_applied"):
-                try:
-                    run["rules_applied"] = json.loads(run["rules_applied"])
-                except (json.JSONDecodeError, TypeError):
-                    pass
-            if run.get("llm_result"):
-                try:
-                    run["llm_result"] = json.loads(run["llm_result"])
-                except (json.JSONDecodeError, TypeError):
-                    pass
-            if run.get("linkage_marker_written"):
-                try:
-                    run["linkage_marker_written"] = json.loads(run["linkage_marker_written"])
-                except (json.JSONDecodeError, TypeError):
-                    pass
-    finally:
-        conn.close()
-
-    # Pagination
-    total_pages = (total_count + page_size - 1) // page_size
-
-    context = {
-        "runs": runs,
-        "page": page,
-        "total_pages": total_pages,
-        "total_count": total_count,
-        "has_prev": page > 1,
-        "has_next": page < total_pages,
-        "filter_document": filter_document or "",
-        "filter_firefly": filter_firefly or "",
-        "filter_source": filter_source or "",
-        **_get_external_urls(request.user if hasattr(request, "user") else None),
-    }
-    return render(request, "review/audit_trail_list.html", context)
+        base_url += f"&{urlencode(params)}"
+    return redirect(base_url)
 
 
 @login_required
@@ -5968,27 +5776,49 @@ def api_ai_confirm(request: HttpRequest, document_id: int) -> JsonResponse:
 def _load_documentation_context() -> str:
     """Load documentation files as context for the chatbot.
 
+    Prioritizes the comprehensive SPARKLINK_USER_GUIDE.md which contains
+    all features, workflows, and step-by-step guides for users.
+
     Returns:
         Combined documentation content.
     """
     from pathlib import Path
 
     docs_dir = Path(__file__).parent.parent.parent.parent.parent / "docs"
-    doc_files = [
-        "DEVELOPER_GUIDE.md",
-        "DOCKER_QUICK_START.md",
-        "TESTING_GUIDE.md",
+
+    # Primary document - comprehensive user guide (higher priority, higher limit)
+    primary_docs = [
+        ("SPARKLINK_USER_GUIDE.md", 25000),  # Main user guide - allow more content
+    ]
+
+    # Secondary documents - technical references (lower priority, stricter limit)
+    secondary_docs = [
+        ("DEVELOPER_GUIDE.md", 5000),
+        ("DOCKER_QUICK_START.md", 3000),
     ]
 
     content_parts = []
-    for filename in doc_files:
+
+    # Load primary documentation with higher limits
+    for filename, max_length in primary_docs:
         filepath = docs_dir / filename
         if filepath.exists():
             try:
                 text = filepath.read_text(encoding="utf-8")
-                # Truncate very long files
-                if len(text) > 10000:
-                    text = text[:10000] + "\n\n[... truncated for brevity ...]"
+                if len(text) > max_length:
+                    text = text[:max_length] + "\n\n[... see full guide for more ...]"
+                content_parts.append(f"# PRIMARY REFERENCE: {filename}\n\n{text}")
+            except Exception as e:
+                logger.warning(f"Could not read {filename}: {e}")
+
+    # Load secondary documentation with stricter limits
+    for filename, max_length in secondary_docs:
+        filepath = docs_dir / filename
+        if filepath.exists():
+            try:
+                text = filepath.read_text(encoding="utf-8")
+                if len(text) > max_length:
+                    text = text[:max_length] + "\n\n[... truncated ...]"
                 content_parts.append(f"## {filename}\n\n{text}")
             except Exception as e:
                 logger.warning(f"Could not read {filename}: {e}")
@@ -6503,65 +6333,23 @@ def _run_ai_job_now(request: HttpRequest, store: StateStore, job: dict) -> bool:
 
 @login_required
 def ai_queue_list(request: HttpRequest) -> HttpResponse:
-    """View the AI job queue."""
-    store = _get_store()
-    user_id = _get_user_id_for_filter(request)
+    """Redirect to Processing History with AI Queue tab.
 
-    # Get filter from query params
-    status_filter = request.GET.get("status", None)
-    page = int(request.GET.get("page", 1))
-    per_page = 50
-    offset = (page - 1) * per_page
+    The AI Queue functionality is now part of the unified Processing History view.
+    """
+    from django.urls import reverse
 
-    # Get jobs filtered by user
-    jobs = store.get_ai_jobs_list(
-        status=status_filter,
-        limit=per_page,
-        offset=offset,
-        user_id=user_id,
-    )
+    # Preserve query params
+    query_string = request.GET.urlencode()
+    base_url = f"{reverse('processing_history')}?tab=ai_queue"
+    if query_string:
+        # Filter out 'tab' param and add remaining
+        params = {k: v for k, v in request.GET.items() if k != "tab"}
+        if params:
+            from urllib.parse import urlencode
 
-    # Parse datetime strings for Django template date filter
-    for job in jobs:
-        for date_field in ["scheduled_at", "started_at", "completed_at"]:
-            if job.get(date_field):
-                try:
-                    # Parse ISO format datetime string
-                    from datetime import datetime
-
-                    dt_str = job[date_field]
-                    # Handle both with and without microseconds
-                    for fmt in [
-                        "%Y-%m-%dT%H:%M:%S.%f",
-                        "%Y-%m-%dT%H:%M:%S",
-                        "%Y-%m-%d %H:%M:%S.%f",
-                        "%Y-%m-%d %H:%M:%S",
-                    ]:
-                        try:
-                            job[date_field] = datetime.strptime(dt_str[:26], fmt)
-                            break
-                        except ValueError:
-                            continue
-                except Exception:
-                    pass  # Keep original string if parsing fails
-
-    # Get stats filtered by user
-    stats = store.get_ai_queue_stats(user_id=user_id)
-
-    # Check if any job is processing (for Run Now button)
-    is_processing = stats.get("processing", 0) > 0
-
-    context = {
-        "jobs": jobs,
-        "stats": stats,
-        "status_filter": status_filter,
-        "page": page,
-        "has_next": len(jobs) == per_page,
-        "has_prev": page > 1,
-        "is_processing": is_processing,
-        **_get_external_urls(request.user if hasattr(request, "user") else None),
-    }
-    return render(request, "review/ai_queue.html", context)
+            base_url += f"&{urlencode(params)}"
+    return redirect(base_url)
 
 
 # ============================================================================
