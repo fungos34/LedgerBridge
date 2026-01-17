@@ -80,7 +80,8 @@ services:
       # Gunicorn production server settings (optional overrides)
       - GUNICORN_WORKERS=${GUNICORN_WORKERS:-4}
       - GUNICORN_THREADS=${GUNICORN_THREADS:-2}
-      - GUNICORN_TIMEOUT=${GUNICORN_TIMEOUT:-120}
+      # Allow long timeout for AI chat responses (LLM can take several minutes)
+      - GUNICORN_TIMEOUT=${GUNICORN_TIMEOUT:-600}
 
       - PYTHONPATH=/app/src
 

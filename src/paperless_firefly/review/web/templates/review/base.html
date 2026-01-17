@@ -499,7 +499,7 @@
                         <a href="{% url 'change_password' %}" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">🔑 Change Password</a>
                         <div style="border-top: 1px solid var(--gray-200); margin: 0.25rem 0;"></div>
                         <div style="padding: 0.25rem 1rem; font-size: 0.7rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Tools</div>
-                        <a href="{% url 'reconciliation_dashboard' %}" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">� Review & Match & Import</a>
+                        <a href="{% url 'reconciliation_dashboard' %}" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">📝 Review & Match & Import</a>
                         <a href="{% url 'sync_assistant' %}" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">🔄 Firefly Sync Assistant</a>
                         <div style="border-top: 1px solid var(--gray-200); margin: 0.25rem 0;"></div>
                         <div style="padding: 0.25rem 1rem; font-size: 0.7rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">External Services</div>
@@ -891,7 +891,7 @@
         const pageContext = buildPageContext();
         const conversationHistory = getRecentHistoryForContext();
         
-        // Send to API with context
+        // Send to API with context - no timeout, wait for response
         fetch('{% url "api_chat" %}', {
             method: 'POST',
             headers: {
@@ -902,9 +902,22 @@
                 question: question,
                 page_context: pageContext,
                 conversation_history: conversationHistory
-            })
+            }),
+            // Keep connection alive for long AI responses
+            keepalive: false
         })
-        .then(response => response.json())
+        .then(response => {
+            if (!response.ok) {
+                // Server returned an error status
+                return response.json().then(data => {
+                    throw new Error(data.error || `Server error: ${response.status}`);
+                }).catch(e => {
+                    if (e.message.includes('Server error')) throw e;
+                    throw new Error(`Server error: ${response.status}`);
+                });
+            }
+            return response.json();
+        })
         .then(data => {
             // Remove loading
             loading.remove();
@@ -927,7 +940,16 @@
             loading.remove();
             const errorMsg = document.createElement('div');
             errorMsg.className = 'chat-message error';
-            errorMsg.innerHTML = `<p>Connection error. Please check if the server is running.</p>`;
+            // Provide more helpful error message
+            let errorText = error.message || 'Unknown error';
+            if (errorText.includes('Failed to fetch') || errorText.includes('NetworkError')) {
+                errorText = 'Network error. The AI might still be processing. Please wait a moment and try again.';
+            } else if (errorText.includes('Server error: 503')) {
+                errorText = 'AI is busy processing other requests. Please wait a moment.';
+            } else if (errorText.includes('Server error: 504') || errorText.includes('timeout')) {
+                errorText = 'Request timed out. The AI is still processing. Please wait and try again.';
+            }
+            errorMsg.innerHTML = `<p>${escapeHtml(errorText)}</p>`;
             messages.appendChild(errorMsg);
             messages.scrollTop = messages.scrollHeight;
         });
