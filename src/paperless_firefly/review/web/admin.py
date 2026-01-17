@@ -21,6 +21,9 @@ from .models import (
     Linkage,
     MatchProposal,
     PaperlessDocument,
+    SyncImportLog,
+    SyncPoolRecord,
+    SyncPoolShare,
     UserProfile,
     VendorMapping,
 )
@@ -567,3 +570,164 @@ class AIJobQueueAdmin(StateStoreAdmin):
             error_message=None,
         )
         self.message_user(request, f"Reset {updated} job(s) to pending.")
+
+
+# ============================================================================
+# Sync Pool Admin (default database)
+# ============================================================================
+
+
+@admin.register(SyncPoolRecord)
+class SyncPoolRecordAdmin(admin.ModelAdmin):
+    """Admin for sync pool records.
+
+    Manages entities fetched from users' Firefly instances for cross-instance sync.
+    Uses the default database (not state_store).
+    """
+
+    list_display = (
+        "id",
+        "owner",
+        "entity_type",
+        "name",
+        "fingerprint_short",
+        "firefly_id",
+        "fetched_at",
+        "updated_at",
+    )
+    list_filter = ("entity_type", "owner")
+    search_fields = ("name", "fingerprint", "owner__username")
+    ordering = ("-updated_at",)
+    readonly_fields = ("fetched_at", "updated_at", "fingerprint")
+    raw_id_fields = ("owner",)
+
+    fieldsets = (
+        (
+            "Entity Info",
+            {
+                "fields": ("entity_type", "name", "firefly_id", "fingerprint"),
+            },
+        ),
+        (
+            "Ownership",
+            {
+                "fields": ("owner",),
+            },
+        ),
+        (
+            "Data",
+            {
+                "fields": ("data_json",),
+                "classes": ("collapse",),
+            },
+        ),
+        (
+            "Timestamps",
+            {
+                "fields": ("fetched_at", "updated_at"),
+            },
+        ),
+    )
+
+    def fingerprint_short(self, obj):
+        """Truncate fingerprint for display."""
+        return obj.fingerprint[:16] + "..." if len(obj.fingerprint) > 16 else obj.fingerprint
+
+    fingerprint_short.short_description = "Fingerprint"
+
+
+@admin.register(SyncPoolShare)
+class SyncPoolShareAdmin(admin.ModelAdmin):
+    """Admin for sync pool shares.
+
+    Manages share permissions for pool records between users.
+    Uses the default database (not state_store).
+    """
+
+    list_display = (
+        "id",
+        "record",
+        "shared_with",
+        "shared_by",
+        "shared_at",
+    )
+    list_filter = ("shared_with", "shared_by")
+    search_fields = (
+        "record__name",
+        "shared_with__username",
+        "shared_by__username",
+    )
+    ordering = ("-shared_at",)
+    readonly_fields = ("shared_at",)
+    raw_id_fields = ("record", "shared_with", "shared_by")
+
+
+@admin.register(SyncImportLog)
+class SyncImportLogAdmin(admin.ModelAdmin):
+    """Admin for sync import logs.
+
+    Audit trail of all import operations with outcomes.
+    Uses the default database (not state_store).
+    """
+
+    list_display = (
+        "id",
+        "user",
+        "entity_type",
+        "name",
+        "status_colored",
+        "target_firefly_id",
+        "source_owner",
+        "imported_at",
+    )
+    list_filter = ("status", "entity_type", "user")
+    search_fields = ("name", "fingerprint", "user__username", "error_message")
+    ordering = ("-imported_at",)
+    readonly_fields = ("imported_at",)
+    raw_id_fields = ("user", "pool_record", "source_owner")
+
+    fieldsets = (
+        (
+            "Entity Info",
+            {
+                "fields": ("entity_type", "name", "fingerprint"),
+            },
+        ),
+        (
+            "Import Details",
+            {
+                "fields": ("user", "pool_record", "source_owner"),
+            },
+        ),
+        (
+            "Outcome",
+            {
+                "fields": ("status", "target_firefly_id", "error_message"),
+            },
+        ),
+        (
+            "Timestamps",
+            {
+                "fields": ("imported_at",),
+            },
+        ),
+    )
+
+    def status_colored(self, obj):
+        """Color-code the import status."""
+        colors = {
+            "created": "#28a745",
+            "skipped": "#ffc107",
+            "error": "#dc3545",
+        }
+        color = colors.get(obj.status, "#6c757d")
+        text_color = "white" if obj.status != "skipped" else "black"
+        return format_html(
+            '<span style="background-color: {}; color: {}; padding: 2px 8px; '
+            'border-radius: 3px; font-weight: bold;">{}</span>',
+            color,
+            text_color,
+            obj.get_status_display(),
+        )
+
+    status_colored.short_description = "Status"
