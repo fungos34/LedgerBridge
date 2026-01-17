@@ -385,7 +385,7 @@
         </div>
         
         <div class="pipeline-node sparklink">
-            <a href="{% url 'unified_review_list' %}" title="Go to Review & Import">
+            <a href="{% url 'unified_review_list' %}" title="Go to Review & Match & Import">
                 <span class="node-icon">⚡</span>
                 <span class="node-name">SparkLink</span>
                 <span class="node-desc">Data Parsing & Review</span>
@@ -452,7 +452,7 @@
     <!-- Unified Review & Link (Consolidated entry point) -->
     <a href="{% url 'unified_review_list' %}" class="service-card primary">
         <div class="service-icon">📋</div>
-        <div class="service-title">Review & Import</div>
+        <div class="service-title">Review & Match & Import</div>
         <div class="service-desc">Review extracted transactions, link documents to bank transactions, and import to Firefly III</div>
         {% if pending_count > 0 or ready_to_import > 0 %}
         <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">

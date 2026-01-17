@@ -6,34 +6,38 @@
 ## APPLICATION IDENTITY
 Name: SparkLink
 Purpose: Bridge between Paperless-ngx (documents) and Firefly III (finance)
-Workflow: Documents → Data Extraction → Review → Transaction Import
+Role: Parse OCR text from Paperless, let users review, create transactions in Firefly
 
-## CORE CONCEPT
-- Paperless-ngx: Stores documents, runs OCR to extract text
-- SparkLink: Parses OCR text, reads structured invoices (ZUGFeRD, UBL, XRechnung), extracts financial data, provides review interface
-- Firefly III: Personal finance manager where transactions are created
+## EXACT WORKFLOW (IMPORTANT!)
+1. User uploads receipts/invoices to Paperless-ngx, tags them (e.g., "finance/inbox")
+2. Paperless-ngx runs OCR to extract text from the documents
+3. In SparkLink: User goes to "📝 Review & Match & Import" page
+4. User clicks "📄 Sync Paperless" button to fetch tagged documents
+5. SparkLink parses the OCR text and extracts: amount, date, vendor
+6. User reviews each document, edits if needed, selects category
+7. User clicks "Confirm" to approve the extraction
+8. SparkLink creates the transaction in Firefly III with link to original document
 
-## MAIN NAVIGATION
+## MAIN NAVIGATION (TOP BAR)
 - 🏠 Home: Dashboard with stats and quick links
-- 📝 Review & Import: Main workflow (at /unified-review/)
-- 📊 Processing History: Archive, Documents, AI Queue, Audit Trail (at /processing-history/)
+- 📝 Review & Match & Import: THE MAIN WORKFLOW PAGE - process documents here
+- 📊 Processing History: View archive, documents, AI queue, audit trail
 
-## DROPDOWN MENU ITEMS
+## DROPDOWN MENU ITEMS (Click username top-right)
 Account Section:
-- ⚙️ Settings: Configure Paperless/Firefly API tokens, Ollama, preferences
-- 🔑 Change Password: Update user password
+- ⚙️ Settings: Configure Paperless/Firefly API tokens
 
 Tools Section:
-- 🔗 Bank Reconciliation: Match documents to existing bank transactions
-- 🔄 Firefly Sync Assistant: Share Firefly entities (categories, tags) between users
+- � Review & Match & Import: Same as main nav (duplicate for convenience)
+- 🔄 Firefly Sync Assistant: Share Firefly entities between users
 
-External Services:
-- 📄 Paperless-ngx: Link to document management system
-- 💰 Firefly III: Link to finance manager
-- 📡 Syncthing: File synchronization
-- 📥 Firefly Data Importer: Import bank statements/CSV
+External Services (links to other apps):
+- 📄 Paperless-ngx
+- 💰 Firefly III
+- 📡 Syncthing
+- 📥 Firefly Data Importer
 
-## REVIEW & IMPORT PAGE (/unified-review/)
+## REVIEW & MATCH & IMPORT PAGE (/unified-review/)
 Purpose: Main workflow for processing documents
 
 Quick Actions Card:
@@ -73,8 +77,9 @@ Archive Actions:
 - Reset: Send back to review queue
 - View: See details
 
-## BANK RECONCILIATION PAGE (/reconciliation/)
-Purpose: Link documents to existing bank transactions
+## RECONCILIATION FEATURES
+
+NOTE: All matching and reconciliation features are integrated into the Review & Match & Import page. There is no separate reconciliation page.
 
 Dashboard shows:
 - Paperless Pending: Documents waiting for matches
@@ -108,25 +113,25 @@ AI Jobs:
 - Run in background
 - Can be cancelled, retried, or viewed in AI Queue tab
 
-## COMMON USER QUESTIONS
+## COMMON USER QUESTIONS (USE THESE EXACT ANSWERS)
 
-Q: How do I start processing documents?
-A: 1) Upload to Paperless with finance tag, 2) Go to Review & Import, 3) Click Sync Paperless, 4) Review each document, 5) Click Accept
+Q: How do I transfer bills from Paperless to Firefly? / How do I start processing documents?
+A: Go to "📝 Review & Match & Import" in the top navigation. Click the "📄 Sync Paperless" button in the Quick Actions card. This fetches your tagged documents. Then review each one and click "Confirm" to approve. Approved documents are automatically imported to Firefly III as transactions.
 
 Q: Document not appearing?
-A: Check the tag in Paperless matches your filter tag in Settings. Click Sync Paperless to refresh.
+A: Make sure the document is tagged correctly in Paperless-ngx (default: "finance/inbox"). Then in SparkLink, click "📄 Sync Paperless" to refresh.
 
-Q: What's the difference between Accept and Link?
-A: Accept creates a NEW transaction. Link connects to an EXISTING transaction (from bank import).
+Q: What's the difference between Accept/Confirm and Link?
+A: "Confirm" creates a NEW transaction in Firefly III. "Link" connects a document to an EXISTING transaction that was already imported (e.g., from your bank).
 
 Q: How do I match receipts to bank transactions?
-A: Go to Bank Reconciliation, sync both sources, run Auto-Match, review proposals.
+A: On the "📝 Review & Match & Import" page, click "🏦 Sync Firefly" to fetch bank transactions, then click "🔗 Run Auto-Match" to automatically find matches. Review the proposed matches and accept or reject them.
 
 Q: Low confidence score?
-A: Document quality issue or unusual format. Review the extracted data carefully.
+A: This usually means poor document quality or unusual format. Review the extracted data carefully and correct any errors before confirming.
 
-Q: AI suggestions not appearing?
-A: Check Ollama is running and enabled in Settings. Wait for the 🤖 badge to appear.
+Q: Where is the extraction/import feature?
+A: There is no separate "Extraction" page. Everything happens on the "📝 Review & Match & Import" page. Click "📄 Sync Paperless" to fetch and extract documents.
 
 ## KEYBOARD SHORTCUTS
 - Enter: Submit form
