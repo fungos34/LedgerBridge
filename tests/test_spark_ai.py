@@ -1150,3 +1150,289 @@ class TestSuggestForReview:
 
         assert "overall_confidence" in data
         assert "analysis_notes" in data
+
+    @patch.object(SparkAIService, "_call_ollama")
+    def test_suggest_for_review_invalid_currency_rejected(
+        self,
+        mock_call: MagicMock,
+        store: StateStore,
+        mock_config_enabled: MagicMock,
+        categories: list[str],
+    ) -> None:
+        """Test suggest_for_review rejects invalid currency suggestions."""
+        mock_call.return_value = {
+            "content": json.dumps(
+                {
+                    "suggestions": {
+                        "category": {"value": "Groceries", "confidence": 0.95, "reason": "Test"},
+                        "currency": {
+                            "value": "XXX",  # Invalid currency
+                            "confidence": 0.80,
+                            "reason": "Invalid currency",
+                        },
+                    },
+                    "overall_confidence": 0.90,
+                    "analysis_notes": "Test",
+                }
+            ),
+            "model": "qwen2.5:14b",
+        }
+
+        service = SparkAIService(store, mock_config_enabled, categories)
+        result = service.suggest_for_review(
+            amount="10.00",
+            date="2025-01-15",
+            use_cache=False,
+            currencies=["EUR", "USD", "GBP"],  # XXX not in list
+        )
+
+        assert result is not None
+        # Invalid currency should be rejected
+        assert "currency" not in result.suggestions
+        # Valid category should still be present
+        assert "category" in result.suggestions
+
+    @patch.object(SparkAIService, "_call_ollama")
+    def test_suggest_for_review_valid_currency_accepted(
+        self,
+        mock_call: MagicMock,
+        store: StateStore,
+        mock_config_enabled: MagicMock,
+        categories: list[str],
+    ) -> None:
+        """Test suggest_for_review accepts valid currency suggestions."""
+        mock_call.return_value = {
+            "content": json.dumps(
+                {
+                    "suggestions": {
+                        "category": {"value": "Groceries", "confidence": 0.95, "reason": "Test"},
+                        "currency": {
+                            "value": "EUR",
+                            "confidence": 0.90,
+                            "reason": "Standard currency",
+                        },
+                    },
+                    "overall_confidence": 0.90,
+                    "analysis_notes": "Test",
+                }
+            ),
+            "model": "qwen2.5:14b",
+        }
+
+        service = SparkAIService(store, mock_config_enabled, categories)
+        result = service.suggest_for_review(
+            amount="10.00",
+            date="2025-01-15",
+            use_cache=False,
+            currencies=["EUR", "USD", "GBP"],
+        )
+
+        assert result is not None
+        assert "currency" in result.suggestions
+        assert result.suggestions["currency"].value == "EUR"
+
+    @patch.object(SparkAIService, "_call_ollama")
+    def test_suggest_for_review_invalid_source_account_rejected(
+        self,
+        mock_call: MagicMock,
+        store: StateStore,
+        mock_config_enabled: MagicMock,
+        categories: list[str],
+    ) -> None:
+        """Test suggest_for_review rejects invalid source_account suggestions."""
+        mock_call.return_value = {
+            "content": json.dumps(
+                {
+                    "suggestions": {
+                        "category": {"value": "Groceries", "confidence": 0.95, "reason": "Test"},
+                        "source_account": {
+                            "value": "NonExistentAccount",
+                            "confidence": 0.80,
+                            "reason": "Invalid",
+                        },
+                    },
+                    "overall_confidence": 0.90,
+                    "analysis_notes": "Test",
+                }
+            ),
+            "model": "qwen2.5:14b",
+        }
+
+        service = SparkAIService(store, mock_config_enabled, categories)
+        result = service.suggest_for_review(
+            amount="10.00",
+            date="2025-01-15",
+            use_cache=False,
+            source_accounts_detailed=[
+                {"name": "Checking", "iban": "DE89370400440532013000"},
+                {"name": "Savings", "iban": "DE89370400440532013001"},
+            ],
+        )
+
+        assert result is not None
+        # Invalid source_account should be rejected
+        assert "source_account" not in result.suggestions
+
+    @patch.object(SparkAIService, "_call_ollama")
+    def test_suggest_for_review_valid_source_account_accepted(
+        self,
+        mock_call: MagicMock,
+        store: StateStore,
+        mock_config_enabled: MagicMock,
+        categories: list[str],
+    ) -> None:
+        """Test suggest_for_review accepts valid source_account from detailed list."""
+        mock_call.return_value = {
+            "content": json.dumps(
+                {
+                    "suggestions": {
+                        "source_account": {
+                            "value": "Checking",
+                            "confidence": 0.90,
+                            "reason": "Matched by IBAN",
+                        },
+                    },
+                    "overall_confidence": 0.90,
+                    "analysis_notes": "Test",
+                }
+            ),
+            "model": "qwen2.5:14b",
+        }
+
+        service = SparkAIService(store, mock_config_enabled, categories)
+        result = service.suggest_for_review(
+            amount="10.00",
+            date="2025-01-15",
+            use_cache=False,
+            source_accounts_detailed=[
+                {"name": "Checking", "iban": "DE89370400440532013000"},
+                {"name": "Savings", "iban": "DE89370400440532013001"},
+            ],
+        )
+
+        assert result is not None
+        assert "source_account" in result.suggestions
+        assert result.suggestions["source_account"].value == "Checking"
+
+    @patch.object(SparkAIService, "_call_ollama")
+    def test_suggest_for_review_invalid_existing_transaction_rejected(
+        self,
+        mock_call: MagicMock,
+        store: StateStore,
+        mock_config_enabled: MagicMock,
+        categories: list[str],
+    ) -> None:
+        """Test suggest_for_review rejects invalid existing_transaction suggestions."""
+        mock_call.return_value = {
+            "content": json.dumps(
+                {
+                    "suggestions": {
+                        "category": {"value": "Groceries", "confidence": 0.95, "reason": "Test"},
+                        "existing_transaction": {
+                            "value": "999999",  # Invalid ID
+                            "confidence": 0.80,
+                            "reason": "Invalid",
+                        },
+                    },
+                    "overall_confidence": 0.90,
+                    "analysis_notes": "Test",
+                }
+            ),
+            "model": "qwen2.5:14b",
+        }
+
+        service = SparkAIService(store, mock_config_enabled, categories)
+        result = service.suggest_for_review(
+            amount="10.00",
+            date="2025-01-15",
+            use_cache=False,
+            existing_transactions=[
+                {"id": "123", "amount": "10.00", "date": "2025-01-15"},
+                {"id": "456", "amount": "20.00", "date": "2025-01-16"},
+            ],
+        )
+
+        assert result is not None
+        # Invalid existing_transaction should be rejected
+        assert "existing_transaction" not in result.suggestions
+
+    @patch.object(SparkAIService, "_call_ollama")
+    def test_suggest_for_review_valid_existing_transaction_accepted(
+        self,
+        mock_call: MagicMock,
+        store: StateStore,
+        mock_config_enabled: MagicMock,
+        categories: list[str],
+    ) -> None:
+        """Test suggest_for_review accepts valid existing_transaction from candidates."""
+        mock_call.return_value = {
+            "content": json.dumps(
+                {
+                    "suggestions": {
+                        "existing_transaction": {
+                            "value": "123",
+                            "confidence": 0.90,
+                            "reason": "High match score",
+                        },
+                    },
+                    "overall_confidence": 0.90,
+                    "analysis_notes": "Test",
+                }
+            ),
+            "model": "qwen2.5:14b",
+        }
+
+        service = SparkAIService(store, mock_config_enabled, categories)
+        result = service.suggest_for_review(
+            amount="10.00",
+            date="2025-01-15",
+            use_cache=False,
+            existing_transactions=[
+                {"id": "123", "amount": "10.00", "date": "2025-01-15"},
+                {"id": "456", "amount": "20.00", "date": "2025-01-16"},
+            ],
+        )
+
+        assert result is not None
+        assert "existing_transaction" in result.suggestions
+        assert result.suggestions["existing_transaction"].value == "123"
+
+    @patch.object(SparkAIService, "_call_ollama")
+    def test_suggest_for_review_create_new_always_valid(
+        self,
+        mock_call: MagicMock,
+        store: StateStore,
+        mock_config_enabled: MagicMock,
+        categories: list[str],
+    ) -> None:
+        """Test suggest_for_review accepts 'create_new' for existing_transaction."""
+        mock_call.return_value = {
+            "content": json.dumps(
+                {
+                    "suggestions": {
+                        "existing_transaction": {
+                            "value": "create_new",
+                            "confidence": 0.95,
+                            "reason": "No matching transaction found",
+                        },
+                    },
+                    "overall_confidence": 0.90,
+                    "analysis_notes": "Test",
+                }
+            ),
+            "model": "qwen2.5:14b",
+        }
+
+        service = SparkAIService(store, mock_config_enabled, categories)
+        result = service.suggest_for_review(
+            amount="10.00",
+            date="2025-01-15",
+            use_cache=False,
+            existing_transactions=[
+                {"id": "123", "amount": "50.00", "date": "2025-01-10"},
+            ],
+        )
+
+        assert result is not None
+        assert "existing_transaction" in result.suggestions
+        assert result.suggestions["existing_transaction"].value == "create_new"

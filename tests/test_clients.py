@@ -534,6 +534,104 @@ class TestFireflyClient:
         assert len(accounts) >= 2
 
     @responses.activate
+    def test_list_accounts_with_identifiers(self):
+        """Test listing accounts with IBAN/account_number/BIC."""
+        responses.add(
+            responses.GET,
+            f"{self.BASE_URL}/api/v1/accounts",
+            json={
+                "data": [
+                    {
+                        "id": "1",
+                        "attributes": {
+                            "name": "Checking Account",
+                            "type": "asset",
+                            "iban": "DE89370400440532013000",
+                            "account_number": "12345678",
+                            "bic": "COBADEFFXXX",
+                        },
+                    },
+                    {
+                        "id": "2",
+                        "attributes": {
+                            "name": "Savings",
+                            "type": "asset",
+                            "iban": None,
+                            "account_number": None,
+                            "bic": None,
+                        },
+                    },
+                ],
+                "meta": {"pagination": {"total": 2}},
+            },
+            status=200,
+        )
+
+        client = FireflyClient(self.BASE_URL, self.TOKEN)
+        accounts = list(client.list_accounts(include_identifiers=True))
+
+        assert len(accounts) >= 2
+        # Check that identifiers are included for first account
+        checking = next(a for a in accounts if a.get("name") == "Checking Account")
+        assert checking.get("iban") == "DE89370400440532013000"
+        assert checking.get("account_number") == "12345678"
+        assert checking.get("bic") == "COBADEFFXXX"
+
+    @responses.activate
+    def test_list_currencies(self):
+        """Test listing enabled currencies."""
+        responses.add(
+            responses.GET,
+            f"{self.BASE_URL}/api/v1/currencies",
+            json={
+                "data": [
+                    {
+                        "id": "1",
+                        "attributes": {
+                            "code": "EUR",
+                            "name": "Euro",
+                            "symbol": "€",
+                            "decimal_places": 2,
+                            "enabled": True,
+                        },
+                    },
+                    {
+                        "id": "2",
+                        "attributes": {
+                            "code": "USD",
+                            "name": "US Dollar",
+                            "symbol": "$",
+                            "decimal_places": 2,
+                            "enabled": True,
+                        },
+                    },
+                    {
+                        "id": "3",
+                        "attributes": {
+                            "code": "GBP",
+                            "name": "British Pound",
+                            "symbol": "£",
+                            "decimal_places": 2,
+                            "enabled": False,  # Disabled
+                        },
+                    },
+                ],
+                "meta": {"pagination": {"total": 3}},
+            },
+            status=200,
+        )
+
+        client = FireflyClient(self.BASE_URL, self.TOKEN)
+        currencies = list(client.list_currencies(enabled_only=True))
+
+        # Should only return enabled currencies
+        assert len(currencies) == 2
+        codes = [c.get("code") for c in currencies]
+        assert "EUR" in codes
+        assert "USD" in codes
+        assert "GBP" not in codes  # Disabled
+
+    @responses.activate
     def test_auth_bearer_header_sent(self):
         """Test that Bearer token is included in requests."""
         responses.add(

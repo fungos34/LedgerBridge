@@ -490,16 +490,23 @@ class FireflyClient:
 
         return None
 
-    def list_accounts(self, account_type: str = "asset", max_pages: int = 10) -> list[dict]:
+    def list_accounts(
+        self,
+        account_type: str = "asset",
+        max_pages: int = 10,
+        include_identifiers: bool = False,
+    ) -> list[dict]:
         """
         List accounts of a specific type.
 
         Args:
             account_type: asset, expense, revenue, liability, cash
             max_pages: Maximum number of pages to fetch (prevents hanging on large datasets)
+            include_identifiers: If True, include IBAN, account_number, bic fields
 
         Returns:
-            List of account dictionaries with id, name, type, and currency_code
+            List of account dictionaries with id, name, type, currency_code,
+            and optionally iban, account_number, bic if include_identifiers=True
         """
         accounts = []
         page = 1
@@ -514,14 +521,18 @@ class FireflyClient:
             data = response.json()
             for account in data.get("data", []):
                 attrs = account.get("attributes", {})
-                accounts.append(
-                    {
-                        "id": account.get("id"),
-                        "name": attrs.get("name"),
-                        "type": attrs.get("type"),
-                        "currency_code": attrs.get("currency_code"),
-                    }
-                )
+                account_dict = {
+                    "id": account.get("id"),
+                    "name": attrs.get("name"),
+                    "type": attrs.get("type"),
+                    "currency_code": attrs.get("currency_code"),
+                }
+                # Include bank identifiers for AI source account matching
+                if include_identifiers:
+                    account_dict["iban"] = attrs.get("iban")
+                    account_dict["account_number"] = attrs.get("account_number")
+                    account_dict["bic"] = attrs.get("bic")
+                accounts.append(account_dict)
 
             # Check for more pages
             meta = data.get("meta", {}).get("pagination", {})
@@ -602,6 +613,55 @@ class FireflyClient:
 
         data = response.json()
         return int(data.get("data", {}).get("id", 0))
+
+    def list_currencies(self, enabled_only: bool = True) -> list[dict]:
+        """
+        List available currencies from Firefly III.
+
+        Args:
+            enabled_only: If True, only return enabled currencies
+
+        Returns:
+            List of currency dictionaries with code, name, symbol, decimal_places, enabled, default
+        """
+        currencies = []
+        page = 1
+
+        while True:
+            response = self._request(
+                "GET",
+                "/api/v1/currencies",
+                params={"page": page},
+            )
+
+            data = response.json()
+            for currency in data.get("data", []):
+                attrs = currency.get("attributes", {})
+                is_enabled = attrs.get("enabled", True)
+                # Skip disabled currencies if enabled_only is True
+                if enabled_only and not is_enabled:
+                    continue
+                currencies.append(
+                    {
+                        "id": currency.get("id"),
+                        "code": attrs.get("code"),
+                        "name": attrs.get("name"),
+                        "symbol": attrs.get("symbol"),
+                        "decimal_places": attrs.get("decimal_places", 2),
+                        "enabled": is_enabled,
+                        "default": attrs.get("default", False),
+                    }
+                )
+
+            # Check for more pages
+            meta = data.get("meta", {}).get("pagination", {})
+            total_pages = meta.get("total_pages", 1)
+
+            if page >= total_pages:
+                break
+            page += 1
+
+        return currencies
 
     def list_transactions(
         self,
@@ -1602,41 +1662,8 @@ class FireflyClient:
     # Currency Methods (Sync Assistant - Everything)
     # =========================================================================
 
-    def list_currencies(self) -> list[dict]:
-        """
-        List all currencies from Firefly.
-
-        Returns:
-            List of currency dictionaries
-        """
-        currencies = []
-        page = 1
-
-        while True:
-            response = self._request("GET", "/api/v1/currencies", params={"page": page})
-            data = response.json()
-
-            for item in data.get("data", []):
-                attrs = item.get("attributes", {})
-                currencies.append(
-                    {
-                        "id": int(item.get("id", 0)),
-                        "code": attrs.get("code", ""),
-                        "name": attrs.get("name", ""),
-                        "symbol": attrs.get("symbol", ""),
-                        "decimal_places": attrs.get("decimal_places", 2),
-                        "enabled": attrs.get("enabled", False),
-                        "default": attrs.get("default", False),
-                    }
-                )
-
-            # Check for more pages
-            meta = data.get("meta", {}).get("pagination", {})
-            if page >= meta.get("total_pages", 1):
-                break
-            page += 1
-
-        return currencies
+    # Note: list_currencies is defined earlier in the file with enabled_only parameter.
+    # This section previously had a duplicate which has been removed.
 
     def enable_currency(self, code: str) -> bool:
         """

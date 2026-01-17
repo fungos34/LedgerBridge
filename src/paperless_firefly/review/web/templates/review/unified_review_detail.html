@@ -862,7 +862,12 @@
                     <div class="form-section">
                         <div class="form-row">
                             <div class="form-group">
-                                <label class="form-label" for="amount">Amount <span class="required-star">*</span></label>
+                                <label class="form-label" for="amount">
+                                    Amount <span class="required-star">*</span>
+                                    {% if ai_suggestions.amount.value %}
+                                    <span class="badge-ai" title="AI suggestion available">🤖</span>
+                                    {% endif %}
+                                </label>
                                 <input type="number" 
                                        id="amount" 
                                        name="amount" 
@@ -874,9 +879,32 @@
                                 {% if confidence.amount %}
                                 <div class="form-help">Confidence: {{ confidence.amount|floatformat:0 }}%</div>
                                 {% endif %}
+                                <!-- AI Suggestion for Amount -->
+                                {% if ai_suggestions.amount.value %}
+                                <div class="ai-suggestion-inline" id="ai-suggestion-amount">
+                                    <span class="ai-icon">🤖</span>
+                                    <span class="ai-value">{{ ai_suggestions.amount.value }}</span>
+                                    {% if ai_suggestions.amount.confidence %}
+                                    <span class="ai-confidence">{{ ai_suggestions.amount.confidence|floatformat:0 }}%</span>
+                                    {% endif %}
+                                    <button type="button" class="btn-accept-ai" onclick="acceptAiField('amount', '{{ ai_suggestions.amount.value|escapejs }}')">
+                                        ✓ Accept
+                                    </button>
+                                </div>
+                                {% if ai_suggestions.amount.reason %}
+                                <div class="form-help" style="font-style: italic; color: #166534;">
+                                    "{{ ai_suggestions.amount.reason }}"
+                                </div>
+                                {% endif %}
+                                {% endif %}
                             </div>
                             <div class="form-group">
-                                <label class="form-label" for="currency">Currency <span class="required-star">*</span></label>
+                                <label class="form-label" for="currency">
+                                    Currency <span class="required-star">*</span>
+                                    {% if ai_suggestions.currency.value %}
+                                    <span class="badge-ai" title="AI suggestion available">🤖</span>
+                                    {% endif %}
+                                </label>
                                 <input type="text" 
                                        id="currency" 
                                        name="currency" 
@@ -888,6 +916,24 @@
                                        required>
                                 {% if confidence.currency %}
                                 <div class="form-help">Confidence: {{ confidence.currency|floatformat:0 }}%</div>
+                                {% endif %}
+                                <!-- AI Suggestion for Currency -->
+                                {% if ai_suggestions.currency.value %}
+                                <div class="ai-suggestion-inline" id="ai-suggestion-currency">
+                                    <span class="ai-icon">🤖</span>
+                                    <span class="ai-value">{{ ai_suggestions.currency.value }}</span>
+                                    {% if ai_suggestions.currency.confidence %}
+                                    <span class="ai-confidence">{{ ai_suggestions.currency.confidence|floatformat:0 }}%</span>
+                                    {% endif %}
+                                    <button type="button" class="btn-accept-ai" onclick="acceptAiField('currency', '{{ ai_suggestions.currency.value|escapejs }}')">
+                                        ✓ Accept
+                                    </button>
+                                </div>
+                                {% if ai_suggestions.currency.reason %}
+                                <div class="form-help" style="font-style: italic; color: #166534;">
+                                    "{{ ai_suggestions.currency.reason }}"
+                                </div>
+                                {% endif %}
                                 {% endif %}
                             </div>
                         </div>
@@ -975,7 +1021,12 @@
                     <div class="form-section">
                         <div class="form-row">
                             <div class="form-group">
-                                <label class="form-label" for="source_account">Source Account <span class="required-star">*</span></label>
+                                <label class="form-label" for="source_account">
+                                    Source Account <span class="required-star">*</span>
+                                    {% if ai_suggestions.source_account.value %}
+                                    <span class="badge-ai" title="AI suggestion available">🤖</span>
+                                    {% endif %}
+                                </label>
                                 {% if record_type == 'paperless' %}
                                 <select id="source_account" name="source_account" class="form-input" required>
                                     <option value="">-- Select Source Account --</option>
@@ -989,6 +1040,24 @@
                                 <div class="form-help" style="color: #dc2626;">⚠️ Could not load Firefly accounts. Check your API settings.</div>
                                 {% else %}
                                 <div class="form-help">The bank account to debit (required for transactions)</div>
+                                {% endif %}
+                                <!-- AI Suggestion for Source Account -->
+                                {% if ai_suggestions.source_account.value %}
+                                <div class="ai-suggestion-inline" id="ai-suggestion-source_account">
+                                    <span class="ai-icon">🤖</span>
+                                    <span class="ai-value">{{ ai_suggestions.source_account.value }}</span>
+                                    {% if ai_suggestions.source_account.confidence %}
+                                    <span class="ai-confidence">{{ ai_suggestions.source_account.confidence|floatformat:0 }}%</span>
+                                    {% endif %}
+                                    <button type="button" class="btn-accept-ai" onclick="acceptAiField('source_account', '{{ ai_suggestions.source_account.value|escapejs }}')">
+                                        ✓ Accept
+                                    </button>
+                                </div>
+                                {% if ai_suggestions.source_account.reason %}
+                                <div class="form-help" style="font-style: italic; color: #166534;">
+                                    "{{ ai_suggestions.source_account.reason }}"
+                                </div>
+                                {% endif %}
                                 {% endif %}
                                 {% else %}
                                 <input type="text" class="form-input" value="{{ record.source_account }}" readonly>
@@ -1033,7 +1102,7 @@
                         <div class="form-group">
                             <label class="form-label" for="category">
                                 Category
-                                {% if ai_suggestions.category.value or llm_suggestion %}
+                                {% if ai_suggestions.category.value %}
                                 <span class="badge-ai" title="AI suggestion available">🤖 AI</span>
                                 {% endif %}
                             </label>
@@ -1046,7 +1115,7 @@
                                 </option>
                                 {% endfor %}
                             </select>
-                            <!-- AI Suggestion for Category (from Queue) -->
+                            <!-- AI Suggestion for Category -->
                             {% if ai_suggestions.category.value %}
                             <div class="ai-suggestion-inline" id="ai-suggestion-category">
                                 <span class="ai-icon">🤖</span>
@@ -1063,15 +1132,6 @@
                                 "{{ ai_suggestions.category.reason }}"
                             </div>
                             {% endif %}
-                            {% elif llm_suggestion %}
-                            <!-- Fallback to old llm_suggestion if no queue suggestion -->
-                            <div class="ai-suggestion-inline" id="ai-suggestion-category">
-                                <span class="ai-icon">🤖</span>
-                                <span class="ai-value">{{ llm_suggestion.category }}</span>
-                                <button type="button" class="btn-accept-ai" onclick="acceptAiField('category', '{{ llm_suggestion.category|escapejs }}')">
-                                    ✓ Accept
-                                </button>
-                            </div>
                             {% elif ai_suggestions and not ai_suggestions.category.value %}
                             <!-- No AI suggestion for category -->
                             <div class="ai-no-suggestion" id="ai-suggestion-category">
@@ -1090,15 +1150,43 @@
                     <div class="form-section">
                         <div class="form-row">
                             <div class="form-group">
-                                <label class="form-label" for="transaction_type">Transaction Type <span class="required-star">*</span></label>
+                                <label class="form-label" for="transaction_type">
+                                    Transaction Type <span class="required-star">*</span>
+                                    {% if ai_suggestions.transaction_type.value %}
+                                    <span class="badge-ai" title="AI suggestion available">🤖</span>
+                                    {% endif %}
+                                </label>
                                 <select id="transaction_type" name="transaction_type" class="form-input" required>
                                     <option value="withdrawal" {% if record.transaction_type == 'withdrawal' or record.transaction_type == 'WITHDRAWAL' %}selected{% endif %}>Withdrawal (Expense)</option>
                                     <option value="deposit" {% if record.transaction_type == 'deposit' or record.transaction_type == 'DEPOSIT' %}selected{% endif %}>Deposit (Income)</option>
                                     <option value="transfer" {% if record.transaction_type == 'transfer' or record.transaction_type == 'TRANSFER' %}selected{% endif %}>Transfer</option>
                                 </select>
+                                <!-- AI Suggestion for Transaction Type -->
+                                {% if ai_suggestions.transaction_type.value %}
+                                <div class="ai-suggestion-inline" id="ai-suggestion-transaction_type">
+                                    <span class="ai-icon">🤖</span>
+                                    <span class="ai-value">{{ ai_suggestions.transaction_type.value }}</span>
+                                    {% if ai_suggestions.transaction_type.confidence %}
+                                    <span class="ai-confidence">{{ ai_suggestions.transaction_type.confidence|floatformat:0 }}%</span>
+                                    {% endif %}
+                                    <button type="button" class="btn-accept-ai" onclick="acceptAiField('transaction_type', '{{ ai_suggestions.transaction_type.value|escapejs }}')">
+                                        ✓ Accept
+                                    </button>
+                                </div>
+                                {% if ai_suggestions.transaction_type.reason %}
+                                <div class="form-help" style="font-style: italic; color: #166534;">
+                                    "{{ ai_suggestions.transaction_type.reason }}"
+                                </div>
+                                {% endif %}
+                                {% endif %}
                             </div>
                             <div class="form-group">
-                                <label class="form-label" for="invoice_number">Invoice / Receipt Number</label>
+                                <label class="form-label" for="invoice_number">
+                                    Invoice / Receipt Number
+                                    {% if ai_suggestions.invoice_number.value %}
+                                    <span class="badge-ai" title="AI suggestion available">🤖</span>
+                                    {% endif %}
+                                </label>
                                 <input type="text" 
                                        id="invoice_number" 
                                        name="invoice_number" 
@@ -1108,9 +1196,96 @@
                                 {% if confidence.invoice_number %}
                                 <div class="form-help">Confidence: {{ confidence.invoice_number|floatformat:0 }}%</div>
                                 {% endif %}
+                                <!-- AI Suggestion for Invoice Number -->
+                                {% if ai_suggestions.invoice_number.value %}
+                                <div class="ai-suggestion-inline" id="ai-suggestion-invoice_number">
+                                    <span class="ai-icon">🤖</span>
+                                    <span class="ai-value">{{ ai_suggestions.invoice_number.value }}</span>
+                                    {% if ai_suggestions.invoice_number.confidence %}
+                                    <span class="ai-confidence">{{ ai_suggestions.invoice_number.confidence|floatformat:0 }}%</span>
+                                    {% endif %}
+                                    <button type="button" class="btn-accept-ai" onclick="acceptAiField('invoice_number', '{{ ai_suggestions.invoice_number.value|escapejs }}')">
+                                        ✓ Accept
+                                    </button>
+                                </div>
+                                {% if ai_suggestions.invoice_number.reason %}
+                                <div class="form-help" style="font-style: italic; color: #166534;">
+                                    "{{ ai_suggestions.invoice_number.reason }}"
+                                </div>
+                                {% endif %}
+                                {% endif %}
                             </div>
                         </div>
                     </div>
+                    
+                    <!-- Existing Transaction Detection -->
+                    {% if existing_transaction_candidates %}
+                    <div class="form-section">
+                        <div class="form-section-title">
+                            Transaction Action
+                            {% if ai_suggestions.existing_transaction.value %}
+                            <span class="badge-ai" title="AI recommendation available">🤖</span>
+                            {% endif %}
+                        </div>
+                        <div class="existing-transaction-options">
+                            <div style="margin-bottom: 1rem;">
+                                <label class="radio-option" style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem; border: 1px solid var(--gray-200); border-radius: 0.375rem; cursor: pointer;">
+                                    <input type="radio" name="transaction_action" value="create_new" checked id="action-create-new">
+                                    <div>
+                                        <span style="font-weight: 500;">Create New Transaction</span>
+                                        <span style="font-size: 0.75rem; color: var(--gray-500); display: block;">
+                                            Create a new transaction in Firefly III
+                                        </span>
+                                    </div>
+                                </label>
+                            </div>
+                            
+                            <div style="margin-bottom: 0.5rem; color: var(--gray-500); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">
+                                Or link to existing transaction:
+                            </div>
+                            
+                            {% for candidate in existing_transaction_candidates %}
+                            <label class="radio-option" style="display: flex; align-items: flex-start; gap: 0.5rem; padding: 0.5rem; border: 1px solid var(--gray-200); border-radius: 0.375rem; cursor: pointer; margin-bottom: 0.5rem; {% if ai_suggestions.existing_transaction.value == candidate.id %}border-color: #059669; background: #f0fdf4;{% endif %}">
+                                <input type="radio" name="transaction_action" value="link_{{ candidate.id }}" id="action-link-{{ candidate.id }}" style="margin-top: 0.25rem;">
+                                <div style="flex: 1;">
+                                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                                        <span style="font-weight: 500;">{{ candidate.description|truncatechars:40 }}</span>
+                                        <span class="badge" style="background: var(--gray-100); color: var(--gray-600); font-size: 0.625rem;">
+                                            {{ candidate.score }}% match
+                                        </span>
+                                    </div>
+                                    <div style="font-size: 0.75rem; color: var(--gray-500);">
+                                        {{ candidate.date }} · {{ candidate.amount }}
+                                    </div>
+                                    {% if ai_suggestions.existing_transaction.value == candidate.id %}
+                                    <div style="font-size: 0.75rem; color: #059669; margin-top: 0.25rem;">
+                                        🤖 AI recommends this transaction
+                                    </div>
+                                    {% endif %}
+                                </div>
+                            </label>
+                            {% endfor %}
+                            
+                            {% if ai_suggestions.existing_transaction.value and ai_suggestions.existing_transaction.value != 'create_new' %}
+                            <div class="ai-suggestion-inline" style="margin-top: 0.5rem;">
+                                <span class="ai-icon">🤖</span>
+                                <span>AI suggests linking to transaction #{{ ai_suggestions.existing_transaction.value }}</span>
+                                {% if ai_suggestions.existing_transaction.confidence %}
+                                <span class="ai-confidence">{{ ai_suggestions.existing_transaction.confidence|floatformat:0 }}%</span>
+                                {% endif %}
+                                <button type="button" class="btn-accept-ai" onclick="document.getElementById('action-link-{{ ai_suggestions.existing_transaction.value }}').checked = true;">
+                                    ✓ Accept
+                                </button>
+                            </div>
+                            {% if ai_suggestions.existing_transaction.reason %}
+                            <div class="form-help" style="font-style: italic; color: #166534;">
+                                "{{ ai_suggestions.existing_transaction.reason }}"
+                            </div>
+                            {% endif %}
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endif %}
                     
                     <!-- Split Transaction / Line Items -->
                     <div class="form-section">
@@ -1933,7 +2108,10 @@ function updateSplitTotal() {
     const totalEl = document.getElementById('split-total');
     if (!totalEl) return;
     
-    if (diff < 0.01) {
+    // Tolerance of ±0.05 for rounding differences in split transactions
+    const SPLIT_TOLERANCE = 0.05;
+    
+    if (diff <= SPLIT_TOLERANCE) {
         totalEl.innerHTML = `Total: ${total.toFixed(2)} ✓`;
         totalEl.style.color = 'var(--success)';
     } else {

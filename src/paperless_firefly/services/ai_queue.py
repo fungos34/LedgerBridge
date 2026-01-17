@@ -149,6 +149,7 @@ class AIJobQueueService:
         job: dict[str, Any],
         ai_service: Any,  # SparkAIService
         paperless_client: Any,  # PaperlessClient
+        firefly_client: Any = None,  # FireflyClient
     ) -> bool:
         """
         Process a single AI job.
@@ -160,6 +161,7 @@ class AIJobQueueService:
             job: Job dict from queue
             ai_service: AI service for interpretation
             paperless_client: Paperless client for fetching document
+            firefly_client: Firefly client for fetching accounts/currencies
 
         Returns:
             True if successful, False otherwise
@@ -221,6 +223,63 @@ class AIJobQueueService:
                 extraction_data.get("suggested_category") if extraction_data else None
             )
 
+            # Fetch Firefly data for enhanced AI suggestions
+            source_accounts_detailed = None
+            currencies = None
+            existing_transactions = None
+            if firefly_client:
+                try:
+                    # Get accounts with identifiers for IBAN matching
+                    raw_accounts = firefly_client.list_accounts(
+                        account_type="asset", include_identifiers=True
+                    )
+                    source_accounts_detailed = [
+                        {
+                            "name": acc.get("name", ""),
+                            "iban": acc.get("iban"),
+                            "account_number": acc.get("account_number"),
+                            "bic": acc.get("bic"),
+                        }
+                        for acc in raw_accounts
+                    ]
+
+                    # Get enabled currencies
+                    raw_currencies = firefly_client.list_currencies(enabled_only=True)
+                    currencies = [c.get("code") for c in raw_currencies if c.get("code")]
+
+                    # Get existing transaction candidates from matching engine
+                    from ..matching.engine import MatchingEngine
+                    from ..config import load_config
+                    from pathlib import Path
+
+                    config_path = Path(self.config._config_path) if hasattr(self.config, "_config_path") else None
+                    if config_path and config_path.exists():
+                        match_config = load_config(config_path)
+                        engine = MatchingEngine(self.store, match_config)
+                        extraction_dict = {
+                            "amount": extraction_data.get("proposal", {}).get("amount") if extraction_data else None,
+                            "date": extraction_data.get("proposal", {}).get("date") if extraction_data else None,
+                            "vendor": extraction_data.get("proposal", {}).get("destination_account") if extraction_data else None,
+                            "description": extraction_data.get("proposal", {}).get("description") if extraction_data else None,
+                        }
+                        matches = engine.find_matches(
+                            document_id=document_id,
+                            extraction=extraction_dict,
+                            max_results=5,
+                        )
+                        existing_transactions = [
+                            {
+                                "id": str(m.firefly_id),
+                                "date": "",  # Would need cache lookup
+                                "amount": "",  # Would need cache lookup
+                                "description": "",  # Would need cache lookup
+                                "score": round(m.total_score * 100, 1),
+                            }
+                            for m in matches
+                        ]
+                except Exception as e:
+                    logger.warning(f"Could not fetch Firefly data for AI job #{job_id}: {e}")
+
             # Run AI interpretation with correct parameters
             suggestions = ai_service.suggest_for_review(
                 amount=amount,
@@ -231,6 +290,9 @@ class AIJobQueueService:
                 document_content=document_content,
                 document_id=document_id,
                 no_timeout=True,  # Background job, wait for LLM
+                source_accounts_detailed=source_accounts_detailed,
+                currencies=currencies,
+                existing_transactions=existing_transactions,
             )
 
             # Store results - convert to dict if needed

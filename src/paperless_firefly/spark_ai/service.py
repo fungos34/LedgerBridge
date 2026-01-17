@@ -997,6 +997,9 @@ class SparkAIService:
         cancel_check: callable = None,
         source_accounts: list[str] | None = None,
         current_source_account: str | None = None,
+        source_accounts_detailed: list[dict] | None = None,
+        currencies: list[str] | None = None,
+        existing_transactions: list[dict] | None = None,
     ) -> TransactionReviewSuggestion | None:
         """Suggest values for all editable transaction fields during review.
 
@@ -1022,8 +1025,11 @@ class SparkAIService:
                        LLM inference can take minutes or even hours.
             cancel_check: Optional callable that returns True if the job should be cancelled.
                          Allows cancellation of long-running LLM requests.
-            source_accounts: List of available source account names for suggestions.
+            source_accounts: List of available source account names for suggestions (simple).
             current_source_account: Currently selected source account.
+            source_accounts_detailed: List of account dicts with iban, account_number, bic.
+            currencies: List of valid currency codes from Firefly.
+            existing_transactions: List of candidate transactions for linking.
 
         Returns:
             TransactionReviewSuggestion with per-field suggestions, or None if LLM disabled/cancelled.
@@ -1102,6 +1108,9 @@ class SparkAIService:
             categories=self.categories,
             source_accounts=source_accounts,
             current_source_account=current_source_account,
+            source_accounts_detailed=source_accounts_detailed,
+            currencies=currencies,
+            existing_transactions=existing_transactions,
         )
 
         # Try fast model first
@@ -1136,6 +1145,26 @@ class SparkAIService:
 
             # Parse suggestions from response
             suggestions = {}
+            
+            # Build set of valid source account names from detailed list or simple list
+            valid_source_accounts = set()
+            if source_accounts_detailed:
+                for acc in source_accounts_detailed:
+                    if acc.get("name"):
+                        valid_source_accounts.add(acc["name"])
+            elif source_accounts:
+                valid_source_accounts = set(source_accounts)
+            
+            # Build set of valid currencies
+            valid_currencies = set(currencies) if currencies else set()
+            
+            # Build set of valid existing transaction IDs
+            valid_existing_tx_ids = set()
+            if existing_transactions:
+                for tx in existing_transactions:
+                    if tx.get("id"):
+                        valid_existing_tx_ids.add(str(tx["id"]))
+            
             for field, field_data in data.get("suggestions", {}).items():
                 if isinstance(field_data, dict) and "value" in field_data:
                     # Validate category suggestions
@@ -1156,6 +1185,34 @@ class SparkAIService:
                             field_data["value"],
                         )
                         continue
+                    # Validate currency suggestions
+                    if field == "currency" and valid_currencies:
+                        if field_data["value"] not in valid_currencies:
+                            logger.warning(
+                                "LLM suggested invalid currency '%s' (valid: %s), skipping",
+                                field_data["value"],
+                                ", ".join(sorted(valid_currencies)[:5]),
+                            )
+                            continue
+                    # Validate source_account suggestions
+                    if field == "source_account" and valid_source_accounts:
+                        if field_data["value"] not in valid_source_accounts:
+                            logger.warning(
+                                "LLM suggested invalid source_account '%s', skipping",
+                                field_data["value"],
+                            )
+                            continue
+                    # Validate existing_transaction suggestions
+                    if field == "existing_transaction" and field_data["value"]:
+                        tx_value = str(field_data["value"])
+                        # Allow "create_new" or a valid transaction ID
+                        if tx_value != "create_new" and valid_existing_tx_ids:
+                            if tx_value not in valid_existing_tx_ids:
+                                logger.warning(
+                                    "LLM suggested invalid existing_transaction ID '%s', skipping",
+                                    tx_value,
+                                )
+                                continue
 
                     suggestions[field] = FieldSuggestion(
                         value=str(field_data["value"]),

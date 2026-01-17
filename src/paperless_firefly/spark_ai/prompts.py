@@ -379,13 +379,15 @@ SPLIT TRANSACTION REQUIREMENTS:
 {
     "suggestions": {
         "amount": {"value": "123.45", "confidence": 0.95, "reason": "Total shown on receipt"},
+        "currency": {"value": "EUR", "confidence": 0.95, "reason": "Euro symbol visible on receipt"},
         "date": {"value": "2025-01-15", "confidence": 0.90, "reason": "Receipt date visible"},
         "category": {"value": "PrimaryCategory", "confidence": 0.85, "reason": "Most items belong here"},
         "transaction_type": {"value": "withdrawal", "confidence": 0.95, "reason": "This is a purchase"},
         "destination_account": {"value": "Vendor Name", "confidence": 0.90, "reason": "Extracted from receipt header"},
         "source_account": {"value": "Checking Account", "confidence": 0.80, "reason": "Bankomat payment detected"},
         "description": {"value": "Descriptive summary", "confidence": 0.80, "reason": "Based on items purchased"},
-        "invoice_number": {"value": "R-2025-001", "confidence": 0.85, "reason": "Receipt number found"}
+        "invoice_number": {"value": "R-2025-001", "confidence": 0.85, "reason": "Receipt number found"},
+        "existing_transaction": {"value": {"firefly_id": 12345, "action": "link"}, "confidence": 0.90, "reason": "Exact match found by amount and date"}
     },
     "split_transactions": [
         {"amount": 15.99, "description": "Food items (milk, bread, eggs)", "category": "Groceries"},
@@ -399,10 +401,12 @@ SPLIT TRANSACTION REQUIREMENTS:
 ## CRITICAL RULES:
 - Categories in suggestions and splits MUST be from the provided list ONLY
 - Source account MUST be from the AVAILABLE SOURCE ACCOUNTS list ONLY
+- Currency MUST be from the AVAILABLE CURRENCIES list ONLY
 - Split amounts MUST sum to total (tolerance: ±0.05)
 - ALWAYS include destination_account (vendor name)
 - ALWAYS include description
 - If document has line items → MUST suggest split_transactions
+- If an EXISTING TRANSACTION CANDIDATE matches closely → suggest linking via existing_transaction field
 - Confidence scores: 0.0-1.0
 - For amounts, use decimal point (not comma) and no currency symbol"""
 
@@ -443,8 +447,20 @@ AVAILABLE CATEGORIES (use ONLY these):
 
 ═══════════════════════════════════════════════════════════════
 AVAILABLE SOURCE ACCOUNTS (use ONLY these for source_account):
+Match payment method on receipt to account identifiers (IBAN/account number).
 ═══════════════════════════════════════════════════════════════
 {source_accounts}
+
+═══════════════════════════════════════════════════════════════
+AVAILABLE CURRENCIES (use ONLY these for currency):
+═══════════════════════════════════════════════════════════════
+{currencies}
+
+═══════════════════════════════════════════════════════════════
+EXISTING TRANSACTION CANDIDATES (potential matches in Firefly):
+If one matches closely, suggest linking instead of creating new.
+═══════════════════════════════════════════════════════════════
+{existing_transactions}
 
 ═══════════════════════════════════════════════════════════════
 AVAILABLE TRANSACTION TYPES (use ONLY these):
@@ -458,14 +474,16 @@ YOUR TASKS:
 ═══════════════════════════════════════════════════════════════
 1. EXTRACT the vendor/merchant name from the document
 2. EXTRACT the total amount if different from current
-3. EXTRACT the date if visible on document
-4. EXTRACT invoice/receipt number if present
-5. IDENTIFY payment method and suggest matching source_account
-6. IDENTIFY all line items with prices from the OCR text
-7. CATEGORIZE each line item into the appropriate category
-8. CREATE split_transactions if multiple items/categories exist
-9. WRITE a descriptive summary
-10. VERIFY the total amount matches line items
+3. EXTRACT the currency (look for €, EUR, $, USD, etc.)
+4. EXTRACT the date if visible on document
+5. EXTRACT invoice/receipt number if present
+6. IDENTIFY payment method and suggest matching source_account (use IBAN if visible)
+7. IDENTIFY all line items with prices from the OCR text
+8. CATEGORIZE each line item into the appropriate category
+9. CREATE split_transactions if multiple items/categories exist
+10. WRITE a descriptive summary
+11. CHECK if an existing transaction matches and suggest linking if so
+12. VERIFY the total amount matches line items
 
 Respond with complete JSON including ALL fields you can determine."""
 
@@ -485,6 +503,9 @@ Respond with complete JSON including ALL fields you can determine."""
         categories: list[str],
         source_accounts: list[str] | None = None,
         current_source_account: str | None = None,
+        source_accounts_detailed: list[dict] | None = None,
+        currencies: list[str] | None = None,
+        existing_transactions: list[dict] | None = None,
     ) -> str:
         """Format the user message for transaction review.
 
@@ -501,19 +522,50 @@ Respond with complete JSON including ALL fields you can determine."""
             bank_transaction: Linked bank transaction data if available.
             previous_decisions: List of previous interpretation decisions.
             categories: List of available category names.
-            source_accounts: List of available source account names.
+            source_accounts: List of available source account names (simple list).
             current_source_account: Currently selected source account.
+            source_accounts_detailed: List of account dicts with iban, account_number, bic.
+            currencies: List of available currency codes.
+            existing_transactions: List of candidate transactions for linking.
 
         Returns:
             Formatted user message.
         """
         categories_str = "\n".join(f"• {cat}" for cat in categories)
 
-        # Format source accounts
-        if source_accounts:
+        # Format source accounts - prefer detailed if available
+        if source_accounts_detailed:
+            source_lines = []
+            for acc in source_accounts_detailed:
+                line = f"• {acc.get('name', 'Unknown')} ({acc.get('type', 'asset')})"
+                if acc.get("iban"):
+                    line += f" - IBAN: {acc.get('iban')}"
+                if acc.get("account_number"):
+                    line += f" - Account#: {acc.get('account_number')}"
+                source_lines.append(line)
+            source_accounts_str = "\n".join(source_lines) if source_lines else "(No accounts)"
+        elif source_accounts:
             source_accounts_str = "\n".join(f"• {acc}" for acc in source_accounts)
         else:
             source_accounts_str = "(No source accounts available - skip source_account suggestion)"
+
+        # Format currencies
+        if currencies:
+            currencies_str = ", ".join(currencies)
+        else:
+            currencies_str = "EUR, USD, GBP, CHF (common defaults)"
+
+        # Format existing transaction candidates
+        if existing_transactions:
+            tx_lines = []
+            for tx in existing_transactions[:5]:  # Max 5 candidates
+                tx_lines.append(
+                    f"• ID:{tx.get('id')} | {tx.get('date')} | {tx.get('amount')} | "
+                    f"{tx.get('description', '')[:40]} | Score: {tx.get('match_score', 0):.0%}"
+                )
+            existing_transactions_str = "\n".join(tx_lines)
+        else:
+            existing_transactions_str = "(No existing transaction candidates - create new)"
 
         # Format bank transaction data
         if bank_transaction:
@@ -556,4 +608,6 @@ Destination: {bank_transaction.get('destination_account', 'N/A')}"""
             previous_decisions=decisions_str,
             categories=categories_str,
             source_accounts=source_accounts_str,
+            currencies=currencies_str,
+            existing_transactions=existing_transactions_str,
         )

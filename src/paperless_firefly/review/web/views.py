@@ -180,6 +180,144 @@ def _get_firefly_accounts_cached(request: HttpRequest) -> list[dict]:
         return []
 
 
+# Cache for detailed Firefly accounts with identifiers (expires after 5 minutes)
+_firefly_accounts_detailed_cache: dict[int, tuple[list[dict], float]] = {}
+
+
+def _get_firefly_accounts_detailed_cached(request: HttpRequest) -> list[dict]:
+    """Get Firefly accounts with identifiers (IBAN, account_number, BIC).
+
+    Caches detailed accounts per-user for 5 minutes.
+
+    Args:
+        request: HTTP request with authenticated user.
+
+    Returns:
+        List of account dicts with 'id', 'name', 'iban', 'account_number', 'bic' keys.
+    """
+    import time
+
+    if not request.user.is_authenticated:
+        return []
+
+    user_id = request.user.id
+    cache_ttl = 300  # 5 minutes
+
+    # Check cache
+    if user_id in _firefly_accounts_detailed_cache:
+        accounts, cached_at = _firefly_accounts_detailed_cache[user_id]
+        if time.time() - cached_at < cache_ttl:
+            return accounts
+
+    # Fetch from Firefly with identifiers
+    try:
+        firefly = _get_firefly_client(request)
+        accounts_raw = firefly.list_accounts(account_type="asset", include_identifiers=True)
+        accounts = [
+            {
+                "id": acc.get("id"),
+                "name": acc.get("name", f"Account #{acc.get('id')}"),
+                "iban": acc.get("iban"),
+                "account_number": acc.get("account_number"),
+                "bic": acc.get("bic"),
+            }
+            for acc in accounts_raw
+        ]
+        _firefly_accounts_detailed_cache[user_id] = (accounts, time.time())
+        return accounts
+    except Exception as e:
+        logger.warning(f"Failed to fetch detailed Firefly accounts: {e}")
+        return []
+
+
+# Cache for Firefly currencies (expires after 30 minutes - rarely changes)
+_firefly_currencies_cache: dict[int, tuple[list[str], float]] = {}
+
+
+def _get_firefly_currencies_cached(request: HttpRequest) -> list[str]:
+    """Get enabled Firefly currencies.
+
+    Caches currencies per-user for 30 minutes (currencies rarely change).
+
+    Args:
+        request: HTTP request with authenticated user.
+
+    Returns:
+        List of currency codes (e.g., ['EUR', 'USD', 'GBP']).
+    """
+    import time
+
+    if not request.user.is_authenticated:
+        return []
+
+    user_id = request.user.id
+    cache_ttl = 1800  # 30 minutes
+
+    # Check cache
+    if user_id in _firefly_currencies_cache:
+        currencies, cached_at = _firefly_currencies_cache[user_id]
+        if time.time() - cached_at < cache_ttl:
+            return currencies
+
+    # Fetch from Firefly
+    try:
+        firefly = _get_firefly_client(request)
+        currencies_raw = firefly.list_currencies(enabled_only=True)
+        currencies = [c.get("code") for c in currencies_raw if c.get("code")]
+        _firefly_currencies_cache[user_id] = (currencies, time.time())
+        return currencies
+    except Exception as e:
+        logger.warning(f"Failed to fetch Firefly currencies: {e}")
+        return ["EUR"]  # Fallback to EUR
+
+
+def _get_existing_transaction_candidates(
+    store: "StateStore",
+    record_type: str,
+    record_id: int,
+    max_results: int = 5,
+    user_id: int | None = None,
+) -> list[dict]:
+    """Get existing Firefly transaction candidates for linking (instead of creating new).
+
+    For Paperless documents, finds matching Firefly transactions using the matching engine.
+    These candidates allow users to link to an existing transaction instead of creating
+    a duplicate.
+
+    Args:
+        store: StateStore instance.
+        record_type: 'paperless' or 'firefly'.
+        record_id: Document ID (Paperless) or Transaction ID (Firefly).
+        max_results: Maximum candidates to return.
+        user_id: User ID for filtering.
+
+    Returns:
+        List of candidate dicts with 'id', 'date', 'amount', 'description', 'score'.
+    """
+    if record_type != "paperless":
+        # Only makes sense for Paperless records that would create transactions
+        return []
+
+    # Get top match suggestions - these are our candidates
+    candidates = _get_top_match_suggestions(
+        store, record_type, record_id, max_results=max_results, user_id=user_id
+    )
+
+    # Format for AI consumption and UI display
+    result = []
+    for c in candidates:
+        result.append(
+            {
+                "id": str(c.get("id", "")),
+                "date": c.get("date", ""),
+                "amount": c.get("amount", ""),
+                "description": c.get("description", ""),
+                "score": c.get("score", 0),
+            }
+        )
+    return result
+
+
 def _get_external_urls(user=None):
     """Get external URLs for browser links.
 
@@ -4802,17 +4940,28 @@ def unified_review_detail(request: HttpRequest, record_type: str, record_id: int
     # Get Firefly accounts and categories for dropdowns
     firefly_accounts = []
     firefly_categories = []
+    firefly_accounts_detailed = []
+    firefly_currencies = []
     try:
         client = _get_firefly_client(request)
         firefly_accounts = client.list_accounts("asset")
         firefly_categories = client.list_categories()
+        # Fetch detailed accounts with IBAN/account_number for AI suggestions
+        firefly_accounts_detailed = _get_firefly_accounts_detailed_cached(request)
+        # Fetch currencies for AI suggestions
+        firefly_currencies = _get_firefly_currencies_cached(request)
     except Exception as e:
         logger.warning(f"Could not fetch Firefly data: {e}")
 
-    # LLM suggestion (for Paperless records - filtered by user for privacy)
-    llm_suggestion = None
+    # Get existing transaction candidates for linking (Paperless only)
+    existing_transaction_candidates = []
     if record_type == "paperless":
-        llm_suggestion = _get_llm_suggestion_for_document(store, record_id, user_id=user_id)
+        existing_transaction_candidates = _get_existing_transaction_candidates(
+            store, record_type, record_id, max_results=5, user_id=user_id
+        )
+
+    # Note: Legacy llm_suggestion has been removed.
+    # All AI suggestions now come through ai_suggestions from the AI job queue.
 
     # Determine link status
     link_status = "pending"
@@ -5000,6 +5149,10 @@ def unified_review_detail(request: HttpRequest, record_type: str, record_id: int
             )
     saved_line_items_json = json.dumps(saved_line_items) if saved_line_items else "[]"
 
+    # JSON-serialize for JavaScript
+    existing_transaction_candidates_json = json.dumps(existing_transaction_candidates) if existing_transaction_candidates else "[]"
+    firefly_currencies_json = json.dumps(firefly_currencies) if firefly_currencies else "[]"
+
     context = {
         "record": record_data,
         "record_type": record_type,
@@ -5013,7 +5166,11 @@ def unified_review_detail(request: HttpRequest, record_type: str, record_id: int
         "firefly_accounts": firefly_accounts,
         "firefly_categories": firefly_categories,
         "firefly_categories_json": firefly_categories_json,
-        "llm_suggestion": llm_suggestion,
+        "firefly_accounts_detailed": firefly_accounts_detailed,
+        "firefly_currencies": firefly_currencies,
+        "firefly_currencies_json": firefly_currencies_json,
+        "existing_transaction_candidates": existing_transaction_candidates,
+        "existing_transaction_candidates_json": existing_transaction_candidates_json,
         "llm_globally_enabled": _is_llm_globally_enabled(),
         "llm_opt_out": record_data.get("llm_opt_out", False),
         "confidence": confidence,
