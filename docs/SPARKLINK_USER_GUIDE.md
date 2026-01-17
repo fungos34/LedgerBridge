@@ -110,8 +110,10 @@ Before using SparkLink, ensure you have:
 | 🔑 | Change Password | Update your account password |
 | 🔗 | Reconciliation | Match documents to existing bank transactions |
 | 🔄 | Sync Assistant | Share Firefly entities between users |
+| � | Paperless-ngx ↗ | External link to Paperless (if configured) |
+| 💰 | Firefly III ↗ | External link to Firefly III (if configured) |
 | 📡 | Syncthing ↗ | External link to Syncthing (if configured) |
-| 🏦 | Bank Importer ↗ | External link to Firefly Importer (if configured) |
+| 📥 | Firefly Data Importer ↗ | External link to Data Importer (if configured) |
 | 🛠️ | Admin Panel | Django admin (staff only) |
 | 🚪 | Logout | Sign out of SparkLink |
 
@@ -120,18 +122,20 @@ Before using SparkLink, ensure you have:
 | Symbol | Meaning |
 |--------|---------|
 | 🏠 | Home/Dashboard |
-| ✏️ | Review/Edit |
+| ✏️/📝 | Review/Edit |
 | 📊 | History/Statistics |
 | ⚙️ | Settings/Configuration |
 | 🔑 | Password/Security |
-| 🔗 | Linkage/Connection |
+| 🔗 | Linkage/Reconciliation |
 | 🔄 | Sync/Refresh |
 | 📄 | Paperless Document |
-| 🏦 | Firefly/Bank Account |
+| 💰 | Firefly III |
 | 📦 | Archive |
 | 🤖 | AI/Automation |
 | 📜 | Audit Trail |
 | 💬 | Chat Assistant |
+| 📡 | Syncthing |
+| 📥 | Firefly Data Importer |
 | 🚪 | Logout/Exit |
 
 ---
@@ -300,7 +304,7 @@ SparkLink includes optional AI-powered assistance via Ollama:
 
 #### External Links
 - **Syncthing URL** - Link to Syncthing UI
-- **Firefly Importer URL** - Link to Data Importer
+- **Firefly Data Importer URL** - Link to Data Importer
 
 ---
 

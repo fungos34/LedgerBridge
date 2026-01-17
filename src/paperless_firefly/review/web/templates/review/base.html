@@ -501,15 +501,19 @@
                         <div style="padding: 0.25rem 1rem; font-size: 0.7rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">Tools</div>
                         <a href="{% url 'reconciliation_dashboard' %}" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">🔗 Reconciliation</a>
                         <a href="{% url 'sync_assistant' %}" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">🔄 Sync Assistant</a>
-                        {% if syncthing_url or firefly_importer_url %}
                         <div style="border-top: 1px solid var(--gray-200); margin: 0.25rem 0;"></div>
-                        <div style="padding: 0.25rem 1rem; font-size: 0.7rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">External</div>
+                        <div style="padding: 0.25rem 1rem; font-size: 0.7rem; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em;">External Services</div>
+                        {% if paperless_url %}
+                        <a href="{{ paperless_url }}" target="_blank" rel="noopener noreferrer" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">📄 Paperless-ngx ↗</a>
+                        {% endif %}
+                        {% if firefly_url %}
+                        <a href="{{ firefly_url }}" target="_blank" rel="noopener noreferrer" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">💰 Firefly III ↗</a>
+                        {% endif %}
                         {% if syncthing_url %}
                         <a href="{{ syncthing_url }}" target="_blank" rel="noopener noreferrer" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">📡 Syncthing ↗</a>
                         {% endif %}
                         {% if firefly_importer_url %}
-                        <a href="{{ firefly_importer_url }}" target="_blank" rel="noopener noreferrer" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">🏦 Bank Importer ↗</a>
-                        {% endif %}
+                        <a href="{{ firefly_importer_url }}" target="_blank" rel="noopener noreferrer" style="display: block; padding: 0.5rem 1rem; color: var(--gray-700); text-decoration: none; font-size: 0.875rem;">📥 Firefly Data Importer ↗</a>
                         {% endif %}
                         {% if user.is_staff %}
                         <div style="border-top: 1px solid var(--gray-200); margin: 0.25rem 0;"></div>

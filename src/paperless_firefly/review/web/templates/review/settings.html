@@ -327,18 +327,18 @@
             </div>
             
             <div class="form-group">
-                <label class="form-label" for="importer_url">Firefly Importer URL</label>
+                <label class="form-label" for="importer_url">Firefly Data Importer URL</label>
                 <input type="url" 
                        name="importer_url" 
                        id="importer_url"
                        class="form-input"
                        value="{{ profile.importer_url }}"
                        placeholder="e.g., http://localhost:8081">
-                <div class="form-help">URL to Firefly Importer for bank statement imports</div>
+                <div class="form-help">URL to Firefly Data Importer for bank statement imports</div>
             </div>
             
             <div class="form-group">
-                <label class="form-label" for="firefly_importer_token">Firefly Importer API Token (optional)</label>
+                <label class="form-label" for="firefly_importer_token">Firefly Data Importer API Token (optional)</label>
                 <div class="token-input-wrapper">
                     <input type="password" 
                            name="firefly_importer_token" 
@@ -348,7 +348,7 @@
                            placeholder="Leave empty if same as Firefly III token">
                     <button type="button" class="toggle-visibility" onclick="toggleVisibility('firefly_importer_token')">👁</button>
                 </div>
-                <div class="form-help">Separate API token for Firefly Importer (if different from Firefly III token)</div>
+                <div class="form-help">Separate API token for Firefly Data Importer (if different from Firefly III token)</div>
             </div>
         </div>
         

@@ -108,28 +108,37 @@
         color: var(--gray-600);
     }
     
-    /* Pipeline Diagram */
+    /* Pipeline Diagram - Enhanced Visual Design */
     .pipeline-diagram {
-        background: white;
-        border-radius: 0.75rem;
-        padding: 1.5rem;
+        background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+        border-radius: 1rem;
+        padding: 2rem;
         margin-bottom: 2rem;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        box-shadow: 0 4px 6px rgba(0,0,0,0.07);
+        border: 1px solid var(--gray-200);
     }
     
     .pipeline-diagram h3 {
-        font-size: 0.875rem;
-        color: var(--gray-500);
+        font-size: 1rem;
+        color: var(--gray-700);
         text-transform: uppercase;
         letter-spacing: 0.05em;
-        margin-bottom: 1rem;
+        margin-bottom: 0.5rem;
+        text-align: center;
+    }
+    
+    .pipeline-subtitle {
+        text-align: center;
+        font-size: 0.875rem;
+        color: var(--gray-500);
+        margin-bottom: 1.5rem;
     }
     
     .pipeline-flow {
         display: flex;
-        align-items: center;
+        align-items: stretch;
         justify-content: center;
-        gap: 0.5rem;
+        gap: 0.25rem;
         flex-wrap: wrap;
         padding: 1rem 0;
     }
@@ -138,40 +147,50 @@
         display: flex;
         flex-direction: column;
         align-items: center;
-        padding: 0.75rem 1rem;
-        border-radius: 0.5rem;
-        min-width: 100px;
+        justify-content: flex-start;
+        padding: 1.25rem 1rem;
+        border-radius: 0.75rem;
+        min-width: 140px;
+        max-width: 160px;
         text-align: center;
+        position: relative;
+        transition: all 0.3s ease;
+        cursor: pointer;
     }
     
     .pipeline-node.paperless {
-        background: #dcfce7;
+        background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
         border: 2px solid #86efac;
     }
     
     .pipeline-node.sparklink {
-        background: #dbeafe;
+        background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
         border: 2px solid #93c5fd;
+        min-width: 180px;
     }
     
     .pipeline-node.firefly {
-        background: #fef3c7;
+        background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
         border: 2px solid #fcd34d;
     }
     
     .pipeline-node .node-icon {
-        font-size: 1.75rem;
-        margin-bottom: 0.25rem;
+        font-size: 2.5rem;
+        margin-bottom: 0.5rem;
+        filter: drop-shadow(0 2px 4px rgba(0,0,0,0.1));
     }
     
     .pipeline-node .node-name {
-        font-weight: 600;
-        font-size: 0.875rem;
+        font-weight: 700;
+        font-size: 0.9rem;
+        color: var(--gray-800);
+        margin-bottom: 0.25rem;
     }
     
     .pipeline-node .node-desc {
         font-size: 0.7rem;
         color: var(--gray-600);
+        line-height: 1.3;
     }
     
     .pipeline-node a {
@@ -183,50 +202,123 @@
     }
     
     .pipeline-node:hover {
-        transform: scale(1.05);
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-        cursor: pointer;
+        transform: translateY(-4px) scale(1.02);
+        box-shadow: 0 8px 25px rgba(0,0,0,0.15);
     }
     
-    .pipeline-node[data-tooltip]:hover::after {
-        content: attr(data-tooltip);
+    .pipeline-node:hover .node-icon {
+        animation: bounce 0.5s ease;
+    }
+    
+    @keyframes bounce {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-5px); }
+    }
+    
+    /* Tooltip styling */
+    .pipeline-node .tooltip {
+        visibility: hidden;
+        opacity: 0;
         position: absolute;
-        bottom: -2.5rem;
+        bottom: calc(100% + 10px);
         left: 50%;
         transform: translateX(-50%);
         background: var(--gray-900);
         color: white;
-        padding: 0.5rem 0.75rem;
-        border-radius: 0.375rem;
+        padding: 0.75rem 1rem;
+        border-radius: 0.5rem;
         font-size: 0.75rem;
-        white-space: nowrap;
-        z-index: 10;
-        max-width: 200px;
-        white-space: normal;
+        line-height: 1.4;
+        width: 220px;
         text-align: center;
+        z-index: 100;
+        transition: all 0.2s ease;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
     }
     
-    .pipeline-node {
-        position: relative;
-        transition: transform 0.2s, box-shadow 0.2s;
+    .pipeline-node .tooltip::after {
+        content: '';
+        position: absolute;
+        top: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        border: 8px solid transparent;
+        border-top-color: var(--gray-900);
     }
     
+    .pipeline-node:hover .tooltip {
+        visibility: visible;
+        opacity: 1;
+    }
+    
+    /* Animated arrows */
     .pipeline-arrow {
-        font-size: 1.5rem;
-        color: var(--gray-400);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 0 0.5rem;
     }
     
+    .pipeline-arrow .arrow-icon {
+        font-size: 2rem;
+        color: var(--primary);
+        animation: pulse-arrow 2s infinite;
+    }
+    
+    .pipeline-arrow .arrow-label {
+        font-size: 0.65rem;
+        color: var(--gray-500);
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        margin-top: 0.25rem;
+    }
+    
+    @keyframes pulse-arrow {
+        0%, 100% { opacity: 0.6; transform: translateX(0); }
+        50% { opacity: 1; transform: translateX(3px); }
+    }
+    
+    /* Step indicators */
     .pipeline-steps {
         display: flex;
-        justify-content: space-around;
-        margin-top: 1rem;
-        font-size: 0.75rem;
-        color: var(--gray-500);
+        justify-content: center;
+        gap: 1rem;
+        margin-top: 1.5rem;
+        flex-wrap: wrap;
     }
     
-    .pipeline-steps span {
-        text-align: center;
-        max-width: 120px;
+    .pipeline-step {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        background: white;
+        padding: 0.5rem 1rem;
+        border-radius: 2rem;
+        font-size: 0.75rem;
+        color: var(--gray-600);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        border: 1px solid var(--gray-200);
+        transition: all 0.2s ease;
+    }
+    
+    .pipeline-step:hover {
+        background: var(--gray-50);
+        transform: translateY(-2px);
+        box-shadow: 0 3px 8px rgba(0,0,0,0.1);
+    }
+    
+    .pipeline-step .step-number {
+        background: var(--primary);
+        color: white;
+        width: 1.25rem;
+        height: 1.25rem;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 700;
+        font-size: 0.65rem;
     }
     
     @media (max-width: 640px) {
@@ -240,10 +332,22 @@
         
         .pipeline-flow {
             flex-direction: column;
+            gap: 0.5rem;
         }
         
         .pipeline-arrow {
             transform: rotate(90deg);
+            padding: 0.25rem 0;
+        }
+        
+        .pipeline-node {
+            min-width: 200px;
+            max-width: 100%;
+        }
+        
+        .pipeline-steps {
+            flex-direction: column;
+            align-items: center;
         }
     }
 </style>
@@ -257,51 +361,71 @@
 
 <!-- Pipeline Visualization Diagram -->
 <div class="pipeline-diagram">
-    <h3>🔄 How SparkLink Works</h3>
+    <h3>⚡ How SparkLink Works</h3>
+    <p class="pipeline-subtitle">Automated document-to-transaction pipeline</p>
     <div class="pipeline-flow">
-        <div class="pipeline-node paperless" 
-             data-tooltip="Your document management system. Upload invoices, receipts, and bills here. Tag them for processing.">
+        <div class="pipeline-node paperless">
             {% if paperless_url %}
             <a href="{{ paperless_url }}" target="_blank" rel="noopener noreferrer" title="Open Paperless-ngx">
                 <span class="node-icon">📄</span>
                 <span class="node-name">Paperless-ngx</span>
-                <span class="node-desc">Document storage</span>
+                <span class="node-desc">Document Storage</span>
             </a>
             {% else %}
             <span class="node-icon">📄</span>
             <span class="node-name">Paperless-ngx</span>
-            <span class="node-desc">Document storage</span>
+            <span class="node-desc">Document Storage</span>
             {% endif %}
+            <div class="tooltip">📤 <strong>Upload receipts & invoices</strong><br>Tag documents for processing. Supports PDF, images, ZUGFeRD, and e-invoices.</div>
         </div>
-        <span class="pipeline-arrow">→</span>
-        <div class="pipeline-node sparklink" 
-             data-tooltip="SparkLink extracts invoice data using AI/OCR, lets you review and approve transactions before import.">
-            <a href="{% url 'list' %}" title="Go to Review Queue">
+        
+        <div class="pipeline-arrow">
+            <span class="arrow-icon">→</span>
+            <span class="arrow-label">Extract</span>
+        </div>
+        
+        <div class="pipeline-node sparklink">
+            <a href="{% url 'unified_review_list' %}" title="Go to Review & Import">
                 <span class="node-icon">⚡</span>
                 <span class="node-name">SparkLink</span>
-                <span class="node-desc">AI Extraction + Review</span>
+                <span class="node-desc">AI Extraction & Review</span>
             </a>
+            <div class="tooltip">🤖 <strong>Intelligent Processing</strong><br>OCR extracts amounts, dates, vendors. AI suggests categories. You review and approve.</div>
         </div>
-        <span class="pipeline-arrow">→</span>
-        <div class="pipeline-node firefly" 
-             data-tooltip="Your personal finance manager. Approved transactions are automatically imported here as expenses.">
+        
+        <div class="pipeline-arrow">
+            <span class="arrow-icon">→</span>
+            <span class="arrow-label">Import</span>
+        </div>
+        
+        <div class="pipeline-node firefly">
             {% if firefly_url %}
             <a href="{{ firefly_url }}" target="_blank" rel="noopener noreferrer" title="Open Firefly III">
                 <span class="node-icon">💰</span>
                 <span class="node-name">Firefly III</span>
-                <span class="node-desc">Finance tracking</span>
+                <span class="node-desc">Finance Tracking</span>
             </a>
             {% else %}
             <span class="node-icon">💰</span>
             <span class="node-name">Firefly III</span>
-            <span class="node-desc">Finance tracking</span>
+            <span class="node-desc">Finance Tracking</span>
             {% endif %}
+            <div class="tooltip">📊 <strong>Personal Finance Manager</strong><br>Transactions are created with document links. Track expenses, budgets, and reports.</div>
         </div>
     </div>
     <div class="pipeline-steps">
-        <span>1️⃣ Documents tagged for processing</span>
-        <span>2️⃣ AI extracts invoice data & you review</span>
-        <span>3️⃣ Transactions auto-imported</span>
+        <div class="pipeline-step">
+            <span class="step-number">1</span>
+            <span>Tag documents for processing</span>
+        </div>
+        <div class="pipeline-step">
+            <span class="step-number">2</span>
+            <span>AI extracts data, you review</span>
+        </div>
+        <div class="pipeline-step">
+            <span class="step-number">3</span>
+            <span>Transactions auto-imported</span>
+        </div>
     </div>
 </div>
 
@@ -369,11 +493,11 @@
     </a>
     {% endif %}
     
-    <!-- Firefly Importer -->
+    <!-- Firefly Data Importer -->
     {% if firefly_importer_url %}
     <a href="{{ firefly_importer_url }}" target="_blank" class="service-card">
         <div class="service-icon">📥</div>
-        <div class="service-title">Firefly Importer</div>
+        <div class="service-title">Firefly Data Importer</div>
         <div class="service-desc">Import bank statements and CSV files</div>
     </a>
     {% endif %}
@@ -381,7 +505,7 @@
     <!-- Syncthing -->
     {% if syncthing_url %}
     <a href="{{ syncthing_url }}" target="_blank" class="service-card">
-        <div class="service-icon">🔄</div>
+        <div class="service-icon">�</div>
         <div class="service-title">Syncthing</div>
         <div class="service-desc">File synchronization between devices</div>
     </a>
